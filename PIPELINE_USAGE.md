@@ -1,9 +1,33 @@
-# fly_stocker_v2 Pipeline Usage
+# fly_stocker_v2 Usage and Pipeline Guide
 
 `fly_stocker_v2` has two CLI pipelines:
 
 1. `get-allele-refs` (Pipeline 1): input gene lists -> BDSC stocks -> publication references
 2. `split-stocks` (Pipeline 2): Pipeline 1 workbook -> JSON-driven stock sheet splits + Ref++-scoped GPT validation
+
+For one-command execution, use `run-full-pipeline` to run Pipeline 1 then Pipeline 2 automatically.
+
+## End-to-End Purpose and Method (High-Level)
+
+This flow chart shows the overall intent and method from raw gene lists to experimentally actionable stock shortlists.
+
+```mermaid
+flowchart TD
+    A[Goal: prioritize functional Drosophila stocks from gene lists]
+    B[Input: gene-list CSV files]
+    C[Pipeline 1 get-allele-refs<br/>map genes to stocks and gather references]
+    D[Intermediate workbook<br/>Stocks + References]
+    E[Pipeline 2 split-stocks<br/>apply JSON filters, combinations, and limits]
+    F{Output sheet includes Ref++?}
+    G[Run GPT functional validation<br/>only after keyword and full-text gating]
+    H[Skip GPT validation]
+    I[Final organized workbook<br/>Contents, Sheet1..N, filtered References]
+    J[Use shortlisted stocks for downstream experimental planning]
+
+    A --> B --> C --> D --> E --> F
+    F -->|Yes| G --> I --> J
+    F -->|No| H --> I
+```
 
 ## High-Level Data Flow
 
@@ -32,9 +56,9 @@ flowchart LR
 
 ## Prerequisites
 
-- Run commands from `Fly_Stock_Scrapers/FlyStocker/Core`.
+- Run commands from the package/project directory that contains `cli.py` and `data/JSON/`.
 - Install dependencies:
-  - `pip install -r fly_stocker_v2/requirements.txt`
+  - `pip install -r requirements.txt`
 - Place input CSV files in one folder (example: `./gene_lists`).
 - Optional environment variables:
   - `OPENAI_API_KEY`: required for GPT functional validation in Pipeline 2
@@ -46,11 +70,30 @@ flowchart LR
 ## CLI Quick Start
 
 ```bash
+# Show available commands and options
+python -m fly_stocker_v2.cli --help
+
+# Full pipeline in one command (recommended for end-to-end runs)
+python -m fly_stocker_v2.cli run-full-pipeline ./gene_lists --config ./my_split_config.json --test-log
+
 # Pipeline 1: build Stocks + References workbook
 python -m fly_stocker_v2.cli get-allele-refs ./gene_lists
 
 # Pipeline 2: split/organize stock sheets and run Ref++-scoped validation
 python -m fly_stocker_v2.cli split-stocks ./gene_lists/Stocks
+```
+
+Recommended default workflow (validation in Pipeline 2 only):
+
+```bash
+python -m fly_stocker_v2.cli get-allele-refs ./gene_lists
+python -m fly_stocker_v2.cli split-stocks ./gene_lists/Stocks --test-log
+```
+
+Optional: run validation during Pipeline 1 instead:
+
+```bash
+python -m fly_stocker_v2.cli get-allele-refs ./gene_lists --run-validation --test-log
 ```
 
 With custom config:
@@ -62,7 +105,7 @@ python -m fly_stocker_v2.cli split-stocks ./gene_lists/Stocks --config ./my_spli
 
 Default config path:
 
-- `fly_stocker_v2/data/JSON/stock_split_config_example.json`
+- `data/JSON/stock_split_config_example.json`
 
 ---
 
@@ -86,12 +129,14 @@ Builds the base `Stocks` + `References` workbook from input gene CSV files.
   - Batch size for pipeline processing.
 - `--skip-fbgnid-conversion`
   - Use this when input CSVs already contain FBgn IDs.
+- `--run-validation`
+  - Run GPT functional validation during Pipeline 1. By default this step is skipped in Pipeline 1 and performed in Pipeline 2.
 - `--soft-run`
-  - Accepted for interface parity; Pipeline 1 itself does not run GPT validation by default.
+  - Stops before GPT API calls and prints predicted call counts (effective when validation runs).
 - `--test-log`
-  - Enables GPT query logging if/when validation is active.
+  - Enables GPT query logging (effective when validation runs).
 - `--max-gpt-calls-per-stock` (default: `5`)
-  - Accepted parameter; effective only when GPT validation is run.
+  - Cap on actual GPT calls per stock (effective when validation runs).
 
 ### Output
 
@@ -112,7 +157,7 @@ Consumes Pipeline 1 workbook(s), applies JSON-defined filter combinations, write
 
 ### Required argument
 
-- `input_dir`: directory containing Pipeline 1 Excel files.
+- `input_dir`: directory containing Pipeline 1 Excel files (for example `./gene_lists/Stocks`).
 
 ### Options
 
@@ -122,8 +167,44 @@ Consumes Pipeline 1 workbook(s), applies JSON-defined filter combinations, write
   - Suppress verbose output.
 - `--soft-run`
   - Stops before GPT API calls and prints predicted call counts.
+- `--test-log`
+  - Enables GPT query logging to `data/logs/GPT-Queries/`.
 - `--max-gpt-calls-per-stock` (default: `5`)
   - Cap on actual GPT calls per stock during validation.
+
+---
+
+## Full Pipeline: `run-full-pipeline`
+
+Runs both pipelines in one command:
+
+1. `get-allele-refs` on your gene-list input directory
+2. `split-stocks` on the generated `./gene_lists/Stocks` output
+
+### Required argument
+
+- `input_dir`: directory containing gene-list CSV files.
+
+### Options
+
+- `--config`, `-c`
+  - Shared JSON config for both steps.
+- `--gene-col` (default: `flybase_gene_id`)
+  - Pipeline 1 gene ID column.
+- `--input-gene-col` (default: `ext_gene`)
+  - Pipeline 1 input symbol column.
+- `--batch-size`, `-b` (default: `50`)
+  - Pipeline 1 batch size.
+- `--skip-fbgnid-conversion`
+  - Skip FBgn conversion in Pipeline 1.
+- `--quiet`, `-q`
+  - Suppress verbose output in Pipeline 2.
+- `--soft-run`
+  - Skip GPT API calls where validation would occur.
+- `--test-log`
+  - Enable GPT query logging to `data/logs/GPT-Queries/`.
+- `--max-gpt-calls-per-stock` (default: `5`)
+  - Cap actual GPT calls per stock during validation.
 
 ### Validation scope (important)
 
@@ -147,6 +228,17 @@ For each input workbook, writes `<input_name>_aggregated.xlsx` containing:
 - `References` (filtered to PMIDs cited by stocks present in output sheets)
 - `Stock Sheet by Gene` (when applicable)
 
+`Stock Sheet by Gene` details:
+
+- Rows are unique `(stock, PMID)` for keyword-hit references.
+- Gene groups are sorted by descending count of Ref++ stocks.
+- Includes a `gene synonyms` column (from FlyBase `fb_synonym`).
+- `EXPERIMENTAL` columns are PMID-specific per row.
+- Stock-level aggregate columns are placed at the end:
+  - `Stock (allele) <keywords> references (all for stock)`
+  - `Stock (allele) all references (all for stock)`
+  - `[EXPERIMENTAL] PMID of <keywords> references that showed stocks functional validity`
+
 ---
 
 ## Split Config Reference (JSON)
@@ -164,13 +256,16 @@ Key sections:
 
 Example config:
 
-- `fly_stocker_v2/data/JSON/stock_split_config_example.json`
+- `data/JSON/stock_split_config_example.json`
 
 ---
 
 ## Notes on Soft Runs and GPT Call Limits
 
+- `get-allele-refs --soft-run` is effective only with `--run-validation`.
+- `get-allele-refs --test-log` is effective only when validation runs.
 - `split-stocks --soft-run` prints projected validation counts and exits before GPT calls.
+- `split-stocks --test-log` writes GPT query logs to `data/logs/GPT-Queries/<timestamp>/`.
 - `--max-gpt-calls-per-stock` counts only actual GPT invocations.
 - References without accessible full text, or missing stock/allele/gene patterns in text, are marked ambiguous and do not consume GPT-call budget.
 - Validation short-circuits per stock once a "Functionally validated" result is found.
@@ -196,6 +291,7 @@ Functional validation uses a multi-source full-text cascade with identifier enri
 Additional behavior:
 
 - A persistent PMID -> retrieval-method cache is used to retry known-good methods first.
+- PubMed metadata cache stores/reuses `title`, `abstract`, `journal`, `authors`, `year`, `doi`, and `pmcid`.
 - HTTP calls use transient-failure retries (`429/5xx`) with exponential backoff.
 - Duplicate `References` rows with the same PMID are merged to prefer rows that include `PMCID`/`DOI`.
 - Full-text misses are reported with reason codes (for example: `missing_pmcid_and_doi`, `all_sources_failed`) in validation logs.
@@ -205,6 +301,12 @@ Additional behavior:
 ## End-to-End Example
 
 ```bash
-python -m fly_stocker_v2.cli get-allele-refs ./gene_lists --config ./my_split_config.json
-python -m fly_stocker_v2.cli split-stocks ./gene_lists/Stocks --config ./my_split_config.json
+python -m fly_stocker_v2.cli run-full-pipeline ./gene_lists --config ./my_split_config.json --test-log
+```
+
+You can also use the package entry point:
+
+```bash
+python -m fly_stocker_v2 get-allele-refs ./gene_lists --config ./my_split_config.json
+python -m fly_stocker_v2 split-stocks ./gene_lists/Stocks --config ./my_split_config.json
 ```

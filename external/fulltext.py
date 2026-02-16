@@ -19,8 +19,13 @@ from urllib.parse import quote
 import pandas as pd
 import requests
 
-from ..config import ValidationStatus, Settings
-from ..utils import clean_id
+try:
+    from ..config import ValidationStatus, Settings
+    from ..utils import clean_id
+except ImportError:
+    # Support flat-repo execution where `external` is top-level.
+    from config import ValidationStatus, Settings
+    from utils import clean_id
 
 # Try to import PyPDF2 for PDF extraction
 try:
@@ -603,6 +608,46 @@ class FullTextFetcher:
         """
         text, label, _reason = self.fetch_with_diagnostics(pmid, pmcid, doi)
         return text, label
+
+    def _coerce_fulltext_from_cached_method(
+        self,
+        cached_method: str,
+        pmcid: str,
+        doi: str,
+    ) -> Tuple[str, str]:
+        """
+        Replay one known-good method label and return a valid full-text match.
+
+        This keeps cache-hit behavior aligned with the normal retrieval cascade.
+        """
+        method_label = str(cached_method or "").strip()
+        if not method_label:
+            return "", ""
+
+        for label, method in [
+            ("PMC OA PDF", lambda: (self._fetch_pmcoa_pdf(pmcid), "PMC OA PDF") if pmcid else ("", "")),
+            ("PMC OA XML", lambda: (self._fetch_pmcoa_xml(pmcid), "PMC OA XML") if pmcid else ("", "")),
+            ("Europe PMC", lambda: (self._fetch_europepmc(pmcid), "Europe PMC") if pmcid else ("", "")),
+            ("PMC HTML", lambda: (self._fetch_pmc_html(pmcid), "PMC HTML") if pmcid else ("", "")),
+        ]:
+            if method_label != label:
+                continue
+            text, out_label = method()
+            if text and len(text) > 300:
+                return text, out_label
+
+        for marker, method in [
+            ("Unpaywall", self._fetch_unpaywall),
+            ("OpenAlex", self._fetch_openalex),
+            ("Crossref", self._fetch_crossref),
+            ("DOI Resolver", self._fetch_doi_resolver),
+        ]:
+            if marker not in method_label or not doi:
+                continue
+            text, out_label = method(doi)
+            if text and len(text) > 300:
+                return text, out_label
+        return "", ""
     
     def fetch_with_diagnostics(
         self,
@@ -649,46 +694,16 @@ class FullTextFetcher:
         # Check persistent cache for previously successful method
         cached_method = self._method_cache.get(pmid_clean)
         if cached_method:
-            if cached_method == "PMC OA PDF" and pmcid_clean:
-                text = self._fetch_pmcoa_pdf(pmcid_clean)
-                if len(text) > 300:
-                    self._session_cache.pop(pmid_clean, None)
-                    return text, cached_method, ""
-            elif cached_method == "PMC OA XML" and pmcid_clean:
-                text = self._fetch_pmcoa_xml(pmcid_clean)
-                if len(text) > 300:
-                    self._session_cache.pop(pmid_clean, None)
-                    return text, cached_method, ""
-            elif cached_method == "Europe PMC" and pmcid_clean:
-                text = self._fetch_europepmc(pmcid_clean)
-                if len(text) > 300:
-                    self._session_cache.pop(pmid_clean, None)
-                    return text, cached_method, ""
-            elif cached_method == "PMC HTML" and pmcid_clean:
-                text = self._fetch_pmc_html(pmcid_clean)
-                if len(text) > 300:
-                    self._session_cache.pop(pmid_clean, None)
-                    return text, cached_method, ""
-            elif "Unpaywall" in cached_method and doi_clean:
-                text, label = self._fetch_unpaywall(doi_clean)
-                if text and len(text) > 300:
-                    self._session_cache.pop(pmid_clean, None)
-                    return text, label, ""
-            elif "OpenAlex" in cached_method and doi_clean:
-                text, label = self._fetch_openalex(doi_clean)
-                if text and len(text) > 300:
-                    self._session_cache.pop(pmid_clean, None)
-                    return text, label, ""
-            elif "Crossref" in cached_method and doi_clean:
-                text, label = self._fetch_crossref(doi_clean)
-                if text and len(text) > 300:
-                    self._session_cache.pop(pmid_clean, None)
-                    return text, label, ""
-            elif "DOI Resolver" in cached_method and doi_clean:
-                text, label = self._fetch_doi_resolver(doi_clean)
-                if text and len(text) > 300:
-                    self._session_cache.pop(pmid_clean, None)
-                    return text, label, ""
+            text, label = self._coerce_fulltext_from_cached_method(
+                cached_method=str(cached_method),
+                pmcid=pmcid_clean,
+                doi=doi_clean,
+            )
+            if text and len(text) > 300:
+                # Keep the canonical successful method label fresh.
+                self._method_cache.set(pmid_clean, label or str(cached_method))
+                self._session_cache.pop(pmid_clean, None)
+                return text, (label or str(cached_method)), ""
         
         # Full cascade
         pmcid_strategies = [

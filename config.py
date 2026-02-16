@@ -110,7 +110,9 @@ class ValidationStatus:
         """
         Extract the highest level of validation from an aggregated string.
         
-        Parses strings like "PMID:123=Functionally validated; PMID:456=Ambiguous functional validity"
+        Parses strings like:
+        - "PMID:123=Functionally validated; PMID:456=Ambiguous functional validity"
+        - "PMID:123: Functionally validated; PMID:456: Ambiguous functional validity"
         and returns the highest priority validation status.
         """
         if not validity_str:
@@ -120,12 +122,21 @@ class ValidationStatus:
         best_validity = ""
         
         for part in validity_str.split("; "):
+            part = str(part).strip()
+            if not part:
+                continue
+            validity = ""
             if "=" in part:
                 validity = part.split("=", 1)[1].strip()
-                priority = cls.PRIORITIES.get(validity, 999)
-                if priority < best_priority:
-                    best_priority = priority
-                    best_validity = validity
+            elif ":" in part:
+                # Handle "PMID:<id>: <status>" and similar colon-delimited forms.
+                validity = part.rsplit(":", 1)[1].strip()
+            if not validity:
+                continue
+            priority = cls.PRIORITIES.get(validity, 999)
+            if priority < best_priority:
+                best_priority = priority
+                best_validity = validity
         
         return best_validity
 
@@ -213,8 +224,8 @@ FULLTEXT_METHOD_CACHE_PATH = Path("/Volumes/umms-rallada/UM Lab Users/Aadish/Dat
 HELPER_SCRIPTS = PROJECT_ROOT / "HelperScripts"
 GET_FBGN_IDS_SCRIPT = HELPER_SCRIPTS / "GetFBgnIDs.py"
 
-# Logs directory
-LOGS_DIR = PROJECT_ROOT / "Logs"
+# Logs directory (repo-local)
+LOGS_DIR = PACKAGE_DIR / "data" / "logs"
 GPT_LOGS_DIR = LOGS_DIR / "GPT-Queries"
 
 

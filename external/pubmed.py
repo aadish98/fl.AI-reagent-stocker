@@ -7,13 +7,18 @@ This module provides:
 """
 
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import requests
 
-from ..utils import clean_id
+try:
+    from ..utils import clean_id
+except ImportError:
+    # Support flat-repo execution where `external` is top-level.
+    from utils import clean_id
 
 # Try to import Biopython
 try:
@@ -25,12 +30,25 @@ except ImportError:
 
 class PubMedCache:
     """
-    Persistent cache for PubMed metadata (title, abstract).
-    
-    Stores metadata in a CSV file for persistence across sessions.
-    New entries are appended incrementally to avoid data loss.
+    Persistent cache for PubMed metadata.
+
+    Cache schema is compatible with the richer fl.AI-CLI metadata payload while
+    remaining backward-compatible with legacy title/abstract-only rows.
     """
-    
+
+    CACHE_COLUMNS = [
+        "pmid",
+        "pmcid",
+        "title",
+        "abstract",
+        "year",
+        "journal",
+        "authors",
+        "doi",
+        "source",
+        "updated_at",
+    ]
+
     def __init__(self, cache_path: Path):
         """
         Initialize the cache.
@@ -41,34 +59,103 @@ class PubMedCache:
         self.cache_path = Path(cache_path)
         self._cache: Dict[str, dict] = {}
         self._loaded = False
+
+    @staticmethod
+    def _normalize_authors(raw_authors: Any) -> List[str]:
+        """Normalize authors from list or semicolon-delimited string."""
+        if raw_authors is None:
+            return []
+        if isinstance(raw_authors, str):
+            return [a.strip() for a in raw_authors.split(";") if a and a.strip()]
+        try:
+            return [str(a).strip() for a in list(raw_authors) if str(a).strip()]
+        except Exception:
+            return []
+
+    def _normalize_entry(self, metadata: Optional[dict]) -> dict:
+        """Normalize metadata to canonical cache schema."""
+        metadata = metadata or {}
+        return {
+            "title": str(metadata.get("title", "") or ""),
+            "abstract": str(metadata.get("abstract", "") or ""),
+            "year": str(metadata.get("year", "") or ""),
+            "journal": str(metadata.get("journal", "") or ""),
+            "authors": self._normalize_authors(metadata.get("authors", [])),
+            "doi": str(metadata.get("doi", "") or ""),
+            "pmcid": str(metadata.get("pmcid", "") or ""),
+            "source": str(metadata.get("source", "") or ""),
+            "updated_at": str(metadata.get("updated_at", "") or ""),
+        }
+
+    def _merged_entry(self, pmid: str, metadata: Optional[dict]) -> dict:
+        """Merge metadata with existing cached values, preferring non-empty new values."""
+        existing = self._cache.get(pmid, {})
+        normalized = self._normalize_entry(metadata)
+        return {
+            "title": normalized["title"] or str(existing.get("title", "") or ""),
+            "abstract": normalized["abstract"] or str(existing.get("abstract", "") or ""),
+            "year": normalized["year"] or str(existing.get("year", "") or ""),
+            "journal": normalized["journal"] or str(existing.get("journal", "") or ""),
+            "authors": normalized["authors"] or self._normalize_authors(existing.get("authors", [])),
+            "doi": normalized["doi"] or str(existing.get("doi", "") or ""),
+            "pmcid": normalized["pmcid"] or str(existing.get("pmcid", "") or ""),
+            "source": normalized["source"] or str(existing.get("source", "") or ""),
+            "updated_at": normalized["updated_at"] or str(existing.get("updated_at", "") or ""),
+        }
+
+    def _save_all(self):
+        """Persist the full in-memory cache to disk in canonical schema."""
+        rows = []
+        for pmid, meta in sorted(self._cache.items()):
+            if not str(pmid).isdigit():
+                continue
+            rows.append(
+                {
+                    "pmid": str(pmid),
+                    "pmcid": str(meta.get("pmcid", "") or ""),
+                    "title": str(meta.get("title", "") or ""),
+                    "abstract": str(meta.get("abstract", "") or ""),
+                    "year": str(meta.get("year", "") or ""),
+                    "journal": str(meta.get("journal", "") or ""),
+                    "authors": "; ".join(self._normalize_authors(meta.get("authors", []))),
+                    "doi": str(meta.get("doi", "") or ""),
+                    "source": str(meta.get("source", "") or ""),
+                    "updated_at": str(meta.get("updated_at", "") or ""),
+                }
+            )
+        out_df = pd.DataFrame(rows, columns=self.CACHE_COLUMNS)
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        out_df.to_csv(self.cache_path, index=False)
     
     def load(self) -> Dict[str, dict]:
         """
         Load the cache from disk.
         
         Returns:
-            Dict mapping PMID to {'title': str, 'abstract': str}
+            Dict mapping PMID to canonical metadata dict.
         """
         if self._loaded:
             return self._cache
-        
+
         if self.cache_path.exists():
             try:
-                cache_df = pd.read_csv(self.cache_path, dtype={'pmid': str})
-                cache_df['pmid_clean'] = cache_df['pmid'].apply(clean_id)
-                cache_df = cache_df[cache_df['pmid_clean'] != ''].copy()
-                
+                cache_df = pd.read_csv(self.cache_path, dtype=str, keep_default_na=False)
+                drop_cols = [c for c in cache_df.columns if str(c).startswith("Unnamed")]
+                if drop_cols:
+                    cache_df = cache_df.drop(columns=drop_cols)
+                if "pmid" not in cache_df.columns:
+                    cache_df = pd.DataFrame(columns=self.CACHE_COLUMNS)
+                for col in self.CACHE_COLUMNS:
+                    if col not in cache_df.columns:
+                        cache_df[col] = ""
+                cache_df["pmid"] = cache_df["pmid"].apply(clean_id)
+                cache_df = cache_df[cache_df["pmid"].str.isdigit()].copy()
                 if len(cache_df) > 0:
-                    cache_df['title_str'] = cache_df['title'].apply(lambda x: str(x) if pd.notna(x) else '')
-                    cache_df['abstract_str'] = cache_df['abstract'].apply(lambda x: str(x) if pd.notna(x) else '')
-                    self._cache = {
-                        pmid: {'title': title, 'abstract': abstract}
-                        for pmid, title, abstract in zip(
-                            cache_df['pmid_clean'],
-                            cache_df['title_str'],
-                            cache_df['abstract_str']
-                        )
-                    }
+                    for _, row in cache_df.iterrows():
+                        pmid = str(row.get("pmid", "")).strip()
+                        if not pmid:
+                            continue
+                        self._cache[pmid] = self._normalize_entry(row.to_dict())
                 print(f"    Loaded {len(self._cache)} entries from PubMed cache")
             except Exception as e:
                 print(f"    Warning: Could not load PubMed cache: {e}")
@@ -86,7 +173,7 @@ class PubMedCache:
             pmid: The PMID to look up
         
         Returns:
-            Dict with 'title' and 'abstract', or None if not cached
+            Metadata dict, or None if not cached
         """
         self.load()
         pmid_clean = clean_id(pmid)
@@ -98,57 +185,31 @@ class PubMedCache:
         
         Args:
             pmid: The PMID
-            metadata: Dict with 'title' and 'abstract'
+            metadata: Dict with metadata fields
         """
         self.load()
         pmid_clean = clean_id(pmid)
         if pmid_clean:
-            self._cache[pmid_clean] = metadata
+            self._cache[pmid_clean] = self._merged_entry(pmid_clean, metadata)
     
     def save_entries(self, new_entries: Dict[str, dict]):
         """
-        Append new entries to the cache file on disk.
+        Save new/updated entries into the cache file on disk.
         
         Args:
-            new_entries: Dict mapping PMID to {'title': str, 'abstract': str}
+            new_entries: Dict mapping PMID to metadata dict
         """
         if not new_entries:
             return
-        
-        # Update in-memory cache
+
+        self.load()
         for pmid, metadata in new_entries.items():
-            self._cache[clean_id(pmid)] = metadata
-        
-        # Prepare DataFrame for new entries
-        rows = []
-        for pmid, metadata in new_entries.items():
-            rows.append({
-                'pmid': pmid,
-                'title': metadata.get('title', ''),
-                'abstract': metadata.get('abstract', '')
-            })
-        
-        new_df = pd.DataFrame(rows)
-        
-        # Ensure parent directory exists
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Check if existing file has an index column for compatibility
-        if self.cache_path.exists():
-            try:
-                existing_cols = pd.read_csv(self.cache_path, nrows=0).columns.tolist()
-                if 'Unnamed: 0' in existing_cols or (existing_cols and existing_cols[0].startswith('Unnamed')):
-                    new_df.insert(0, 'Unnamed: 0', '')
-            except Exception:
-                pass
-        
-        # Append to existing file or create new one
-        if self.cache_path.exists():
-            new_df.to_csv(self.cache_path, mode='a', header=False, index=False)
-        else:
-            new_df.to_csv(self.cache_path, index=False)
-        
-        print(f"    Appended {len(new_entries)} new entries to PubMed cache")
+            pmid_clean = clean_id(pmid)
+            if not pmid_clean:
+                continue
+            self._cache[pmid_clean] = self._merged_entry(pmid_clean, metadata)
+        self._save_all()
+        print(f"    Saved {len(new_entries)} PubMed metadata updates")
     
     def __contains__(self, pmid: str) -> bool:
         """Check if a PMID is in the cache."""
@@ -193,51 +254,123 @@ class PubMedClient:
     
     def fetch_metadata(self, pmids: List[str]) -> Dict[str, dict]:
         """
-        Batch fetch title and abstract for PMIDs from PubMed.
-        
-        Results are cached to avoid re-fetching.
+        Batch fetch metadata for PMIDs from PubMed.
+
+        Uses cache-first retrieval and only queries PubMed for missing metadata.
         
         Args:
             pmids: List of PMIDs to fetch
         
         Returns:
-            Dict mapping PMID to {'title': str, 'abstract': str}
+            Dict mapping PMID to metadata dict:
+            {
+              'title','abstract','year','journal','authors','doi','pmcid',
+              'source','updated_at'
+            }
         """
-        results = {}
+        results: Dict[str, dict] = {}
         pmids_to_fetch = []
-        
-        # Clean PMIDs and check cache
+
+        def _is_cache_complete(meta: dict) -> bool:
+            if not isinstance(meta, dict):
+                return False
+            return bool(
+                str(meta.get("title", "")).strip()
+                and str(meta.get("abstract", "")).strip()
+                and str(meta.get("journal", "")).strip()
+                and str(meta.get("year", "")).strip()
+                and bool(meta.get("authors", []))
+            )
+
         for pmid in pmids:
             pmid_str = clean_id(pmid)
             if not pmid_str or not pmid_str.isdigit():
                 continue
-            
+
             if self.cache and pmid_str in self.cache:
                 cached = self.cache.get(pmid_str)
                 if cached:
                     results[pmid_str] = cached
+                    if not _is_cache_complete(cached):
+                        pmids_to_fetch.append(pmid_str)
+                else:
+                    pmids_to_fetch.append(pmid_str)
             else:
                 pmids_to_fetch.append(pmid_str)
-        
+
+        pmids_to_fetch = sorted(set(pmids_to_fetch))
         if not pmids_to_fetch:
             return results
-        
+
         if not BIOPYTHON_AVAILABLE:
             print("    Warning: Biopython not installed. Cannot fetch PubMed metadata.")
             return results
-        
+
         print(f"    Fetching metadata for {len(pmids_to_fetch)} PMIDs from PubMed...")
-        
+
         Entrez.email = self.email
         if self.api_key:
             Entrez.api_key = self.api_key
-        
+
+        def _normalize_authors(raw_authors: Any) -> List[str]:
+            if raw_authors is None:
+                return []
+            if isinstance(raw_authors, str):
+                return [a.strip() for a in raw_authors.split(";") if a and a.strip()]
+            try:
+                return [str(a).strip() for a in list(raw_authors) if str(a).strip()]
+            except Exception:
+                return []
+
+        def _extract_article_ids(pubmed_data: dict) -> Dict[str, str]:
+            out = {"doi": "", "pmcid": ""}
+            id_list = pubmed_data.get("ArticleIdList", []) or []
+            for aid in id_list:
+                try:
+                    id_type = str(aid.attributes.get("IdType", "")).lower()
+                except Exception:
+                    id_type = ""
+                value = str(aid).strip()
+                if not value:
+                    continue
+                if id_type == "doi" and not out["doi"]:
+                    out["doi"] = value
+                elif id_type == "pmc" and not out["pmcid"]:
+                    out["pmcid"] = value if value.upper().startswith("PMC") else f"PMC{value}"
+            return out
+
+        def _extract_authors(article_data: dict) -> List[str]:
+            author_list = article_data.get("AuthorList", []) or []
+            authors: List[str] = []
+            for author_obj in author_list:
+                if not isinstance(author_obj, dict):
+                    continue
+                ln = str(author_obj.get("LastName", "")).strip()
+                fn = str(author_obj.get("ForeName", "")).strip()
+                if ln:
+                    authors.append(f"{ln}, {fn}" if fn else ln)
+            return _normalize_authors(authors)
+
+        def _extract_year(article_data: dict) -> str:
+            try:
+                pub_date = article_data.get("Journal", {}).get("JournalIssue", {}).get("PubDate", {})
+                year = str(pub_date.get("Year", "")).strip()
+                if year:
+                    return year
+                medline_date = str(pub_date.get("MedlineDate", "")).strip()
+                digits = "".join(ch for ch in medline_date if ch.isdigit())
+                if len(digits) >= 4:
+                    return digits[:4]
+            except Exception:
+                pass
+            return ""
+
         batch_size = 200  # NCBI limit
-        new_entries = {}
-        
+        new_entries: Dict[str, dict] = {}
+
         for i in range(0, len(pmids_to_fetch), batch_size):
             batch = pmids_to_fetch[i:i + batch_size]
-            
+
             try:
                 handle = Entrez.efetch(
                     db="pubmed",
@@ -247,184 +380,105 @@ class PubMedClient:
                 )
                 records = Entrez.read(handle)
                 handle.close()
-                
+
                 for article in records.get('PubmedArticle', []):
                     try:
                         medline = article['MedlineCitation']
                         pmid = str(medline['PMID'])
-                        
-                        # Get title
-                        title = medline['Article'].get('ArticleTitle', '')
-                        if title:
-                            title = str(title)
-                        
-                        # Get abstract (may be in parts)
-                        abstract_data = medline['Article'].get('Abstract', {})
+
+                        article_data = medline.get('Article', {})
+                        title = str(article_data.get('ArticleTitle', '') or '')
+                        abstract_data = article_data.get('Abstract', {})
                         abstract_parts = abstract_data.get('AbstractText', [])
                         if isinstance(abstract_parts, list):
                             abstract = ' '.join(str(p) for p in abstract_parts)
                         else:
-                            abstract = str(abstract_parts)
-                        
-                        metadata = {'title': title, 'abstract': abstract}
+                            abstract = str(abstract_parts or '')
+                        journal_info = article_data.get('Journal', {})
+                        journal = str(
+                            journal_info.get('Title', '')
+                            or journal_info.get('ISOAbbreviation', '')
+                            or ''
+                        )
+                        ids = _extract_article_ids(article.get('PubmedData', {}))
+                        metadata = {
+                            'title': title,
+                            'abstract': abstract,
+                            'year': _extract_year(article_data),
+                            'journal': journal,
+                            'authors': _extract_authors(article_data),
+                            'doi': ids.get("doi", ""),
+                            'pmcid': ids.get("pmcid", ""),
+                            'source': "entrez",
+                            'updated_at': datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        }
                         results[pmid] = metadata
                         new_entries[pmid] = metadata
-                        
-                        # Update cache in memory
+
                         if self.cache:
                             self.cache.set(pmid, metadata)
-                        
+
                     except (KeyError, TypeError):
                         continue
-                
+
                 # Rate limiting - NCBI allows 3 requests/sec with API key, 1/sec without
                 time.sleep(0.4)
-                
+
             except Exception as e:
                 print(f"    Warning: PubMed fetch failed for batch: {e}")
                 continue
-        
-        # Save newly fetched entries to cache
+
+        # Return cached entries for PMIDs we did not fetch in this run.
+        if self.cache:
+            for pmid in pmids:
+                pmid_str = clean_id(pmid)
+                if not pmid_str:
+                    continue
+                if pmid_str not in results:
+                    cached = self.cache.get(pmid_str)
+                    if cached:
+                        results[pmid_str] = cached
+
         if self.cache and new_entries:
             self.cache.save_entries(new_entries)
-        
+
         return results
-    
+
     def fetch_author_date_metadata(self, pmids: List[str]) -> Dict[str, Dict]:
         """
-        Fetch author, date, and journal metadata for PMIDs from PubMed.
-        
+        Return author/date/journal metadata for PMIDs.
+
+        This method reuses the unified PubMed metadata cache and only relies on
+        Entrez via :meth:`fetch_metadata` for missing metadata.
+
         Args:
             pmids: List of PMIDs to fetch
-        
+
         Returns:
-            Dict mapping PMID to {'first_author': str, 'corresponding_author': str, 
-                                  'date_published': str, 'title': str, 'journal': str}
+            Dict mapping PMID to {
+                'first_author', 'corresponding_author', 'all_authors',
+                'date_published', 'title', 'journal'
+            }
         """
-        if not BIOPYTHON_AVAILABLE:
-            return {}
-        
-        Entrez.email = self.email
-        if self.api_key:
-            Entrez.api_key = self.api_key
-        
-        results = {}
-        
-        # Clean PMIDs
-        pmids_to_fetch = []
+        results: Dict[str, Dict[str, str]] = {}
+        meta_by_pmid = self.fetch_metadata(pmids)
         for pmid in pmids:
-            pmid_str = str(pmid).strip()
-            if pmid_str and pmid_str.isdigit():
-                pmids_to_fetch.append(pmid_str)
-        
-        if not pmids_to_fetch:
-            return results
-        
-        batch_size = 200
-        for i in range(0, len(pmids_to_fetch), batch_size):
-            batch = pmids_to_fetch[i:i + batch_size]
-            
-            try:
-                handle = Entrez.efetch(
-                    db="pubmed",
-                    id=",".join(batch),
-                    rettype="xml",
-                    retmode="xml"
-                )
-                records = Entrez.read(handle)
-                handle.close()
-                
-                for article in records.get('PubmedArticle', []):
-                    try:
-                        medline = article['MedlineCitation']
-                        pmid = str(medline['PMID'])
-                        
-                        # Get title
-                        title = str(medline['Article'].get('ArticleTitle', ''))
-                        
-                        # Get journal name
-                        journal = ""
-                        try:
-                            journal_info = medline['Article'].get('Journal', {})
-                            journal = str(journal_info.get('Title', ''))
-                            if not journal:
-                                # Try ISOAbbreviation as fallback
-                                journal = str(journal_info.get('ISOAbbreviation', ''))
-                        except (KeyError, TypeError):
-                            pass
-                        
-                        # Get authors
-                        author_list = medline['Article'].get('AuthorList', [])
-                        first_author = ""
-                        corresponding_author = ""
-                        all_authors = []
-                        
-                        if author_list:
-                            # First author
-                            first_author_obj = author_list[0]
-                            last_name = first_author_obj.get('LastName', '')
-                            first_name = first_author_obj.get('ForeName', '')
-                            if last_name:
-                                first_author = f"{last_name}, {first_name}" if first_name else last_name
-                            
-                            # Collect all authors
-                            for author_obj in author_list:
-                                if isinstance(author_obj, dict):
-                                    ln = author_obj.get('LastName', '')
-                                    fn = author_obj.get('ForeName', '')
-                                    if ln:
-                                        all_authors.append(f"{ln}, {fn}" if fn else ln)
-                                    
-                                    # Look for corresponding author with email
-                                    if not corresponding_author:
-                                        affiliation_info = author_obj.get('AffiliationInfo', [])
-                                        if not isinstance(affiliation_info, list):
-                                            affiliation_info = [affiliation_info] if affiliation_info else []
-                                        
-                                        for aff in affiliation_info:
-                                            if isinstance(aff, dict):
-                                                affiliation = aff.get('Affiliation', '')
-                                                if isinstance(affiliation, str) and '@' in affiliation:
-                                                    corresponding_author = f"{ln}, {fn}" if fn else ln
-                                                    break
-                        
-                        # Get publication date
-                        date_published = ""
-                        try:
-                            journal_issue = medline['Article'].get('Journal', {}).get('JournalIssue', {})
-                            pub_date = journal_issue.get('PubDate', {})
-                            if pub_date:
-                                year = pub_date.get('Year', '')
-                                month = pub_date.get('Month', '')
-                                day = pub_date.get('Day', '')
-                                if year:
-                                    date_parts = [str(year)]
-                                    if month:
-                                        date_parts.append(str(month))
-                                    if day:
-                                        date_parts.append(str(day))
-                                    date_published = "-".join(date_parts)
-                        except (KeyError, TypeError):
-                            pass
-                        
-                        results[pmid] = {
-                            'first_author': first_author,
-                            'corresponding_author': corresponding_author,
-                            'all_authors': '; '.join(all_authors) if all_authors else '',
-                            'date_published': date_published,
-                            'title': title,
-                            'journal': journal
-                        }
-                        
-                    except (KeyError, TypeError, IndexError):
-                        continue
-                
-                time.sleep(0.4)
-                
-            except Exception as e:
-                print(f"    Warning: PubMed fetch failed for batch: {e}")
+            pmid_str = clean_id(pmid)
+            if not pmid_str:
                 continue
-        
+            meta = meta_by_pmid.get(pmid_str, {})
+            authors = meta.get("authors", [])
+            if isinstance(authors, str):
+                authors = [a.strip() for a in authors.split(";") if a.strip()]
+            first_author = str(authors[0]).strip() if authors else ""
+            results[pmid_str] = {
+                "first_author": first_author,
+                "corresponding_author": "",
+                "all_authors": "; ".join([str(a).strip() for a in authors if str(a).strip()]),
+                "date_published": str(meta.get("year", "") or ""),
+                "title": str(meta.get("title", "") or ""),
+                "journal": str(meta.get("journal", "") or ""),
+            }
         return results
     
     def check_keywords(

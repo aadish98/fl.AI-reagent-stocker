@@ -8,8 +8,13 @@ from typing import Dict, List, Optional, Set, Tuple
 import pandas as pd
 from tqdm import tqdm
 
-from .config import ValidationStatus
-from .utils import clean_id, parse_semicolon_list, generate_keyword_column_name
+try:
+    from .config import ValidationStatus
+    from .utils import clean_id, parse_semicolon_list, generate_keyword_column_name
+except ImportError:
+    # Support flat-repo execution (for example `python -m cli ...`).
+    from config import ValidationStatus
+    from utils import clean_id, parse_semicolon_list, generate_keyword_column_name
 
 
 def run_functional_validation(
@@ -362,7 +367,9 @@ def run_functional_validation(
             validity = result["functional_validity"]
             validities.append(validity)
             pmid_clean = clean_id(pmid)
-            per_ref_results.append(f"PMID:{pmid_clean}={validity}")
+            # Keep PMID-tagged payload format consistent across GPT-derived columns
+            # so stock-sheet per-reference extraction can parse by PMID reliably.
+            per_ref_results.append(f"PMID:{pmid_clean}: {validity}")
             if validity == ValidationStatus.FUNCTIONALLY_VALIDATED:
                 validated_pmids.append(pmid_clean)
             if result.get("from_gpt") and result.get("rationale"):

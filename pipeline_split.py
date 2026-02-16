@@ -26,23 +26,47 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
-from .config import Settings, ValidationStatus, DEFAULT_SPLIT_CONFIG_PATH
-from .external.pubmed import PubMedClient, PubMedCache
-from .external.fulltext import FullTextFetcher, FunctionalValidator
-from .utils import (
-    clean_id,
-    parse_semicolon_list,
-    find_keyword_column,
-    find_keyword_title_abstract_column,
-    extract_keywords_from_column,
-    extract_keywords_from_title_abstract_column,
-    has_keyword_validation,
-    generate_keyword_column_name,
-    get_gpt_derived_columns,
-    apply_experimental_prefix,
-    EXPERIMENTAL_PREFIX,
-)
-from .validation_runner import run_functional_validation
+try:
+    from .config import Settings, ValidationStatus, DEFAULT_SPLIT_CONFIG_PATH
+    from .external.pubmed import PubMedClient, PubMedCache
+    from .external.fulltext import FullTextFetcher, FunctionalValidator
+    from .utils import (
+        clean_id,
+        parse_semicolon_list,
+        find_keyword_column,
+        find_keyword_title_abstract_column,
+        extract_keywords_from_column,
+        extract_keywords_from_title_abstract_column,
+        has_keyword_validation,
+        generate_keyword_column_name,
+        get_gpt_derived_columns,
+        apply_experimental_prefix,
+        EXPERIMENTAL_PREFIX,
+        find_latest_tsv,
+        load_flybase_tsv,
+    )
+    from .validation_runner import run_functional_validation
+except ImportError:
+    # Support flat-repo execution (for example `python -m cli ...`).
+    from config import Settings, ValidationStatus, DEFAULT_SPLIT_CONFIG_PATH
+    from external.pubmed import PubMedClient, PubMedCache
+    from external.fulltext import FullTextFetcher, FunctionalValidator
+    from utils import (
+        clean_id,
+        parse_semicolon_list,
+        find_keyword_column,
+        find_keyword_title_abstract_column,
+        extract_keywords_from_column,
+        extract_keywords_from_title_abstract_column,
+        has_keyword_validation,
+        generate_keyword_column_name,
+        get_gpt_derived_columns,
+        apply_experimental_prefix,
+        EXPERIMENTAL_PREFIX,
+        find_latest_tsv,
+        load_flybase_tsv,
+    )
+    from validation_runner import run_functional_validation
 
 
 # Human-readable filter type descriptions for Contents sheet
@@ -589,7 +613,11 @@ def _find_allele_column(df: pd.DataFrame) -> Optional[str]:
 ###############################################################################
 
 def _apply_grey_fill_xlsxwriter(
-    worksheet, df: pd.DataFrame, grey_format
+    worksheet,
+    df: pd.DataFrame,
+    grey_format,
+    dark_header_format=None,
+    dark_header_columns: Optional[Set[str]] = None,
 ) -> None:
     """
     Apply light grey background to GPT-derived column **headers** via
@@ -598,8 +626,12 @@ def _apply_grey_fill_xlsxwriter(
     GPT-derived columns are detected by the '[EXPERIMENTAL] ' prefix that
     :func:`apply_experimental_prefix` adds to their header names.
     """
+    dark_header_columns = dark_header_columns or set()
     for col_idx, col_name in enumerate(df.columns):
-        if str(col_name).startswith(EXPERIMENTAL_PREFIX):
+        col_name_str = str(col_name)
+        if dark_header_format is not None and col_name_str in dark_header_columns:
+            worksheet.write(0, col_idx, col_name, dark_header_format)
+        elif col_name_str.startswith(EXPERIMENTAL_PREFIX):
             worksheet.write(0, col_idx, col_name, grey_format)
 
 
@@ -661,7 +693,10 @@ def _extract_row_pmid_entry(cell_value: Any, row_pmid: str) -> Any:
     if not pmid_clean:
         return cell_value
 
-    pattern = re.compile(r"PMID:\s*([0-9]+)\s*:\s*(.*?)(?=(?:\s*\|\s*)?PMID:\s*[0-9]+\s*:|$)", re.IGNORECASE | re.DOTALL)
+    pattern = re.compile(
+        r"PMID:\s*([0-9]+)\s*:\s*(.*?)(?=(?:\s*[|;]\s*)?PMID:\s*[0-9]+\s*:|$)",
+        re.IGNORECASE | re.DOTALL,
+    )
     matches = pattern.findall(text)
     if not matches:
         return cell_value
@@ -671,6 +706,155 @@ def _extract_row_pmid_entry(cell_value: Any, row_pmid: str) -> Any:
             entry = str(content).strip()
             return entry if entry else f"PMID: {pmid_clean}"
     return ""
+
+
+def _is_keyword_validation_pmid_column(col_name: str) -> bool:
+    """Return True for dynamic PMID-of-keyword-valid-references column names."""
+    col = str(col_name or "").strip()
+    if col.startswith(EXPERIMENTAL_PREFIX):
+        col = col[len(EXPERIMENTAL_PREFIX):].strip()
+    return bool(
+        re.match(
+            r"^PMID of .+ references that showed stocks functional validity$",
+            col
+        )
+    )
+
+
+def _derive_stock_keyword_refs_header(keyword_pmids_col: Optional[str]) -> str:
+    """
+    Build a Stock Sheet by Gene keyword-reference column header.
+
+    If source column already encodes explicit keywords (for example
+    "Stock (allele) sleep OR circadian references"), preserve that wording.
+    """
+    base = "Stock (allele) keyword-hit references"
+    raw = str(keyword_pmids_col or "").strip()
+    if raw:
+        if raw.startswith("Stock (allele)") and "references" in raw:
+            base = raw.replace("(all for stock)", "").strip()
+        elif raw == "keyword_ref_pmids":
+            base = "Stock (allele) keyword-hit references"
+    return f"{base} (all for stock)"
+
+
+def _load_gene_synonyms_map(
+    flybase_data_path: Optional[Path],
+    verbose: bool = False
+) -> Dict[str, str]:
+    """
+    Load FlyBase gene symbol/synonym table and build symbol -> synonyms display.
+
+    Maps both current symbols and known synonyms to a normalized semicolon list.
+    """
+    def _find_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+        lower_map = {str(c).strip().lower(): c for c in df.columns}
+        for cand in candidates:
+            col = lower_map.get(str(cand).strip().lower())
+            if col is not None:
+                return col
+        return None
+
+    def _find_synonym_tsv(base_path: Path) -> Optional[Path]:
+        genes_dir = base_path / "Genes"
+        if genes_dir.exists():
+            try:
+                return find_latest_tsv(genes_dir, "fb_synonym")
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+
+        # Fallback: some local data layouts do not include a top-level "Genes"
+        # folder, so search within FlyBase for any fb_synonym TSV/GZ.
+        candidates = sorted(base_path.rglob("fb_synonym*.tsv*"))
+        if candidates:
+            return max(candidates, key=lambda p: p.stat().st_mtime)
+        return None
+
+    if flybase_data_path is None:
+        return {}
+    try:
+        synonym_path = _find_synonym_tsv(Path(flybase_data_path))
+        if synonym_path is None:
+            if verbose:
+                print(
+                    f"    Warning: Could not find fb_synonym TSV under {flybase_data_path}"
+                )
+            return {}
+        syn_df = load_flybase_tsv(synonym_path, keep_default_na=False)
+    except Exception as e:
+        if verbose:
+            print(f"    Warning: Could not load FlyBase gene synonyms: {e}")
+        return {}
+
+    organism_col = _find_col(syn_df, ["organism_abbreviation"])
+    current_symbol_col = _find_col(syn_df, ["current_symbol"])
+    synonyms_col = _find_col(syn_df, ["symbol_synonym(s)", "symbol_synonyms"])
+    primary_fbid_col = _find_col(syn_df, ["primary_FBid", "primary_fbid"])
+
+    if organism_col:
+        syn_df = syn_df[
+            syn_df[organism_col]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .eq("dmel")
+        ].copy()
+    if len(syn_df) == 0 or current_symbol_col is None:
+        return {}
+
+    fbgn_to_names: Dict[str, Set[str]] = {}
+    for _, row in syn_df.iterrows():
+        fbgn = str(row.get(primary_fbid_col, "") or "").strip() if primary_fbid_col else ""
+        if not fbgn:
+            continue
+        names = fbgn_to_names.setdefault(fbgn, set())
+        current_symbol = str(row.get(current_symbol_col, "") or "").strip()
+        if current_symbol:
+            names.add(current_symbol)
+        syn_field = str(row.get(synonyms_col, "") or "").strip() if synonyms_col else ""
+        if syn_field:
+            for syn in syn_field.split("|"):
+                syn = syn.strip()
+                if syn:
+                    names.add(syn)
+
+    name_to_synonyms: Dict[str, str] = {}
+    for names in fbgn_to_names.values():
+        normalized = sorted({n for n in names if n})
+        if not normalized:
+            continue
+        for name in normalized:
+            others = [n for n in normalized if n != name]
+            name_to_synonyms[name] = "; ".join(others) if others else ""
+
+    # Add case-insensitive lookup keys so stock-sheet symbols still resolve even
+    # when casing differs from FlyBase's synonym table.
+    for name, syns in list(name_to_synonyms.items()):
+        key = str(name).strip().casefold()
+        if key and key not in name_to_synonyms:
+            name_to_synonyms[key] = syns
+    if verbose:
+        print(f"    Loaded FlyBase gene synonyms for {len(name_to_synonyms)} symbols")
+    return name_to_synonyms
+
+
+def _lookup_gene_synonyms(
+    gene_label: str,
+    gene_synonyms_map: Optional[Dict[str, str]],
+) -> str:
+    """Resolve synonyms for a gene symbol with robust normalization."""
+    if not gene_synonyms_map:
+        return ""
+    label = str(gene_label or "").strip()
+    if not label:
+        return ""
+    direct = str(gene_synonyms_map.get(label, "") or "").strip()
+    if direct:
+        return direct
+    # Fallback to case-insensitive key.
+    return str(gene_synonyms_map.get(label.casefold(), "") or "").strip()
 
 
 def _normalize_stock_sheet_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -692,7 +876,8 @@ def _normalize_stock_sheet_columns(df: pd.DataFrame) -> pd.DataFrame:
 def _build_stock_sheet_by_gene(
     combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict]],
     references_df: Optional[pd.DataFrame],
-    csv_input_genes: Optional[Set[str]] = None
+    csv_input_genes: Optional[Set[str]] = None,
+    gene_synonyms_map: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     """
     Build a grouped sheet with unique (stock, PMID) keyword-hit rows.
@@ -749,6 +934,7 @@ def _build_stock_sheet_by_gene(
     
     kw_count_col = _find_keyword_ref_count_column(sample_df)
     kw_pmids_col = _find_keyword_ref_pmids_column(sample_df)
+    keyword_refs_header = _derive_stock_keyword_refs_header(kw_pmids_col)
     has_keyword_signal = bool(kw_count_col or kw_pmids_col or keyword_hit_pmids)
     if not has_keyword_signal:
         return pd.DataFrame()
@@ -833,13 +1019,14 @@ def _build_stock_sheet_by_gene(
 
             out_row: Dict[str, Any] = {
                 'gene': gene_label,
+                'gene synonyms': _lookup_gene_synonyms(gene_label, gene_synonyms_map),
                 'stock #': stock_num,
                 'pmid': pmid,
                 'title': meta.get('title', ''),
                 'journal': meta.get('journal', ''),
                 'publication date': meta.get('publication_date', ''),
                 'authors': meta.get('authors', ''),
-                'Stock (allele) keyword-hit references (all for stock)': kw_refs_for_stock,
+                keyword_refs_header: kw_refs_for_stock,
                 'Stock (allele) all references (all for stock)': all_refs_for_stock,
                 '_is_functionally_valid': 1 if is_functionally_valid else 0,
                 '_keyword_ref_count': kw_ref_count,
@@ -879,17 +1066,34 @@ def _build_stock_sheet_by_gene(
         ascending=[False, True, False, False, True, False, True],
     ).reset_index(drop=True)
     
-    # Final column order: core columns, then GPT columns.
+    # Final column order: core columns, then non-aggregate GPT columns.
+    keyword_validation_col = None
+    for gc in gpt_cols:
+        if _is_keyword_validation_pmid_column(gc):
+            keyword_validation_col = gc
+            break
+
     ordered_cols = [
-        'gene', 'stock #', 'pmid', 'title', 'journal',
+        'gene', 'gene synonyms', 'stock #', 'pmid', 'title', 'journal',
         'publication date', 'authors',
-        'Stock (allele) keyword-hit references (all for stock)',
-        'Stock (allele) all references (all for stock)',
     ]
     for gc in gpt_cols:
+        if gc == keyword_validation_col:
+            continue
         if gc not in ordered_cols and gc in out_df.columns:
             ordered_cols.append(gc)
-    
+
+    # Stock-level aggregate reference columns should appear last, in this order.
+    aggregate_cols = [
+        keyword_refs_header,
+        'Stock (allele) all references (all for stock)',
+    ]
+    for col in aggregate_cols:
+        if col in out_df.columns and col not in ordered_cols:
+            ordered_cols.append(col)
+    if keyword_validation_col and keyword_validation_col in out_df.columns:
+        ordered_cols.append(keyword_validation_col)
+
     return out_df[ordered_cols]
 
 
@@ -902,6 +1106,7 @@ def write_aggregated_excel(
     all_input_genes: Optional[Set[str]] = None,
     genes_no_stocks: Optional[Set[str]] = None,
     csv_input_genes: Optional[Set[str]] = None,
+    gene_synonyms_map: Optional[Dict[str, str]] = None,
 ) -> None:
     """
     Write aggregated Excel file with Contents, Sheet1..N, References.
@@ -918,6 +1123,7 @@ def write_aggregated_excel(
             had 0 BDSC stocks found by Pipeline 1. Displayed separately from
             genes that have stocks but were filtered out by combinations.
         csv_input_genes: Set of unique gene symbols from the original CSV input.
+        gene_synonyms_map: Optional map of gene symbol -> semicolon-delimited synonyms.
     """
     filters_config = config.get('filters', {})
     filter_descriptions = config.get('filterDescriptions', {})
@@ -966,7 +1172,10 @@ def write_aggregated_excel(
     ]
     
     stock_sheet_by_gene_df = _build_stock_sheet_by_gene(
-        combination_outputs, references_df, csv_input_genes=csv_input_genes
+        combination_outputs,
+        references_df,
+        csv_input_genes=csv_input_genes,
+        gene_synonyms_map=gene_synonyms_map,
     )
     
     # Pre-compute gene symbols that appear in at least one sheet
@@ -998,6 +1207,9 @@ def write_aggregated_excel(
         bold_bottom = workbook.add_format({'bold': True, 'bottom': 2, 'font_size': 13, 'align': 'left'})
         fmt_faint_bottom = workbook.add_format({'font_size': 13, 'bottom': 2, 'bottom_color': '#808080', 'align': 'left'})
         fmt_grey = workbook.add_format({'bg_color': '#D9D9D9'})
+        fmt_dark_grey_white = workbook.add_format(
+            {'bg_color': '#595959', 'font_color': '#FFFFFF'}
+        )
         
         # Contents sheet
         contents_ws = workbook.add_worksheet("Contents")
@@ -1289,10 +1501,20 @@ def write_aggregated_excel(
             stock_sheet_by_gene_out.to_excel(
                 writer, sheet_name="Stock Sheet by Gene", index=False
             )
+            stock_aggregate_columns: Set[str] = set()
+            for col_name in stock_sheet_by_gene_out.columns:
+                col_name_str = str(col_name)
+                if (
+                    col_name_str.startswith("Stock (allele)")
+                    and col_name_str.endswith("(all for stock)")
+                ) or _is_keyword_validation_pmid_column(col_name_str):
+                    stock_aggregate_columns.add(col_name_str)
             _apply_grey_fill_xlsxwriter(
                 writer.sheets["Stock Sheet by Gene"],
                 stock_sheet_by_gene_out,
                 fmt_grey,
+                dark_header_format=fmt_dark_grey_white,
+                dark_header_columns=stock_aggregate_columns,
             )
     
     if verbose:
@@ -1881,6 +2103,11 @@ class StockSplitterPipeline:
                         print(f"  Warning: Could not remove duplicate report {extra}: {e}")
         else:
             print("  No no-PMID FBrf report found to copy")
+
+        gene_synonyms_map = _load_gene_synonyms_map(
+            self.settings.flybase_data_path,
+            verbose=verbose,
+        )
         
         # Process each file
         for excel_path in excel_files:
@@ -2075,6 +2302,7 @@ class StockSplitterPipeline:
                 all_input_genes=all_input_genes,
                 genes_no_stocks=genes_no_stocks,
                 csv_input_genes=csv_input_genes,
+                gene_synonyms_map=gene_synonyms_map,
             )
         
         # Print summary

@@ -26,20 +26,37 @@ from typing import Dict, List, Optional, Tuple, Set
 
 import pandas as pd
 
-from .config import Settings, ValidationStatus, GET_FBGN_IDS_SCRIPT
-from .utils import (
-    clean_id,
-    parse_semicolon_list,
-    find_latest_tsv,
-    load_flybase_tsv,
-    generate_keyword_column_name,
-    get_gpt_derived_columns,
-    apply_experimental_prefix,
-    EXPERIMENTAL_PREFIX,
-)
-from .external.pubmed import PubMedClient, PubMedCache
-from .external.fulltext import FullTextFetcher, FunctionalValidator
-from .validation_runner import run_functional_validation
+try:
+    from .config import Settings, ValidationStatus, GET_FBGN_IDS_SCRIPT
+    from .utils import (
+        clean_id,
+        parse_semicolon_list,
+        find_latest_tsv,
+        load_flybase_tsv,
+        generate_keyword_column_name,
+        get_gpt_derived_columns,
+        apply_experimental_prefix,
+        EXPERIMENTAL_PREFIX,
+    )
+    from .external.pubmed import PubMedClient, PubMedCache
+    from .external.fulltext import FullTextFetcher, FunctionalValidator
+    from .validation_runner import run_functional_validation
+except ImportError:
+    # Support flat-repo execution (for example `python -m cli ...`).
+    from config import Settings, ValidationStatus, GET_FBGN_IDS_SCRIPT
+    from utils import (
+        clean_id,
+        parse_semicolon_list,
+        find_latest_tsv,
+        load_flybase_tsv,
+        generate_keyword_column_name,
+        get_gpt_derived_columns,
+        apply_experimental_prefix,
+        EXPERIMENTAL_PREFIX,
+    )
+    from external.pubmed import PubMedClient, PubMedCache
+    from external.fulltext import FullTextFetcher, FunctionalValidator
+    from validation_runner import run_functional_validation
 
 
 def _apply_grey_fill_openpyxl(ws, df: pd.DataFrame) -> None:
@@ -787,10 +804,6 @@ class AlleleReferencesPipeline:
             stocks_df['keyword_ref_count'] = 0
             stocks_df['keyword_ref_pmids'] = ''
         
-        # Fetch author/date metadata for references
-        print(f"    Fetching author/date metadata for {len(unique_pmids_list)} references...")
-        author_date_metadata = self._pubmed_client.fetch_author_date_metadata(unique_pmids_list)
-        
         # Enhance refs_df with new columns
         if len(refs_df) > 0:
             # Add associated_stocks column
@@ -822,35 +835,34 @@ class AlleleReferencesPipeline:
                 lambda x: len(pmid_to_stocks.get(clean_id(x), set())) if pd.notna(x) else 0
             )
             
-            # Add publication date, authors, journal from PubMed metadata
-            def get_pub_date(pmid):
+            # Add publication date, authors, journal from unified PubMed metadata
+            def _get_pubmed_meta(pmid):
                 if pd.isna(pmid):
-                    return ''
+                    return {}
                 pmid_clean = clean_id(pmid)
-                meta = author_date_metadata.get(pmid_clean, {})
-                return meta.get('date_published', '') if isinstance(meta, dict) else ''
+                meta = pubmed_metadata.get(pmid_clean, {})
+                return meta if isinstance(meta, dict) else {}
+
+            def get_pub_date(pmid):
+                meta = _get_pubmed_meta(pmid)
+                return str(meta.get('year', '') or '')
             
             def get_authors(pmid):
-                if pd.isna(pmid):
-                    return ''
-                pmid_clean = clean_id(pmid)
-                meta = author_date_metadata.get(pmid_clean, {})
-                if not isinstance(meta, dict):
-                    return ''
-                first_author = meta.get('first_author', '')
-                # For now, just return first author. Could add more if needed.
-                return first_author
+                meta = _get_pubmed_meta(pmid)
+                authors = meta.get('authors', [])
+                if isinstance(authors, str):
+                    return '; '.join([a.strip() for a in authors.split(';') if a.strip()])
+                if isinstance(authors, list):
+                    return '; '.join([str(a).strip() for a in authors if str(a).strip()])
+                return ''
             
             refs_df['publication_date'] = refs_df['PMID'].apply(get_pub_date)
             refs_df['author(s)'] = refs_df['PMID'].apply(get_authors)
             
             # Get journal from metadata
             def get_journal(pmid):
-                if pd.isna(pmid):
-                    return ''
-                pmid_clean = clean_id(pmid)
-                meta = author_date_metadata.get(pmid_clean, {})
-                return meta.get('journal', '') if isinstance(meta, dict) else ''
+                meta = _get_pubmed_meta(pmid)
+                return str(meta.get('journal', '') or '')
             
             refs_df['journal'] = refs_df['PMID'].apply(get_journal)
             
