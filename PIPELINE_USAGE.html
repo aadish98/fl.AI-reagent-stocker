@@ -1,12 +1,10 @@
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
-<head>
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.8.27">
 
-<meta charset="utf-8" />
-<meta name="generator" content="quarto-1.8.27" />
-
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
 <title>pipeline_usage</title>
@@ -59,380 +57,408 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 }
 </style>
 
-<!-- htmldependencies:E3FAD763 -->
+
+<script src="PIPELINE_USAGE_files/libs/clipboard/clipboard.min.js"></script>
+<script src="PIPELINE_USAGE_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="PIPELINE_USAGE_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="PIPELINE_USAGE_files/libs/quarto-html/axe/axe-check.js" type="module"></script>
+<script src="PIPELINE_USAGE_files/libs/quarto-html/popper.min.js"></script>
+<script src="PIPELINE_USAGE_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="PIPELINE_USAGE_files/libs/quarto-html/anchor.min.js"></script>
+<link href="PIPELINE_USAGE_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="PIPELINE_USAGE_files/libs/quarto-html/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="PIPELINE_USAGE_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="PIPELINE_USAGE_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="PIPELINE_USAGE_files/libs/bootstrap/bootstrap-d6a003b94517c951b2d65075d42fb01b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 
 
 </head>
 
-<body>
+<body class="fullcontent quarto-light">
 
 <div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
-<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
-</div>
+
 <main class="content" id="quarto-document-content">
 
 
 
 
-<section id="fly_stocker_v2-usage-and-pipeline-guide" class="level1">
-<h1>fly_stocker_v2 Usage and Pipeline Guide</h1>
-<p><code>fly_stocker_v2</code> has two CLI pipelines:</p>
-<ol type="1">
-<li><code>get-allele-refs</code> (Pipeline 1): input gene lists -&gt; BDSC stocks -&gt; publication references</li>
-<li><code>split-stocks</code> (Pipeline 2): Pipeline 1 workbook -&gt; JSON-driven stock sheet splits + Ref++-scoped GPT validation</li>
-</ol>
-<p>For one-command execution, use <code>run-full-pipeline</code> to run Pipeline 1 then Pipeline 2 automatically.</p>
-<section id="end-to-end-purpose-and-method-high-level" class="level2">
-<h2>End-to-End Purpose and Method (High-Level)</h2>
-<p>This flow chart shows the overall intent and method from raw gene lists to experimentally actionable stock shortlists.</p>
-<pre class="mermaid"><code>flowchart TD
-    A[Goal: prioritize functional Drosophila stocks from gene lists]
-    B[Input: gene-list CSV files]
-    C[Pipeline 1 get-allele-refs&lt;br/&gt;map genes to stocks and gather references]
-    D[Intermediate workbook&lt;br/&gt;Stocks + References]
-    E[Pipeline 2 split-stocks&lt;br/&gt;apply JSON filters, combinations, and limits]
-    F{Output sheet includes Ref++?}
-    G[Run GPT functional validation&lt;br/&gt;only after keyword and full-text gating]
-    H[Skip GPT validation]
-    I[Final organized workbook&lt;br/&gt;Contents, Sheet1..N, filtered References]
-    J[Use shortlisted stocks for downstream experimental planning]
-
-    A --&gt; B --&gt; C --&gt; D --&gt; E --&gt; F
-    F --&gt;|Yes| G --&gt; I --&gt; J
-    F --&gt;|No| H --&gt; I</code></pre>
-</section>
-<section id="high-level-data-flow" class="level2">
-<h2>High-Level Data Flow</h2>
-<section id="pipeline-1-get-allele-refs" class="level3">
-<h3>Pipeline 1 (<code>get-allele-refs</code>)</h3>
-<pre class="mermaid"><code>flowchart LR
-    A[Input CSV files&lt;br/&gt;gene symbols or FBgn IDs] --&gt; B[FBgn conversion&lt;br/&gt;optional]
-    B --&gt; C[Map genes to BDSC stocks&lt;br/&gt;stockgenes.csv]
-    C --&gt; D[Find references&lt;br/&gt;FlyBase entity_publication + metadata]
-    D --&gt; E[Keyword matching using split JSON relevantSearchTerms]
-    E --&gt; F[Output Excel Stocks and References sheets]</code></pre>
-</section>
-<section id="pipeline-2-split-stocks" class="level3">
-<h3>Pipeline 2 (<code>split-stocks</code>)</h3>
-<pre class="mermaid"><code>flowchart LR
-    H[Pipeline 1 Excel output&lt;br/&gt;Stocks + References] --&gt; I[Load split config JSON&lt;br/&gt;filters + combinations + limits]
-    I --&gt; J[Compute derived columns&lt;br/&gt;Balancers, insertions, relevance score]
-    J --&gt; K[Apply filter combinations and per-gene/per-allele limits]
-    K --&gt; L[Run GPT validation only for Ref++ output-sheet stocks]
-    L --&gt; M[Build organized workbook&lt;br/&gt;Contents + Sheet1..N + References]
-    M --&gt; N[Output folder Organized Stocks]</code></pre>
-</section>
-</section>
-<section id="prerequisites" class="level2">
-<h2>Prerequisites</h2>
+<section id="fly_stocker_v2-practical-pipeline-guide" class="level1">
+<h1>fly_stocker_v2: Practical Pipeline Guide</h1>
+<p>This guide explains how to go from a gene list to a curated set of candidate fly stocks with supporting literature.</p>
+<section id="what-you-get" class="level2">
+<h2 class="anchored" data-anchor-id="what-you-get">What You Get</h2>
+<p>After a full run, you will have:</p>
 <ul>
-<li>Run commands from the package/project directory that contains <code>cli.py</code> and <code>data/JSON/</code>.</li>
-<li>Install dependencies:
+<li>a stock-level table linked to references</li>
+<li>organized output sheets based on your filtering rules</li>
+<li>a reference table narrowed to papers relevant to selected stocks</li>
+<li>optional functional-validation signals for Ref++ sheets</li>
+</ul>
+</section>
+<section id="end-to-end-flow-purpose-and-method" class="level2">
+<h2 class="anchored" data-anchor-id="end-to-end-flow-purpose-and-method">End-to-End Flow (Purpose and Method)</h2>
+<section id="flowchart-1-high-level-overview" class="level3">
+<h3 class="anchored" data-anchor-id="flowchart-1-high-level-overview">Flowchart 1: High-Level Overview</h3>
+<p>Use this when you want the one-minute story of what goes in, what the pipeline does, and what comes out.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="pipeline-flowchart-high-level-standalone.png" class="img-fluid figure-img"></p>
+<figcaption>High-level end-to-end pipeline flowchart</figcaption>
+</figure>
+</div>
+</section>
+<section id="flowchart-2-rules-and-evidence-decisions" class="level3">
+<h3 class="anchored" data-anchor-id="flowchart-2-rules-and-evidence-decisions">Flowchart 2: Rules and Evidence Decisions</h3>
+<p>Use this when you want to understand how prioritization rules are applied and how <code>Ref++</code> decisions are handled.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="pipeline-flowchart-rules-and-tools-standalone.png" class="img-fluid figure-img"></p>
+<figcaption>Rules and evidence decision flowchart</figcaption>
+</figure>
+</div>
+</section>
+</section>
+<section id="before-you-run" class="level2">
+<h2 class="anchored" data-anchor-id="before-you-run">Before You Run</h2>
 <ul>
-<li><code>pip install -r requirements.txt</code></li>
-</ul></li>
-<li>Place input CSV files in one folder (example: <code>./gene_lists</code>).</li>
+<li>Run commands from the project directory (the folder with <code>cli.py</code> and <code>data/JSON/</code>).</li>
+<li>Install dependencies:</li>
+</ul>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-r</span> requirements.txt</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li>Put your input CSV files in one folder (example: <code>./gene_lists</code>).</li>
 <li>Optional environment variables:
 <ul>
-<li><code>OPENAI_API_KEY</code>: required for GPT functional validation in Pipeline 2</li>
-<li><code>NCBI_API_KEY</code>: recommended to reduce PubMed rate limits</li>
-<li><code>UNPAYWALL_TOKEN</code>: optional full-text retrieval token</li>
+<li><code>OPENAI_API_KEY</code> (needed if you want GPT-based validation)</li>
+<li><code>NCBI_API_KEY</code> (helps with PubMed rate limits)</li>
+<li><code>UNPAYWALL_TOKEN</code> (optional, can improve full-text retrieval)</li>
 </ul></li>
 </ul>
-<hr />
 </section>
-<section id="cli-quick-start" class="level2">
-<h2>CLI Quick Start</h2>
-<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Show available commands and options</span></span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli <span class="at">--help</span></span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Full pipeline in one command (recommended for end-to-end runs)</span></span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli run-full-pipeline ./gene_lists <span class="at">--config</span> ./my_split_config.json <span class="at">--test-log</span></span>
-<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Pipeline 1: build Stocks + References workbook</span></span>
-<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli get-allele-refs ./gene_lists</span>
-<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Pipeline 2: split/organize stock sheets and run Ref++-scoped validation</span></span>
-<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli split-stocks ./gene_lists/Stocks</span></code></pre></div>
-<p>Recommended default workflow (validation in Pipeline 2 only):</p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli get-allele-refs ./gene_lists</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli split-stocks ./gene_lists/Stocks <span class="at">--test-log</span></span></code></pre></div>
-<p>Optional: run validation during Pipeline 1 instead:</p>
-<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli get-allele-refs ./gene_lists <span class="at">--run-validation</span> <span class="at">--test-log</span></span></code></pre></div>
-<p>With custom config:</p>
-<div class="sourceCode" id="cb7"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli get-allele-refs ./gene_lists <span class="at">--config</span> ./my_split_config.json</span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli split-stocks ./gene_lists/Stocks <span class="at">--config</span> ./my_split_config.json</span></code></pre></div>
+<section id="minute-quick-start" class="level2">
+<h2 class="anchored" data-anchor-id="minute-quick-start">5-Minute Quick Start</h2>
+<section id="option-a-recommended-one-command" class="level3">
+<h3 class="anchored" data-anchor-id="option-a-recommended-one-command">Option A (recommended): one command</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli run-full-pipeline ./gene_lists <span class="at">--config</span> ./my_split_config.json <span class="at">--test-log</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="option-b-two-step-workflow" class="level3">
+<h3 class="anchored" data-anchor-id="option-b-two-step-workflow">Option B: two-step workflow</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli get-allele-refs ./gene_lists</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli split-stocks ./gene_lists/Stocks <span class="at">--test-log</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Default config path:</p>
 <ul>
 <li><code>data/JSON/stock_split_config_example.json</code></li>
 </ul>
-<hr />
+<hr>
 </section>
-<section id="pipeline-1-get-allele-refs-1" class="level2">
-<h2>Pipeline 1: <code>get-allele-refs</code></h2>
-<p>Builds the base <code>Stocks</code> + <code>References</code> workbook from input gene CSV files.</p>
-<section id="required-argument" class="level3">
-<h3>Required argument</h3>
-<ul>
-<li><code>input_dir</code>: directory containing CSV files.</li>
-</ul>
 </section>
-<section id="options" class="level3">
-<h3>Options</h3>
-<ul>
-<li><code>--gene-col</code> (default: <code>flybase_gene_id</code>)
-<ul>
-<li>Column containing FBgn IDs after conversion.</li>
-</ul></li>
-<li><code>--input-gene-col</code> (default: <code>ext_gene</code>)
-<ul>
-<li>Input symbol column used during FBgn conversion.</li>
-</ul></li>
-<li><code>--config</code>, <code>-c</code>
-<ul>
-<li>JSON config path used to load <code>settings.relevantSearchTerms</code>.</li>
-</ul></li>
-<li><code>--batch-size</code>, <code>-b</code> (default: <code>50</code>)
-<ul>
-<li>Batch size for pipeline processing.</li>
-</ul></li>
-<li><code>--skip-fbgnid-conversion</code>
-<ul>
-<li>Use this when input CSVs already contain FBgn IDs.</li>
-</ul></li>
-<li><code>--run-validation</code>
-<ul>
-<li>Run GPT functional validation during Pipeline 1. By default this step is skipped in Pipeline 1 and performed in Pipeline 2.</li>
-</ul></li>
-<li><code>--soft-run</code>
-<ul>
-<li>Stops before GPT API calls and prints predicted call counts (effective when validation runs).</li>
-</ul></li>
-<li><code>--test-log</code>
-<ul>
-<li>Enables GPT query logging (effective when validation runs).</li>
-</ul></li>
-<li><code>--max-gpt-calls-per-stock</code> (default: <code>5</code>)
-<ul>
-<li>Cap on actual GPT calls per stock (effective when validation runs).</li>
-</ul></li>
-</ul>
+<section id="step-1-build-stocks-references-get-allele-refs" class="level2">
+<h2 class="anchored" data-anchor-id="step-1-build-stocks-references-get-allele-refs">Step 1: Build Stocks + References (<code>get-allele-refs</code>)</h2>
+<p>This step reads your gene lists and creates an Excel workbook that links genes, stocks, and publications.</p>
+<section id="command" class="level3">
+<h3 class="anchored" data-anchor-id="command">Command</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli get-allele-refs ./gene_lists</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
-<section id="output" class="level3">
-<h3>Output</h3>
-<p>Creates:</p>
+<section id="main-output" class="level3">
+<h3 class="anchored" data-anchor-id="main-output">Main output</h3>
 <ul>
 <li><code>./gene_lists/Stocks/aggregated_bdsc_stock_refs.xlsx</code></li>
 </ul>
-<p>Main sheets:</p>
-<ul>
-<li><code>Stocks</code></li>
-<li><code>References</code></li>
-</ul>
-<hr />
 </section>
-</section>
-<section id="pipeline-2-split-stocks-1" class="level2">
-<h2>Pipeline 2: <code>split-stocks</code></h2>
-<p>Consumes Pipeline 1 workbook(s), applies JSON-defined filter combinations, writes organized output sheets, then runs GPT functional validation only for selected Ref++ stocks.</p>
-<section id="required-argument-1" class="level3">
-<h3>Required argument</h3>
+<section id="what-is-inside" class="level3">
+<h3 class="anchored" data-anchor-id="what-is-inside">What is inside</h3>
 <ul>
-<li><code>input_dir</code>: directory containing Pipeline 1 Excel files (for example <code>./gene_lists/Stocks</code>).</li>
+<li><code>Stocks</code>: stock-centric rows with associated metadata</li>
+<li><code>References</code>: publication-centric rows connected to stock entries</li>
 </ul>
 </section>
-<section id="options-1" class="level3">
-<h3>Options</h3>
+<section id="common-options" class="level3">
+<h3 class="anchored" data-anchor-id="common-options">Common options</h3>
 <ul>
-<li><code>--config</code>, <code>-c</code>
-<ul>
-<li>JSON split configuration path.</li>
-</ul></li>
-<li><code>--quiet</code>, <code>-q</code>
-<ul>
-<li>Suppress verbose output.</li>
-</ul></li>
-<li><code>--soft-run</code>
-<ul>
-<li>Stops before GPT API calls and prints predicted call counts.</li>
-</ul></li>
-<li><code>--test-log</code>
-<ul>
-<li>Enables GPT query logging to <code>data/logs/GPT-Queries/</code>.</li>
-</ul></li>
-<li><code>--max-gpt-calls-per-stock</code> (default: <code>5</code>)
-<ul>
-<li>Cap on actual GPT calls per stock during validation.</li>
-</ul></li>
+<li><code>--config</code>, <code>-c</code>: path to your split config JSON (loads keyword terms)</li>
+<li><code>--skip-fbgnid-conversion</code>: use this if your input already has FBgn IDs</li>
+<li><code>--run-validation</code>: run GPT validation during Step 1 (off by default)</li>
+<li><code>--soft-run</code>: estimate GPT calls without making them (only meaningful with validation)</li>
+<li><code>--test-log</code>: write GPT query logs (only when validation runs)</li>
 </ul>
-<hr />
+<hr>
 </section>
 </section>
-<section id="full-pipeline-run-full-pipeline" class="level2">
-<h2>Full Pipeline: <code>run-full-pipeline</code></h2>
-<p>Runs both pipelines in one command:</p>
-<ol type="1">
-<li><code>get-allele-refs</code> on your gene-list input directory</li>
-<li><code>split-stocks</code> on the generated <code>./gene_lists/Stocks</code> output</li>
-</ol>
-<section id="required-argument-2" class="level3">
-<h3>Required argument</h3>
-<ul>
-<li><code>input_dir</code>: directory containing gene-list CSV files.</li>
-</ul>
+<section id="step-2-organize-and-prioritize-split-stocks" class="level2">
+<h2 class="anchored" data-anchor-id="step-2-organize-and-prioritize-split-stocks">Step 2: Organize and Prioritize (<code>split-stocks</code>)</h2>
+<p>This step takes the Step 1 workbook, applies your config logic, and writes organized output sheets.</p>
+<section id="command-1" class="level3">
+<h3 class="anchored" data-anchor-id="command-1">Command</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli split-stocks ./gene_lists/Stocks <span class="at">--config</span> ./my_split_config.json</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
-<section id="options-2" class="level3">
-<h3>Options</h3>
-<ul>
-<li><code>--config</code>, <code>-c</code>
-<ul>
-<li>Shared JSON config for both steps.</li>
-</ul></li>
-<li><code>--gene-col</code> (default: <code>flybase_gene_id</code>)
-<ul>
-<li>Pipeline 1 gene ID column.</li>
-</ul></li>
-<li><code>--input-gene-col</code> (default: <code>ext_gene</code>)
-<ul>
-<li>Pipeline 1 input symbol column.</li>
-</ul></li>
-<li><code>--batch-size</code>, <code>-b</code> (default: <code>50</code>)
-<ul>
-<li>Pipeline 1 batch size.</li>
-</ul></li>
-<li><code>--skip-fbgnid-conversion</code>
-<ul>
-<li>Skip FBgn conversion in Pipeline 1.</li>
-</ul></li>
-<li><code>--quiet</code>, <code>-q</code>
-<ul>
-<li>Suppress verbose output in Pipeline 2.</li>
-</ul></li>
-<li><code>--soft-run</code>
-<ul>
-<li>Skip GPT API calls where validation would occur.</li>
-</ul></li>
-<li><code>--test-log</code>
-<ul>
-<li>Enable GPT query logging to <code>data/logs/GPT-Queries/</code>.</li>
-</ul></li>
-<li><code>--max-gpt-calls-per-stock</code> (default: <code>5</code>)
-<ul>
-<li>Cap actual GPT calls per stock during validation.</li>
-</ul></li>
-</ul>
-</section>
-<section id="validation-scope-important" class="level3">
-<h3>Validation scope (important)</h3>
-<p>Pipeline 2 does <strong>not</strong> validate every stock/reference pair. It validates only:</p>
-<ol type="1">
-<li>stocks that survive filters + limits into produced output sheets whose combination contains <code>Ref++</code></li>
-<li><code>(stock, allele, PMID)</code> tasks where PMID is keyword-hit (<code>relevantSearchTerms</code>) and full text/pattern checks pass</li>
-</ol>
-<p>Stocks in non-<code>Ref++</code> output sheets are not sent to GPT validation.</p>
-</section>
-<section id="output-1" class="level3">
-<h3>Output</h3>
-<p>Creates:</p>
+<section id="main-output-folder" class="level3">
+<h3 class="anchored" data-anchor-id="main-output-folder">Main output folder</h3>
 <ul>
 <li><code>./gene_lists/Stocks/Organized Stocks/</code></li>
 </ul>
-<p>For each input workbook, writes <code>&lt;input_name&gt;_aggregated.xlsx</code> containing:</p>
+<p>For each input workbook, output is <code>&lt;input_name&gt;_aggregated.xlsx</code>.</p>
+</section>
+<section id="what-is-inside-1" class="level3">
+<h3 class="anchored" data-anchor-id="what-is-inside-1">What is inside</h3>
 <ul>
-<li><code>Contents</code></li>
-<li><code>Sheet1</code>, <code>Sheet2</code>, …</li>
-<li><code>References</code> (filtered to PMIDs cited by stocks present in output sheets)</li>
-<li><code>Stock Sheet by Gene</code> (when applicable)</li>
+<li><code>Contents</code>: overview of generated sheets</li>
+<li><code>Sheet1</code>, <code>Sheet2</code>, …: config-driven stock groupings</li>
+<li><code>References</code>: only PMIDs cited by stocks that remain in output sheets</li>
+<li><code>Stock Sheet by Gene</code> (when applicable): gene-grouped stock/reference summary</li>
 </ul>
-<p><code>Stock Sheet by Gene</code> details:</p>
+</section>
+<section id="common-options-1" class="level3">
+<h3 class="anchored" data-anchor-id="common-options-1">Common options</h3>
 <ul>
-<li>Rows are unique <code>(stock, PMID)</code> for keyword-hit references.</li>
-<li>Gene groups are sorted by descending count of Ref++ stocks.</li>
-<li>Includes a <code>gene synonyms</code> column (from FlyBase <code>fb_synonym</code>).</li>
-<li><code>EXPERIMENTAL</code> columns are PMID-specific per row.</li>
-<li>Stock-level aggregate columns are placed at the end:
-<ul>
-<li><code>Stock (allele) &lt;keywords&gt; references (all for stock)</code></li>
-<li><code>Stock (allele) all references (all for stock)</code></li>
-<li><code>[EXPERIMENTAL] PMID of &lt;keywords&gt; references that showed stocks functional validity</code></li>
-</ul></li>
+<li><code>--config</code>, <code>-c</code>: split configuration file</li>
+<li><code>--quiet</code>, <code>-q</code>: less console output</li>
+<li><code>--soft-run</code>: estimate validation calls and stop before GPT calls</li>
+<li><code>--test-log</code>: write GPT query logs to <code>data/logs/GPT-Queries/</code></li>
+<li><code>--max-gpt-calls-per-stock</code>: cap GPT calls per stock during validation</li>
 </ul>
-<hr />
+<hr>
 </section>
 </section>
-<section id="split-config-reference-json" class="level2">
-<h2>Split Config Reference (JSON)</h2>
-<p>The split config controls filtering, sheet definitions, and keyword logic.</p>
-<p>Key sections:</p>
+<section id="how-validation-is-applied" class="level2">
+<h2 class="anchored" data-anchor-id="how-validation-is-applied">How Validation Is Applied</h2>
+<p>Validation is intentionally selective.</p>
+<p>In Step 2, a stock-reference pair is considered for GPT validation only when it passes all of the following:</p>
+<ol type="1">
+<li>the stock survives filter and limit rules into a sheet whose combination includes <code>Ref++</code></li>
+<li>the reference is keyword-relevant (from <code>settings.relevantSearchTerms</code>)</li>
+<li>full-text and pattern checks indicate the pair is eligible</li>
+</ol>
+<p>If a stock is only present in non-<code>Ref++</code> sheets, it is not sent for GPT validation.</p>
+<hr>
+</section>
+<section id="choosing-between-commands" class="level2">
+<h2 class="anchored" data-anchor-id="choosing-between-commands">Choosing Between Commands</h2>
 <ul>
-<li><code>settings.relevantSearchTerms</code>: case-insensitive title/abstract terms used for Ref++ status</li>
-<li><code>settings.maxStocksPerGene</code>: per-gene cap applied in splitting</li>
-<li><code>settings.maxStocksPerAllele</code>: per-allele cap applied in splitting</li>
-<li><code>filters</code>: named filter definitions (<code>column</code>, <code>type</code>, <code>value</code>)</li>
-<li><code>combinations</code>: ordered lists of filter names; each list becomes one output sheet</li>
-<li><code>filterDescriptions</code>: human-readable text shown in workbook summaries</li>
+<li>Use <code>run-full-pipeline</code> when you want a single end-to-end run.</li>
+<li>Use separate <code>get-allele-refs</code> then <code>split-stocks</code> when you want to inspect or reuse intermediate outputs.</li>
+</ul>
+<section id="full-pipeline-command" class="level3">
+<h3 class="anchored" data-anchor-id="full-pipeline-command">Full pipeline command</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli run-full-pipeline ./gene_lists <span class="at">--config</span> ./my_split_config.json <span class="at">--test-log</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Equivalent package entry-point usage:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2 get-allele-refs ./gene_lists <span class="at">--config</span> ./my_split_config.json</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2 split-stocks ./gene_lists/Stocks <span class="at">--config</span> ./my_split_config.json</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<hr>
+</section>
+</section>
+<section id="config-file-in-plain-terms" class="level2">
+<h2 class="anchored" data-anchor-id="config-file-in-plain-terms">Config File in Plain Terms</h2>
+<p>The JSON config controls:</p>
+<ul>
+<li>which terms define “reference relevance” (<code>settings.relevantSearchTerms</code>)</li>
+<li>max stocks per gene (<code>settings.maxStocksPerGene</code>)</li>
+<li>max stocks per allele (<code>settings.maxStocksPerAllele</code>)</li>
+<li>reusable filter blocks (<code>filters</code>)</li>
+<li>output-sheet definitions (<code>combinations</code>)</li>
+<li>human-readable sheet descriptions (<code>filterDescriptions</code>)</li>
 </ul>
 <p>Example config:</p>
 <ul>
 <li><code>data/JSON/stock_split_config_example.json</code></li>
 </ul>
-<hr />
+<hr>
 </section>
-<section id="notes-on-soft-runs-and-gpt-call-limits" class="level2">
-<h2>Notes on Soft Runs and GPT Call Limits</h2>
+<section id="example-run-through-inc-tim-vri" class="level2">
+<h2 class="anchored" data-anchor-id="example-run-through-inc-tim-vri">Example Run-Through (inc, tim, vri)</h2>
+<p>Illustrative counts for genes <code>inc</code>, <code>tim</code>, <code>vri</code> with default config (keywords: <code>["sleep", "circadian"]</code>, maxStocksPerGene: 5, maxStocksPerAllele: 3).</p>
+<section id="get-allele-refs" class="level3">
+<h3 class="anchored" data-anchor-id="get-allele-refs"><code>get-allele-refs</code></h3>
+<pre><code>┌─────────────────────────────────────────────────────────────────────────┐
+│ INPUT: gene_list.csv  (inc, tim, vri)                                   │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+              ┌──────────────────────────────────┐
+              │ 1. Gene → FBgn ID conversion     │
+              │    inc → FBgn0036816              │
+              │    tim → FBgn0014396              │
+              │    vri → FBgn0016076              │
+              └───────────────┬──────────────────┘
+                              │
+                              ▼
+              ┌──────────────────────────────────┐
+              │ 2. FBgn → BDSC Stocks            │
+              │    (via stockgenes.csv)           │
+              │    inc: 12 stocks, 8 alleles      │
+              │    tim: 35 stocks, 15 alleles     │
+              │    vri: 10 stocks, 6 alleles      │
+              │    ────────────────────────        │
+              │    57 stocks, 29 alleles total     │
+              └───────────────┬──────────────────┘
+                              │
+               ┌──────────────┴──────────────┐
+               ▼                             ▼
+┌─────────────────────────────┐  ┌──────────────────────────┐
+│ 3. Alleles → References     │  │ 4. Flag &amp; Metadata       │
+│    FlyBase entity_publication│  │    UAS: 18 stocks        │
+│    → FBrf → PMID            │  │    sgRNA: 3 stocks       │
+│    (papers only, ≤50 genes) │  │    + chromosome info     │
+│    104 unique PMIDs         │  │    + stock comments      │
+│    17 FBrfs without PMID    │  └──────────────────────────┘
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│ 5. PubMed Metadata Fetch    │
+│    104 PMIDs → Entrez API   │
+│    → title, abstract,       │
+│      authors, journal, date │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│ 6. Keyword Scoring          │
+│    "sleep" OR "circadian"   │
+│    in title/abstract?       │
+│    38 match, 66 don't       │
+│    → per-stock counts       │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ OUTPUT: aggregated_bdsc_stock_refs.xlsx                                  │
+│   Stocks sheet (57 rows) ── stock, genotype, alleles, UAS, sgRNA,       │
+│                              PMIDs, keyword counts, keyword boolean      │
+│   References sheet (104 rows) ── PMID, title, genes, keyword boolean    │
+└─────────────────────────────────────────────────────────────────────────┘</code></pre>
+</section>
+<section id="split-stocks" class="level3">
+<h3 class="anchored" data-anchor-id="split-stocks"><code>split-stocks</code></h3>
+<pre><code>┌─────────────────────────────────────────────────────────────────────────┐
+│ INPUT: aggregated_bdsc_stock_refs.xlsx (57 stocks, 104 refs)            │
+│      + stock_split_config_example.json (18 filters, 15 combinations)    │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+              ┌──────────────────────────────────────────┐
+              │ 1. Compute Derived Columns               │
+              │    Balancers:      14 have / 43 none      │
+              │    multi-insert:    9 yes  / 48 no        │
+              │    Relevance score:                       │
+              │      Ref++ (score 2): 30    ── keyword hit│
+              │      Ref+  (score 1): 19    ── refs only  │
+              │      Ref−  (score 0):  8    ── no refs    │
+              └───────────────────┬──────────────────────┘
+                                  │
+                                  ▼
+              ┌──────────────────────────────────────────┐
+              │ 2. Sort by Priority                      │
+              │    score → keyword hits → total refs     │
+              └───────────────────┬──────────────────────┘
+                                  │
+                                  ▼
+              ┌──────────────────────────────────────────┐
+              │ 3. Apply 15 Filter Combinations          │
+              │                                          │
+              │  Example (combo 1):                      │
+              │    Bloomington ∩ UAS ∩ No sgRNA ∩        │
+              │    No Balancers ∩ single insert ∩ Ref++  │
+              │    57→18→15→11→9→6 match                 │
+              │    after limits (5/gene, 3/allele): 5    │
+              │    → Sheet1                              │
+              │                                          │
+              │  Each combo: AND filters → limit → sheet │
+              │  Stocks used in earlier sheets excluded  │
+              │  Empty combos produce no sheet           │
+              └───────────────────┬──────────────────────┘
+                                  │
+                                  ▼
+              ┌──────────────────────────────────────────┐
+              │ 4. GPT Validation (Ref++ sheets only)    │
+              │    13 Ref++ stocks, 28 (stock, PMID)     │
+              │    tasks — fetch full text, check for    │
+              │    allele mention, send to GPT           │
+              │    → functional validity, phenotypes     │
+              │    (capped at 5 calls/stock)             │
+              └───────────────────┬──────────────────────┘
+                                  │
+                                  ▼
+              ┌──────────────────────────────────────────┐
+              │ 5. Filter References                     │
+              │    Keep PMIDs cited by surviving stocks   │
+              │    104 → 78 rows                         │
+              └───────────────────┬──────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ OUTPUT: aggregated_bdsc_stock_refs_aggregated.xlsx                       │
+│   Contents ──────── summary table, filter definitions, gene lists       │
+│   Sheet1–Sheet15 ── filtered stock groups (35 unique stocks)            │
+│   References ────── 78 rows, keyword column color-coded                 │
+│   Stock Sheet by Gene ── Ref++ stocks grouped by gene, one row per      │
+│                          (stock, keyword-hit PMID) pair                  │
+└─────────────────────────────────────────────────────────────────────────┘</code></pre>
+<hr>
+</section>
+</section>
+<section id="notes-for-reliability-and-reproducibility" class="level2">
+<h2 class="anchored" data-anchor-id="notes-for-reliability-and-reproducibility">Notes for Reliability and Reproducibility</h2>
 <ul>
-<li><code>get-allele-refs --soft-run</code> is effective only with <code>--run-validation</code>.</li>
-<li><code>get-allele-refs --test-log</code> is effective only when validation runs.</li>
-<li><code>split-stocks --soft-run</code> prints projected validation counts and exits before GPT calls.</li>
-<li><code>split-stocks --test-log</code> writes GPT query logs to <code>data/logs/GPT-Queries/&lt;timestamp&gt;/</code>.</li>
-<li><code>--max-gpt-calls-per-stock</code> counts only actual GPT invocations.</li>
-<li>References without accessible full text, or missing stock/allele/gene patterns in text, are marked ambiguous and do not consume GPT-call budget.</li>
-<li>Validation short-circuits per stock once a “Functionally validated” result is found.</li>
+<li>Full-text retrieval uses multiple sources and retries transient failures.</li>
+<li>Metadata and method caches are used to reduce repeated lookup work.</li>
+<li>Duplicate reference rows with the same PMID are merged with preference for richer identifiers (PMCID/DOI).</li>
+<li>Validation can short-circuit per stock once functional evidence is found.</li>
 </ul>
-<hr />
+<hr>
 </section>
-<section id="full-text-retrieval-notes" class="level2">
-<h2>Full-Text Retrieval Notes</h2>
-<p>Functional validation uses a multi-source full-text cascade with identifier enrichment:</p>
-<ol type="1">
-<li>Resolve missing IDs (PMCID/DOI) from PMID using NCBI ID Converter, with Europe PMC as fallback.</li>
-<li>Try PMCID-based sources:
+<section id="useful-flags-reference" class="level2">
+<h2 class="anchored" data-anchor-id="useful-flags-reference">Useful Flags (Reference)</h2>
+<section id="get-allele-refs-1" class="level3">
+<h3 class="anchored" data-anchor-id="get-allele-refs-1"><code>get-allele-refs</code></h3>
 <ul>
-<li>PMC OA PDF</li>
-<li>PMC OA XML</li>
-<li>Europe PMC fullTextXML</li>
-<li>PMC article HTML</li>
-</ul></li>
-<li>Try DOI-based sources:
-<ul>
-<li>Unpaywall (PDF/HTML)</li>
-<li>OpenAlex OA URL</li>
-<li>Crossref links</li>
-<li>DOI landing page</li>
-</ul></li>
-</ol>
-<p>Additional behavior:</p>
-<ul>
-<li>A persistent PMID -&gt; retrieval-method cache is used to retry known-good methods first.</li>
-<li>PubMed metadata cache stores/reuses <code>title</code>, <code>abstract</code>, <code>journal</code>, <code>authors</code>, <code>year</code>, <code>doi</code>, and <code>pmcid</code>.</li>
-<li>HTTP calls use transient-failure retries (<code>429/5xx</code>) with exponential backoff.</li>
-<li>Duplicate <code>References</code> rows with the same PMID are merged to prefer rows that include <code>PMCID</code>/<code>DOI</code>.</li>
-<li>Full-text misses are reported with reason codes (for example: <code>missing_pmcid_and_doi</code>, <code>all_sources_failed</code>) in validation logs.</li>
+<li><code>input_dir</code> (required): folder containing your CSV files</li>
+<li><code>--gene-col</code> (default: <code>flybase_gene_id</code>)</li>
+<li><code>--input-gene-col</code> (default: <code>ext_gene</code>)</li>
+<li><code>--batch-size</code>, <code>-b</code> (default: <code>50</code>)</li>
+<li><code>--config</code>, <code>-c</code></li>
+<li><code>--skip-fbgnid-conversion</code></li>
+<li><code>--run-validation</code></li>
+<li><code>--soft-run</code></li>
+<li><code>--test-log</code></li>
+<li><code>--max-gpt-calls-per-stock</code> (default: <code>5</code>)</li>
 </ul>
-<hr />
 </section>
-<section id="end-to-end-example" class="level2">
-<h2>End-to-End Example</h2>
-<div class="sourceCode" id="cb8"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2.cli run-full-pipeline ./gene_lists <span class="at">--config</span> ./my_split_config.json <span class="at">--test-log</span></span></code></pre></div>
-<p>You can also use the package entry point:</p>
-<div class="sourceCode" id="cb9"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2 get-allele-refs ./gene_lists <span class="at">--config</span> ./my_split_config.json</span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> fly_stocker_v2 split-stocks ./gene_lists/Stocks <span class="at">--config</span> ./my_split_config.json</span></code></pre></div>
+<section id="split-stocks-1" class="level3">
+<h3 class="anchored" data-anchor-id="split-stocks-1"><code>split-stocks</code></h3>
+<ul>
+<li><code>input_dir</code> (required): folder with Step 1 Excel files (example: <code>./gene_lists/Stocks</code>)</li>
+<li><code>--config</code>, <code>-c</code></li>
+<li><code>--quiet</code>, <code>-q</code></li>
+<li><code>--soft-run</code></li>
+<li><code>--test-log</code></li>
+<li><code>--max-gpt-calls-per-stock</code> (default: <code>5</code>)</li>
+</ul>
+</section>
+<section id="run-full-pipeline" class="level3">
+<h3 class="anchored" data-anchor-id="run-full-pipeline"><code>run-full-pipeline</code></h3>
+<ul>
+<li><code>input_dir</code> (required): folder containing gene-list CSV files</li>
+<li>shared options include <code>--config</code>, <code>--soft-run</code>, <code>--test-log</code>, <code>--max-gpt-calls-per-stock</code></li>
+<li>pipeline-specific options include <code>--gene-col</code>, <code>--input-gene-col</code>, <code>--batch-size</code>, <code>--skip-fbgnid-conversion</code>, <code>--quiet</code></li>
+</ul>
+<hr>
+</section>
+</section>
+<section id="quick-troubleshooting" class="level2">
+<h2 class="anchored" data-anchor-id="quick-troubleshooting">Quick Troubleshooting</h2>
+<ul>
+<li>If validation does not run, check whether your output sheet is <code>Ref++</code> and whether <code>OPENAI_API_KEY</code> is set.</li>
+<li>If PMID coverage looks low, verify keyword terms in <code>settings.relevantSearchTerms</code>.</li>
+<li>If full-text retrieval is sparse, add <code>UNPAYWALL_TOKEN</code> and retry.</li>
+<li>If API usage is a concern, start with <code>--soft-run</code>.</li>
+</ul>
 </section>
 </section>
 
 </main>
 <!-- /main column -->
-<script id = "quarto-html-after-body" type="application/javascript">
+<script id="quarto-html-after-body" type="application/javascript">
   window.document.addEventListener("DOMContentLoaded", function (event) {
     const icon = "";
     const anchorJS = new window.AnchorJS();
@@ -834,6 +860,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   </script>
 </div> <!-- /content -->
 
-</body>
 
-</html>
+
+
+</body></html>

@@ -152,8 +152,12 @@ def _find_project_root() -> Path:
     for parent in current.parents:
         if parent.name == "FlyStocker":
             return parent
-    # Fallback to parent of Core
-    return Path(__file__).parent.parent.parent
+    # If this file lives at the repository root (current layout), use it.
+    package_dir = Path(__file__).parent.resolve()
+    if (package_dir / "cli.py").exists() and (package_dir / "pipeline_references.py").exists():
+        return package_dir
+    # Legacy fallback for older nested layouts.
+    return package_dir.parent.parent
 
 
 def _get_package_dir() -> Path:
@@ -221,7 +225,7 @@ PUBMED_CACHE_PATH = Path("/Volumes/umms-rallada/UM Lab Users/Aadish/Data/PubMed 
 FULLTEXT_METHOD_CACHE_PATH = Path("/Volumes/umms-rallada/UM Lab Users/Aadish/Data/PubMed Cache/pmid_to_fulltext_method.csv")
 
 # Helper scripts
-HELPER_SCRIPTS = PROJECT_ROOT / "HelperScripts"
+HELPER_SCRIPTS = PACKAGE_DIR / "HelperScripts"
 GET_FBGN_IDS_SCRIPT = HELPER_SCRIPTS / "GetFBgnIDs.py"
 
 # Logs directory (repo-local)

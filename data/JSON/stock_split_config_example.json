@@ -18,8 +18,8 @@
   
   "settings": {
     "relevantSearchTerms": ["sleep", "circadian"],
-    "maxStocksPerGene": 99999999999,
-    "maxStocksPerAllele": 99999999999
+    "maxStocksPerGene": 3,
+    "maxStocksPerAllele": 1
   },
   
   "filterDescriptions": {
