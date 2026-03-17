@@ -162,15 +162,19 @@
     ["Bloomington", "UAS", "No sgRNA", "No Balancers", "no_other_insertion", "Ref++"],
     ["Bloomington", "UAS", "No sgRNA", "No Balancers", "no_other_insertion", "Ref+"],
     ["Bloomington", "UAS", "No sgRNA", "No Balancers", "no_other_insertion", "Ref-"],
+
     ["Bloomington", "UAS", "No sgRNA", "Has Balancers", "no_other_insertion", "Ref++"],
     ["Bloomington", "UAS", "No sgRNA", "Has Balancers", "no_other_insertion", "Ref+"],
     ["Bloomington", "UAS", "No sgRNA", "Has Balancers", "no_other_insertion", "Ref-"],
+
     ["Bloomington", "UAS", "No sgRNA", "No Balancers", "other_insertion", "Ref++"],
     ["Bloomington", "UAS", "No sgRNA", "No Balancers", "other_insertion", "Ref+"],
     ["Bloomington", "UAS", "No sgRNA", "No Balancers", "other_insertion", "Ref-"],
+
     ["Bloomington", "UAS", "No sgRNA", "Has Balancers", "other_insertion", "Ref++"],
     ["Bloomington", "UAS", "No sgRNA", "Has Balancers", "other_insertion", "Ref+"],
     ["Bloomington", "UAS", "No sgRNA", "Has Balancers", "other_insertion", "Ref-"],
+    
     ["Bloomington", "AlleleOrInsertion", "No Balancers", "no_other_insertion", "Ref++"],
     ["Bloomington", "AlleleOrInsertion", "No Balancers", "no_other_insertion", "Ref+"],
     ["Bloomington", "AlleleOrInsertion", "No Balancers", "no_other_insertion", "Ref-"]
