@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fl.AI Reagent Stocker — Pipeline Data Flowchart</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #08090d;
+  --surface: #12141c;
+  --surface-2: #191c28;
+  --border: #252a3a;
+  --text: #dfe3f0;
+  --text-dim: #6b7394;
+  --stage1: #e85d26;
+  --stage2: #2ba8e0;
+  --stage3: #8b5cf6;
+  --data-flybase: #0ea879;
+  --data-derived: #48d6a0;
+  --data-output: #22c55e;
+  --ext-api: #f43f8a;
+  --cache: #eab308;
+  --pre: #d97706;
+  --id-tag: rgba(255,255,255,0.08);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+}
+
+.header {
+  padding: 40px 40px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.header h1 {
+  font-family: 'Playfair Display', serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.header .subtitle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 6px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.legend-bar {
+  display: flex;
+  gap: 20px;
+  padding: 14px 40px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.legend-dot {
+  width: 9px; height: 9px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.canvas-wrap {
+  padding: 20px 10px 60px;
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+}
+
+svg text {
+  font-family: 'Outfit', sans-serif;
+}
+
+.node-group { cursor: pointer; }
+.node-group:hover .node-box { filter: brightness(1.3); }
+
+.node-box {
+  rx: 5; ry: 5;
+  transition: filter 0.15s;
+}
+.node-accent {
+  rx: 2; ry: 2;
+}
+.node-title {
+  font-weight: 600;
+  font-size: 12.5px;
+  fill: var(--text);
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+.node-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  fill: var(--text-dim);
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+.node-ids {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8.5px;
+  fill: #9ba3c0;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+.id-pill {
+  rx: 3; ry: 3;
+  fill: var(--id-tag);
+  pointer-events: none;
+}
+
+.edge {
+  fill: none;
+  stroke-width: 1.6;
+  opacity: 0.45;
+}
+
+.stage-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.stage-line {
+  stroke-width: 3;
+}
+.section-divider {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 6 4;
+}
+
+.tooltip {
+  position: fixed;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 18px;
+  max-width: 380px;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.12s, transform 0.12s;
+  z-index: 100;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+}
+.tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.tooltip .tt-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+}
+.tooltip .tt-file {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  margin-bottom: 8px;
+}
+.tooltip .tt-body {
+  color: #a0a8c4;
+  font-size: 0.8rem;
+}
+.tooltip .tt-ids {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--data-derived);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>fl.AI Reagent Stocker</h1>
+  <div class="subtitle">Data Provenance &amp; Pipeline Flowchart</div>
+</div>
+
+<div class="legend-bar">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--pre)"></div>Pre-processing</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--stage1)"></div>Stage 1: find-stocks</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--stage2)"></div>Stage 2: split-stocks</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--stage3)"></div>Stage 3: validate-stocks</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--data-flybase)"></div>FlyBase data source</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--data-derived)"></div>Derived / generated file</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--data-output)"></div>Pipeline output</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--ext-api)"></div>External API</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--cache)"></div>Cache</div>
+</div>
+
+<div class="canvas-wrap">
+  <svg id="fc" width="1240" height="2700"></svg>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const svg = document.getElementById('fc');
+const tooltip = document.getElementById('tooltip');
+
+const C = {
+  pre:     '#d97706',
+  s1:      '#e85d26',
+  s2:      '#2ba8e0',
+  s3:      '#8b5cf6',
+  fb:      '#0ea879',
+  derived: '#48d6a0',
+  output:  '#22c55e',
+  ext:     '#f43f8a',
+  cache:   '#eab308',
+};
+
+// ─── Node definitions ───────────────────────────────────────────
+// Each node: { id, x, y, w, h, label, sub, ids, color, tipColor, tip }
+//   ids: string shown as ID tags on the node
+//   tip: detailed tooltip HTML
+
+const CX = 420;  // center x for main column
+const LX = 50;   // left column
+const RX = 760;  // right column
+
+const nodes = [
+
+  // ═══════════════════════════════════════════════════════════════
+  // PRE-PROCESSING SECTION
+  // ═══════════════════════════════════════════════════════════════
+
+  // FlyBase S3 source
+  { id:'s3', x:CX, y:40, w:280, h:50, label:'FlyBase S3 FTP', sub:'s3ftp.flybase.org/releases/current/', color:C.fb,
+    tipColor:C.fb,
+    tip:'Official FlyBase current-release precomputed reports hosted on AWS S3. The refresh_flybase_data.py script discovers and downloads the latest TSV/TSV.GZ files from md5sum.txt index.',
+    ids:'TSV reports' },
+
+  { id:'refresh', x:CX, y:130, w:280, h:50, label:'refresh_flybase_data.py', sub:'Downloads 8 report families', color:C.pre,
+    tipColor:C.pre,
+    tip:'Downloads the latest versions of 8 FlyBase report families: stocks, fbal_to_fbgn, dmel_classical_and_insertion_allele_descriptions, genotype_phenotype_data, transgenic_construct_descriptions, entity_publication, fbrf_pmid_pmcid_doi, fb_synonym. Prunes old versions after successful download.',
+    ids:'' },
+
+  // Downloaded FlyBase TSV files (left column, fanned out)
+  { id:'tsv_stocks', x:LX, y:250, w:200, h:44, label:'stocks_FB*.tsv', sub:'Stock metadata (FBst)', color:C.fb,
+    tipColor:C.fb,
+    tip:'FlyBase stock report. Columns: FBst, stock_number, collection (e.g. Bloomington, VDRC), FB_genotype. One row per stock center stock.',
+    ids:'FBst → stock_number, collection, genotype' },
+
+  { id:'tsv_fbal', x:LX, y:310, w:200, h:44, label:'fbal_to_fbgn*.tsv', sub:'Allele → Gene mapping', color:C.fb,
+    tipColor:C.fb,
+    tip:'FlyBase allele-to-gene map. Columns: AlleleID (FBal), AlleleSymbol, GeneID (FBgn), GeneSymbol. One row per allele–gene association.',
+    ids:'FBal → FBgn' },
+
+  { id:'tsv_allele_desc', x:LX, y:370, w:200, h:44, label:'dmel_classical_and_…*.tsv', sub:'Allele → Insertion (FBti)', color:C.fb,
+    tipColor:C.fb,
+    tip:'Classical and insertion allele descriptions. Links alleles (FBal) to their transgenic insertions (FBti) with allele class terms and supporting FBrf references.',
+    ids:'FBal → FBti, AlleleClass' },
+
+  { id:'tsv_constructs', x:LX, y:430, w:200, h:44, label:'transgenic_construct_…*.tsv', sub:'Allele → Construct (FBtp)', color:C.fb,
+    tipColor:C.fb,
+    tip:'Transgenic construct descriptions. Links alleles (FBal) to constructs (FBtp) with product class terms (e.g. rnai_reagent) and supporting FBrf references.',
+    ids:'FBal → FBtp, ProductClass' },
+
+  { id:'tsv_entity_pub', x:LX, y:490, w:200, h:44, label:'entity_publication*.tsv', sub:'Entity ↔ Reference bridge', color:C.fb,
+    tipColor:C.fb,
+    tip:'Maps FlyBase entity IDs (FBal, FBtp, FBti, FBgn, etc.) to FBrf publication IDs. The bridge table that connects stock components to their associated literature.',
+    ids:'FBal/FBtp/FBti → FBrf' },
+
+  { id:'tsv_fbrf', x:LX, y:550, w:200, h:44, label:'fbrf_pmid_pmcid_doi*.tsv', sub:'FBrf → PMID / DOI resolver', color:C.fb,
+    tipColor:C.fb,
+    tip:'Maps FlyBase reference IDs (FBrf) to PubMed IDs (PMID), PubMed Central IDs (PMCID), and DOIs. Used to resolve FBrf references from entity_publication into citable PMIDs.',
+    ids:'FBrf → PMID, PMCID, DOI' },
+
+  { id:'tsv_phenotype', x:LX, y:610, w:200, h:44, label:'genotype_phenotype_data*.tsv', sub:'Genotype–phenotype associations', color:C.fb,
+    tipColor:C.fb,
+    tip:'Genotype-phenotype associations from FlyBase. Used to find alleles with known phenotypes that may not appear in stock center stocks, generating "custom stock" phenotype rows.',
+    ids:'FBal → phenotype terms' },
+
+  { id:'tsv_synonym', x:LX, y:670, w:200, h:44, label:'fb_synonym*.tsv', sub:'Gene synonym table (Dmel)', color:C.fb,
+    tipColor:C.fb,
+    tip:'FlyBase synonym table filtered to D. melanogaster. Maps current_symbol, current_fullname, symbol_synonym(s), fullname_synonym(s) to primary_FBid (FBgn). Used for fuzzy gene symbol → FBgn ID resolution.',
+    ids:'gene symbol → FBgn' },
+
+  // Chado XML files (right column)
+  { id:'chado_fbst', x:RX, y:250, w:220, h:50, label:'chado_FBst.xml.gz', sub:'FlyBase Chado DB dump (stocks)', color:C.fb,
+    tipColor:C.fb,
+    tip:'FlyBase Chado database XML dump for stocks (FBst). Each <stock> element contains a genotype block with embedded @FB...@ tokens that identify the alleles (FBal), constructs (FBtp), and insertions (FBti) composing each stock. This XML is the only source of the FBst → component decomposition.',
+    ids:'FBst → @FBal/FBtp/FBti@ tokens' },
+
+  { id:'chado_fbti', x:RX, y:370, w:220, h:50, label:'chado_FBti.xml.gz', sub:'FlyBase Chado DB dump (insertions)', color:C.fb,
+    tipColor:C.fb,
+    tip:'FlyBase Chado database XML dump for transgenic insertions (FBti). Each FBti feature contains feature_relationship/object_id references to parent constructs (FBtp). Streamed line-by-line to extract FBtp → FBti pairs.',
+    ids:'FBti → FBtp (via feature_relationship)' },
+
+  // Build scripts
+  { id:'build_fbst', x:RX, y:490, w:240, h:56, label:'build_fbst_derived_stock_components.py', sub:'Parses Chado XML + enriches from TSVs', color:C.pre,
+    tipColor:C.pre,
+    tip:'Streams chado_FBst.xml.gz, extracts @FB...@ genotype tokens (FBal, FBtp, FBti per stock). Enriches with metadata from stocks_FB*.tsv (stock_number, collection, genotype), fbal_to_fbgn*.tsv (AlleleSymbol, FBgnID, GeneSymbol), and entity_publication*.tsv (non-FBal object symbols). Deduplicates and writes the output CSV.',
+    ids:'Input: FBst XML + 3 TSVs → Output: CSV' },
+
+  { id:'build_fbtp', x:RX, y:600, w:240, h:50, label:'build_fbtp_to_fbti_mapping.py', sub:'Parses Chado FBti XML', color:C.pre,
+    tipColor:C.pre,
+    tip:'Streams chado_FBti.xml.gz line-by-line, extracts <uniquename>FBtp...</uniquename> references from feature_relationship/object_id blocks for each FBti feature. Collects unique (FBtp, FBti) pairs and writes a simple two-column CSV.',
+    ids:'Input: FBti XML → Output: FBtp,FBti CSV' },
+
+  // Derived CSV outputs
+  { id:'csv_fbst', x:RX, y:710, w:240, h:56, label:'fbst_to_derived_stock_component.csv', sub:'FBst → all component IDs + metadata', color:C.derived,
+    tipColor:C.derived,
+    tip:'The core mapping table. Columns: FBst, stock_number, collection, FB_genotype, derived_stock_component, embedded_type, object_symbol, AlleleSymbol, FBgnID, GeneSymbol. One row per (FBst, component) pair. This is the primary join key for Stage 1 stock mapping.',
+    ids:'FBst, FBal, FBtp, FBti, FBgn' },
+
+  { id:'csv_fbtp_fbti', x:RX, y:810, w:240, h:44, label:'fbtp_to_fbti.csv', sub:'Construct → Insertion expansion', color:C.derived,
+    tipColor:C.derived,
+    tip:'Two-column CSV: FBtp, FBti. Maps transgenic constructs to their physical insertions. Used in Stage 1 to expand FBtp references found in derived_stock_components into their constituent FBti IDs.',
+    ids:'FBtp → FBti' },
+
+  // ═══════════════════════════════════════════════════════════════
+  // STAGE 1: FIND-STOCKS
+  // ═══════════════════════════════════════════════════════════════
+
+  // Input
+  { id:'csv_genes', x:CX, y:940, w:280, h:48, label:'CSV Gene Lists', sub:'gene_lists/*.csv (user input)', color:C.derived,
+    tipColor:C.derived,
+    tip:'User-provided CSV files with Drosophila gene symbols in the ext_gene column. Multiple files are aggregated. These are the starting point of the pipeline — everything flows from this gene list.',
+    ids:'ext_gene (gene symbol)' },
+
+  // FBgn conversion
+  { id:'fbgn_conv', x:CX, y:1040, w:280, h:56, label:'FBgn ID Conversion', sub:'fetch_fbgn_ids.py → fb_synonym*.tsv', color:C.s1,
+    tipColor:C.s1,
+    tip:'Loads fb_synonym*.tsv (filtered to Dmel), builds lookup maps from current_symbol, current_fullname, fullname_synonym(s), symbol_synonym(s) → primary_FBid (FBgn). Applies cascading fuzzy matching (lowercase, remove hyphens/zeros, capitalize, Greek symbol substitution) to resolve unmapped genes. Writes flybase_gene_id column back to each CSV.',
+    ids:'ext_gene → FBgn (via synonym table)' },
+
+  // Stock mapping
+  { id:'stock_map', x:CX, y:1160, w:280, h:64, label:'Build Stock Mapping', sub:'FBgn → FBal → FBtp/FBti → FBst', color:C.s1,
+    tipColor:C.s1,
+    tip:'For each input FBgn: (1) Look up alleles via fbal_to_fbgn (FBgn → FBal). (2) Look up constructs via transgenic_construct_descriptions (FBal → FBtp). (3) Look up insertions via allele_descriptions (FBal → FBti) and expand FBtp → FBti via fbtp_to_fbti.csv. (4) Match all FBal/FBtp/FBti against fbst_to_derived_stock_component.csv to find which FBst stocks contain them. Enriches with stock metadata (collection, genotype, stock_number).',
+    ids:'FBgn → FBal → FBtp → FBti → FBst' },
+
+  // Phenotype rows
+  { id:'phenotype', x:CX, y:1270, w:280, h:48, label:'Custom Phenotype Rows', sub:'Alleles with phenotypes but no stocks', color:C.s1,
+    tipColor:C.s1,
+    tip:'For input genes, checks genotype_phenotype_data for alleles (FBal) that have known phenotype annotations but were NOT matched to any stock center FBst. Creates synthetic "custom_stock" rows so these alleles still appear in output with their references. Expands FBal → FBtp/FBti for these alleles too.',
+    ids:'FBal (with phenotype) → custom row' },
+
+  // Reference resolution
+  { id:'ref_resolve', x:CX, y:1380, w:280, h:64, label:'Reference Resolution', sub:'Component IDs → FBrf → PMID', color:C.s1,
+    tipColor:C.s1,
+    tip:'For each stock\'s components (FBal, FBtp, FBti): (1) Look up associated FBrf IDs from entity_publication*.tsv. (2) Resolve FBrf → PMID via fbrf_pmid_pmcid_doi*.tsv. (3) Filter out non-research pub types (e.g. personal_communication, FlyBase_analysis). (4) Track references separately per component type (FBal PMID, FBtp PMID, FBti PMID). (5) Report FBrf IDs without PMIDs to a sidecar file.',
+    ids:'FBal/FBtp/FBti → FBrf → PMID' },
+
+  // PubMed
+  { id:'pubmed', x:RX, y:1340, w:220, h:48, label:'PubMed / Entrez API', sub:'NCBI E-utilities (Biopython)', color:C.ext,
+    tipColor:C.ext,
+    tip:'Fetches title, abstract, journal, authors, publication date, DOI for each PMID via NCBI Entrez efetch. Batches requests (default 50 PMIDs per call). Uses NCBI_API_KEY for higher rate limits (10 req/s vs 3 req/s).',
+    ids:'PMID → title, abstract, journal, year' },
+
+  { id:'pubmed_cache', x:RX, y:1440, w:220, h:40, label:'PubMed Cache', sub:'data/cache/pmid_to_title_abstract.csv', color:C.cache,
+    tipColor:C.cache,
+    tip:'Persistent CSV cache storing PMID metadata (pmid, pmcid, title, abstract, year, journal, authors, doi). Checked before making Entrez API calls. New entries appended after each fetch batch.',
+    ids:'PMID → cached metadata' },
+
+  // Keyword scoring
+  { id:'keyword', x:CX, y:1500, w:280, h:56, label:'Keyword Relevance Scoring', sub:'Title + abstract scanned for config keywords', color:C.s1,
+    tipColor:C.s1,
+    tip:'For each stock, scans the titles and abstracts of all associated PMIDs for the configured relevantSearchTerms (e.g. "sleep", "circadian"). Produces: (1) keyword_ref_count: number of keyword-matching references. (2) keyword_ref_pmids: semicolon-joined PMIDs with keyword hits. (3) Boolean flag: does any component have at least 1 keyword reference?',
+    ids:'PMID titles/abstracts × keywords → Ref+' },
+
+  // JSON config (feeds keyword + Stage 2)
+  { id:'config', x:RX, y:1530, w:220, h:48, label:'JSON Config', sub:'data/config/*.json', color:C.derived,
+    tipColor:C.derived,
+    tip:'User configuration file defining: settings.relevantSearchTerms (keyword list), filters (named column predicates with type/column/value), combinations (ordered lists of filter names for each output sheet), filterDescriptions (human-readable sheet descriptions), maxStocksPerGene, maxStocksPerAllele.',
+    ids:'keywords, filters, combinations, limits' },
+
+  // Boolean flags
+  { id:'flags', x:CX, y:1610, w:280, h:48, label:'Boolean Flags from Genotype', sub:'Parsed from genotype + collection + product class', color:C.s1,
+    tipColor:C.s1,
+    tip:'Derives boolean columns by scanning stock genotype text and metadata: UAS (genotype contains "uas"), sgRNA (contains "sgrna"), RNAi (contains "uas" OR "rnai" OR VDRC knockdown construct patterns P{GD}, P{KK}, P{VSH} OR transgenic_product_class_terms contains "rnai_reagent"). These flags are used as filter predicates in Stage 2.',
+    ids:'genotype text → UAS, sgRNA, RNAi booleans' },
+
+  // Stage 1 output
+  { id:'s1_out', x:CX, y:1720, w:280, h:56, label:'Stage 1 Workbook', sub:'Stocks/aggregated_stock_refs.xlsx', color:C.output,
+    tipColor:C.output,
+    tip:'Excel workbook with 2 sheets: "Stocks" (one row per gene–stock mapping with ~35 columns: FBst, stock_number, collection, genotype, num_Balancers, component IDs/symbols, PMIDs per component type, keyword flags, boolean flags) and "References" (deduplicated reference table: PMID, title, associated_stocks, stock_count, publication_date, authors, journal, keyword match flag). Also writes references_without_pmid_fbrf.txt sidecar.',
+    ids:'FBst + FBal/FBtp/FBti + PMID + flags' },
+
+
+  // ═══════════════════════════════════════════════════════════════
+  // STAGE 2: SPLIT-STOCKS
+  // ═══════════════════════════════════════════════════════════════
+
+  { id:'derived_cols', x:CX, y:1880, w:280, h:64, label:'Compute Derived Columns', sub:'Parsed from genotype and keyword data', color:C.s2,
+    tipColor:C.s2,
+    tip:'Adds 3 computed columns: (1) num_Balancers / Balancers: counts balancer chromosomes in genotype text (CyO, TM3, TM6B, FM7, etc.). (2) multiple_insertions: True if stock has >1 FBti insertion ID. (3) ALLELE_PAPER_RELEVANCE_SCORE: 2 (Ref++) if keyword_ref_count ≥ 1 AND title/abstract column has keyword hit; 1 (Ref+) if either condition; 0 (Ref-) otherwise.',
+    ids:'→ Balancers, multiple_insertions, SCORE' },
+
+  { id:'filter', x:CX, y:1990, w:280, h:64, label:'Apply JSON Filter Combinations', sub:'Each combination = AND of named filters → 1 sheet', color:C.s2,
+    tipColor:C.s2,
+    tip:'Reads "combinations" array from config. Each combination is an ordered list of filter names (e.g. ["has_keyword_ref", "not_rnai", "single_insertion"]). For each, ANDs together the named filter predicates from the "filters" object. Filter types: contains (str.contains), doesnt_contain, equals (==), doesnt_equal (!=), insertion_site (contains site AND single insertion). Each combination produces one output sheet in the workbook.',
+    ids:'filters × combinations → sheet partitions' },
+
+  { id:'limits', x:CX, y:2100, w:280, h:48, label:'Stock Limits (Deduplication)', sub:'Global per-gene + per-allele caps', color:C.s2,
+    tipColor:C.s2,
+    tip:'Enforces maxStocksPerGene and maxStocksPerAllele limits from JSON config across ALL output sheets. Maintains running counters and a global seen_stocks set. Earlier combinations (higher priority) claim stocks first. Each FBst appears at most once across all sheets.',
+    ids:'FBst deduped, FBgn/FBal counters' },
+
+  { id:'s2_out', x:CX, y:2200, w:280, h:56, label:'Organized Workbook', sub:'Organized Stocks/<name>_aggregated.xlsx', color:C.output,
+    tipColor:C.output,
+    tip:'Multi-sheet Excel workbook: "Contents" (index sheet listing each output sheet name, filter descriptions from filterDescriptions config, stock/gene/allele counts), N output sheets (one per filter combination, each with the filtered+limited stock rows), "No Matched Stocks" (input genes that had 0 stocks in any sheet), "References" (reference table filtered to stocks that appear in output sheets).',
+    ids:'Contents + N sheets + No-Match + Refs' },
+
+
+  // ═══════════════════════════════════════════════════════════════
+  // STAGE 3: VALIDATE-STOCKS
+  // ═══════════════════════════════════════════════════════════════
+
+  { id:'refpp', x:CX, y:2360, w:280, h:48, label:'Identify Ref++ Stocks', sub:'ALLELE_PAPER_RELEVANCE_SCORE = 2', color:C.s3,
+    tipColor:C.s3,
+    tip:'Scans the organized output sheets and selects stocks where ALLELE_PAPER_RELEVANCE_SCORE = 2 (Ref++). These are stocks with at least one keyword-matching reference AND keyword hits in title/abstract. Only Ref++ stocks proceed to GPT validation — this keeps API costs proportional to signal strength.',
+    ids:'FBst where SCORE=2 → validation queue' },
+
+  { id:'fulltext', x:RX, y:2340, w:220, h:48, label:'Full-Text Retrieval', sub:'Unpaywall → PMC → Entrez', color:C.ext,
+    tipColor:C.ext,
+    tip:'For each Ref++ PMID, attempts full paper retrieval via cascade: (1) Unpaywall API (DOI → open-access PDF/XML URL), (2) PubMed Central (PMCID → full XML), (3) Entrez efetch (PMID → abstract-only fallback). PDF text extracted via PyPDF2. Method cached so repeated PMIDs skip the cascade.',
+    ids:'PMID → full text / abstract fallback' },
+
+  { id:'ft_cache', x:RX, y:2430, w:220, h:40, label:'Full-Text Method Cache', sub:'data/cache/pmid_to_fulltext_method.csv', color:C.cache,
+    tipColor:C.cache,
+    tip:'Persistent CSV storing PMID → successful retrieval method (unpaywall, pmc, entrez, failed). On subsequent runs, the known-good method is tried first, avoiding redundant API calls.',
+    ids:'PMID → method (unpaywall|pmc|entrez)' },
+
+  { id:'gpt', x:RX, y:2520, w:220, h:48, label:'GPT Functional Validation', sub:'OpenAI API (structured output)', color:C.ext,
+    tipColor:C.ext,
+    tip:'Sends a structured prompt to OpenAI with the allele symbol, gene symbol, and paper text. Asks: "Does this paper provide experimental evidence of a phenotype for this allele?" Returns one of: Functionally validated, Tested but no phenotype, Ambiguous functional validity. Capped at max_gpt_calls_per_stock (default 5) per FBst. Uses Pydantic structured output for reliable parsing.',
+    ids:'allele + paper text → validation verdict' },
+
+  { id:'merge', x:CX, y:2520, w:280, h:56, label:'Merge Validation Results', sub:'Per-PMID verdicts → stock-level status', color:C.s3,
+    tipColor:C.s3,
+    tip:'Aggregates individual PMID validation verdicts into stock-level columns: (1) VALIDATION_STATUS: the highest-priority verdict across all Ref++ PMIDs for that stock (Functionally validated > Tested no phenotype > Ambiguous > No refs). (2) VALIDATED_PMID: the PMID that yielded the best verdict. (3) Detailed semicolon-separated string of all PMID=verdict pairs. Merges these columns back into the organized workbook sheets.',
+    ids:'→ VALIDATION_STATUS, VALIDATED_PMID' },
+
+  { id:'s3_out', x:CX, y:2640, w:280, h:56, label:'Validated Workbook', sub:'Organized Stocks/<name>_aggregated.xlsx', color:C.output,
+    tipColor:C.output,
+    tip:'Final output — same multi-sheet structure as Stage 2, but Ref++ sheets now include 3 extra columns: VALIDATION_STATUS, VALIDATED_PMID, and per-PMID detail string. Stocks are categorized into 4 groups: Functionally Validated, Tested But No Phenotype, Ambiguous Functional Validity, No References.',
+    ids:'Stage 2 sheets + validation columns' },
+];
+
+// ─── Edges ──────────────────────────────────────────────────────
+const edges = [
+  // Pre-processing: S3 → refresh → TSVs
+  { from:'s3', to:'refresh', color:C.fb },
+  { from:'refresh', to:'tsv_stocks', color:C.pre },
+  { from:'refresh', to:'tsv_fbal', color:C.pre },
+  { from:'refresh', to:'tsv_allele_desc', color:C.pre },
+  { from:'refresh', to:'tsv_constructs', color:C.pre },
+  { from:'refresh', to:'tsv_entity_pub', color:C.pre },
+  { from:'refresh', to:'tsv_fbrf', color:C.pre },
+  { from:'refresh', to:'tsv_phenotype', color:C.pre },
+  { from:'refresh', to:'tsv_synonym', color:C.pre },
+
+  // Chado XML → build scripts
+  { from:'chado_fbst', to:'build_fbst', color:C.fb },
+  { from:'chado_fbti', to:'build_fbtp', color:C.fb },
+
+  // TSVs feed into build_fbst
+  { from:'tsv_stocks', to:'build_fbst', color:C.fb },
+  { from:'tsv_fbal', to:'build_fbst', color:C.fb },
+  { from:'tsv_entity_pub', to:'build_fbst', color:C.fb },
+
+  // Build scripts → derived CSVs
+  { from:'build_fbst', to:'csv_fbst', color:C.pre },
+  { from:'build_fbtp', to:'csv_fbtp_fbti', color:C.pre },
+
+  // ── Stage 1 ──
+  { from:'csv_genes', to:'fbgn_conv', color:C.s1 },
+  { from:'tsv_synonym', to:'fbgn_conv', color:C.fb },
+  { from:'fbgn_conv', to:'stock_map', color:C.s1 },
+
+  // Data → stock mapping
+  { from:'csv_fbst', to:'stock_map', color:C.derived },
+  { from:'csv_fbtp_fbti', to:'stock_map', color:C.derived },
+  { from:'tsv_fbal', to:'stock_map', color:C.fb },
+  { from:'tsv_constructs', to:'stock_map', color:C.fb },
+  { from:'tsv_allele_desc', to:'stock_map', color:C.fb },
+  { from:'tsv_stocks', to:'stock_map', color:C.fb },
+
+  { from:'stock_map', to:'phenotype', color:C.s1 },
+  { from:'tsv_phenotype', to:'phenotype', color:C.fb },
+
+  { from:'phenotype', to:'ref_resolve', color:C.s1 },
+  { from:'tsv_entity_pub', to:'ref_resolve', color:C.fb },
+  { from:'tsv_fbrf', to:'ref_resolve', color:C.fb },
+  { from:'pubmed', to:'ref_resolve', color:C.ext },
+  { from:'pubmed_cache', to:'pubmed', color:C.cache },
+
+  { from:'ref_resolve', to:'keyword', color:C.s1 },
+  { from:'config', to:'keyword', color:C.derived },
+
+  { from:'keyword', to:'flags', color:C.s1 },
+  { from:'flags', to:'s1_out', color:C.s1 },
+
+  // ── Stage 2 ──
+  { from:'s1_out', to:'derived_cols', color:C.output },
+  { from:'derived_cols', to:'filter', color:C.s2 },
+  { from:'config', to:'filter', color:C.derived },
+  { from:'filter', to:'limits', color:C.s2 },
+  { from:'limits', to:'s2_out', color:C.s2 },
+
+  // ── Stage 3 ──
+  { from:'s2_out', to:'refpp', color:C.output },
+  { from:'refpp', to:'fulltext', color:C.s3 },
+  { from:'refpp', to:'merge', color:C.s3 },
+  { from:'fulltext', to:'gpt', color:C.ext },
+  { from:'ft_cache', to:'fulltext', color:C.cache },
+  { from:'gpt', to:'merge', color:C.ext },
+  { from:'merge', to:'s3_out', color:C.s3 },
+];
+
+// ─── Section dividers ───────────────────────────────────────────
+const sections = [
+  { y: 890, label:'STAGE 1: FIND-STOCKS', color:C.s1 },
+  { y: 1830, label:'STAGE 2: SPLIT-STOCKS', color:C.s2 },
+  { y: 2310, label:'STAGE 3: VALIDATE-STOCKS', color:C.s3 },
+];
+
+const preSection = { y: 10, label:'DATA SOURCES & PRE-PROCESSING', color:C.pre };
+
+// ═══════════════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════════════
+
+const nodeMap = {};
+nodes.forEach(n => nodeMap[n.id] = n);
+
+// Defs for arrowheads
+const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+svg.appendChild(defs);
+
+function getMarker(color, idx) {
+  const id = `a${idx}`;
+  const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+  m.setAttribute('id', id);
+  m.setAttribute('markerWidth', '7');
+  m.setAttribute('markerHeight', '5');
+  m.setAttribute('refX', '7');
+  m.setAttribute('refY', '2.5');
+  m.setAttribute('orient', 'auto');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  p.setAttribute('points', '0 0, 7 2.5, 0 5');
+  p.setAttribute('fill', color);
+  p.setAttribute('opacity', '0.65');
+  m.appendChild(p);
+  defs.appendChild(m);
+  return id;
+}
+
+// Draw section labels
+function drawSection(s) {
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', '40'); line.setAttribute('x2', '1200');
+  line.setAttribute('y1', s.y); line.setAttribute('y2', s.y);
+  line.classList.add('section-divider');
+  g.appendChild(line);
+
+  const bar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  bar.setAttribute('x1', '20'); bar.setAttribute('x2', '20');
+  bar.setAttribute('y1', String(s.y + 8)); bar.setAttribute('y2', String(s.y + 28));
+  bar.setAttribute('stroke', s.color);
+  bar.classList.add('stage-line');
+  g.appendChild(bar);
+
+  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  text.setAttribute('x', '32');
+  text.setAttribute('y', String(s.y + 22));
+  text.classList.add('stage-label');
+  text.setAttribute('fill', s.color);
+  text.textContent = s.label;
+  g.appendChild(text);
+
+  svg.appendChild(g);
+}
+
+drawSection(preSection);
+sections.forEach(drawSection);
+
+// Draw edges
+const edgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+svg.appendChild(edgeG);
+
+edges.forEach((e, i) => {
+  const from = nodeMap[e.from];
+  const to = nodeMap[e.to];
+  if (!from || !to) return;
+
+  const markerId = getMarker(e.color, i);
+
+  const fx = from.x + from.w / 2;
+  const fy = from.y + from.h;
+  const tx = to.x + to.w / 2;
+  const ty = to.y;
+
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const dy = Math.abs(ty - fy);
+  const dx = Math.abs(tx - fx);
+
+  if (dx < 5) {
+    path.setAttribute('d', `M${fx},${fy} L${tx},${ty}`);
+  } else {
+    const cy1 = fy + dy * 0.4;
+    const cy2 = ty - dy * 0.4;
+    path.setAttribute('d', `M${fx},${fy} C${fx},${cy1} ${tx},${cy2} ${tx},${ty}`);
+  }
+  path.setAttribute('stroke', e.color);
+  path.classList.add('edge');
+  path.setAttribute('marker-end', `url(#${markerId})`);
+  edgeG.appendChild(path);
+});
+
+// Draw nodes
+nodes.forEach((n, i) => {
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.classList.add('node-group');
+
+  // Box
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', n.x); rect.setAttribute('y', n.y);
+  rect.setAttribute('width', n.w); rect.setAttribute('height', n.h);
+  rect.setAttribute('fill', '#12141c');
+  rect.setAttribute('stroke', n.color);
+  rect.setAttribute('stroke-width', '1.4');
+  rect.classList.add('node-box');
+  g.appendChild(rect);
+
+  // Accent bar
+  const accent = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  accent.setAttribute('x', n.x); accent.setAttribute('y', n.y);
+  accent.setAttribute('width', '3.5'); accent.setAttribute('height', n.h);
+  accent.setAttribute('fill', n.color);
+  accent.classList.add('node-accent');
+  g.appendChild(accent);
+
+  // Title
+  const hasIds = n.ids && n.ids.length > 0;
+  const hasSub = n.sub && n.sub.length > 0;
+  let titleY;
+  if (hasIds && hasSub) {
+    titleY = n.y + n.h / 2 - 12;
+  } else if (hasSub) {
+    titleY = n.y + n.h / 2 - 6;
+  } else {
+    titleY = n.y + n.h / 2;
+  }
+
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  title.setAttribute('x', n.x + n.w / 2 + 2);
+  title.setAttribute('y', titleY);
+  title.classList.add('node-title');
+  title.textContent = n.label;
+  g.appendChild(title);
+
+  // Subtitle
+  if (hasSub) {
+    const sub = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    sub.setAttribute('x', n.x + n.w / 2 + 2);
+    sub.setAttribute('y', titleY + 13);
+    sub.classList.add('node-sub');
+    sub.textContent = n.sub;
+    g.appendChild(sub);
+  }
+
+  // ID tag line
+  if (hasIds) {
+    const idy = hasSub ? titleY + 25 : titleY + 14;
+
+    // Background pill
+    const idText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    idText.setAttribute('x', n.x + n.w / 2 + 2);
+    idText.setAttribute('y', idy);
+    idText.classList.add('node-ids');
+    idText.textContent = n.ids;
+
+    // Measure text width (approximate)
+    g.appendChild(idText);
+  }
+
+  // Tooltip
+  g.addEventListener('mouseenter', () => {
+    tooltip.innerHTML = `
+      <div class="tt-title" style="color:${n.tipColor}">${n.label}</div>
+      ${n.sub ? `<div class="tt-file" style="color:${n.tipColor}">${n.sub}</div>` : ''}
+      <div class="tt-body">${n.tip}</div>
+      ${n.ids ? `<div class="tt-ids">IDs: ${n.ids}</div>` : ''}
+    `;
+    tooltip.classList.add('visible');
+  });
+  g.addEventListener('mousemove', (ev) => {
+    let left = ev.clientX + 16;
+    let top = ev.clientY + 16;
+    if (left + 400 > window.innerWidth) left = ev.clientX - 400;
+    if (top + 220 > window.innerHeight) top = ev.clientY - 220;
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+  });
+  g.addEventListener('mouseleave', () => {
+    tooltip.classList.remove('visible');
+  });
+
+  svg.appendChild(g);
+});
+
+// Entrance animation
+const groups = svg.querySelectorAll('.node-group');
+groups.forEach((g, i) => {
+  g.style.opacity = '0';
+  g.style.transform = 'translateY(10px)';
+  g.style.transition = `opacity 0.35s ${i * 0.03}s, transform 0.35s ${i * 0.03}s`;
+  requestAnimationFrame(() => {
+    g.style.opacity = '1';
+    g.style.transform = 'translateY(0)';
+  });
+});
+</script>
+</body>
+</html>
