@@ -1,47 +1,53 @@
-# fly-stocker-v2
+# fl_ai_reagent_stocker
 
-Modular Drosophila stock-processing pipeline for going from gene lists to prioritized stock sheets with linked references and optional GPT-based functional validation.
+Modular Drosophila stock-processing pipeline for turning gene lists into stock workbooks, config-driven organized sheets, and optional AI-assisted validation.
 
-This README consolidates the existing project documentation and points to the full detailed guides.
+## Documentation
 
-## Documentation Map
+- Practical guide (Markdown): `docs/pipeline_usage.md`
+- Practical guide (HTML): `docs/pipeline_usage.html`
+- Practical guide (PDF): `docs/pipeline_usage.pdf`
+- Data flowchart: `docs/images/pipeline-data-flowchart.png`
+- High-level flowchart: `docs/images/pipeline-flowchart-high-level-standalone.png`
+- Rules/evidence flowchart: `docs/images/pipeline-flowchart-rules-and-tools-standalone.png`
+- End-to-end flow diagram: `docs/images/pipeline-end-to-end-flowchart.png`
+- Example split config: `data/config/stock_split_config_example.json`
 
-- Full practical guide (Markdown): `PIPELINE_USAGE.md`
-- Full practical guide (HTML): `PIPELINE_USAGE.html`
-- Full practical guide (PDF): `PIPELINE_USAGE.pdf`
-- High-level flowchart: `pipeline-flowchart-high-level-standalone.png`
-- Rules/evidence flowchart: `pipeline-flowchart-rules-and-tools-standalone.png`
-- End-to-end flow diagram: `pipeline-end-to-end-flowchart.png`
-- Example split config: `data/JSON/stock_split_config_example.json`
-
-## What the Pipeline Produces
+## What The Pipeline Produces
 
 After a full run, you get:
 
-- a stock-level table linked to references
-- organized output sheets based on your filtering rules
-- a references table narrowed to papers relevant to selected stocks
-- optional functional-validation signals for `Ref++` stocks
+- a stock-level workbook linked to references
+- organized output sheets based on your JSON rules
+- a references sheet narrowed to papers cited by selected stocks
+- optional validation columns for `Ref++` output-sheet stocks
 
 ## Pipeline Overview
 
-The project has two CLI stages (plus an end-to-end wrapper command):
+The canonical package is `fl_ai_reagent_stocker` and it exposes three explicit stages plus an end-to-end wrapper:
 
-1. `get-allele-refs`
+1. `find-stocks`
    - Reads gene-list CSV files.
-   - Converts gene symbols to FBgn IDs (unless skipped).
-   - Maps genes to BDSC stocks.
-   - Links stocks/alleles to references and PMIDs.
-   - Produces an aggregated workbook.
+   - Converts gene symbols to FBgn IDs unless skipped.
+   - Maps genes to FlyBase stocks through allele, construct, and insertion components.
+   - Links stocks and components to publications and PMIDs.
+   - Writes `./gene_lists/Stocks/aggregated_stock_refs.xlsx`.
 
 2. `split-stocks`
-   - Reads Step 1 workbook(s).
-   - Applies JSON-driven filters and combinations.
-   - Builds organized output sheets.
-   - Runs selective GPT validation for eligible `Ref++` stock-reference pairs.
+   - Reads the Stage 1 workbook.
+   - Applies `data/config/*.json` filters and combinations.
+   - Writes organized output sheets to `./gene_lists/Stocks/Organized Stocks/`.
+   - Does not run GPT validation.
 
-3. `run-full-pipeline`
-   - Runs Step 1 then Step 2 in one command.
+3. `validate-stocks`
+   - Rebuilds the same split outputs using the same JSON config.
+   - Selectively validates only `Ref++` output-sheet stocks.
+   - Merges validation columns back into the organized workbook.
+
+4. `run-full-pipeline`
+   - Runs Stages 1, 2, and 3 in sequence.
+
+The JSON configs in `data/config/` stay in place and keep the same effect on stock splitting as before.
 
 ## Installation
 
@@ -51,71 +57,80 @@ From the repository root:
 pip install -r requirements.txt
 ```
 
-## Before You Run
+Optional environment variables:
 
-- Run commands from this project directory (the folder containing `cli.py` and `data/JSON/`).
-- Put your input CSV files in one folder (for example, `./gene_lists`).
-- Optional environment variables:
-  - `OPENAI_API_KEY` for GPT validation
-  - `NCBI_API_KEY` to improve PubMed API rate limits
-  - `UNPAYWALL_TOKEN` to improve full-text retrieval coverage
+- `OPENAI_API_KEY` for validation
+- `NCBI_API_KEY` for improved PubMed rate limits
+- `UNPAYWALL_TOKEN` for improved full-text retrieval coverage
+- `OPENAI_MODEL` to override the default model
 
-## 5-Minute Quick Start
+## Quick Start
 
-### Option A (recommended): one command
+### One command
 
 ```bash
-python -m fly_stocker_v2.cli run-full-pipeline ./gene_lists --config ./my_split_config.json --test-log
+python -m fl_ai_reagent_stocker run-full-pipeline ./gene_lists --config ./my_split_config.json --test-log
 ```
 
-### Option B: two-step workflow
+### Three-step workflow
 
 ```bash
-python -m fly_stocker_v2.cli get-allele-refs ./gene_lists
-python -m fly_stocker_v2.cli split-stocks ./gene_lists/Stocks --test-log
+python -m fl_ai_reagent_stocker find-stocks ./gene_lists
+python -m fl_ai_reagent_stocker split-stocks ./gene_lists/Stocks --config ./my_split_config.json
+python -m fl_ai_reagent_stocker validate-stocks ./gene_lists/Stocks --config ./my_split_config.json --test-log
 ```
 
 Default config path:
 
-- `data/JSON/stock_split_config_example.json`
+- `data/config/stock_split_config_example.json`
 
-## Commands
+## Command Summary
 
-### Step 1: Build Stocks + References
+### Stage 1: `find-stocks`
 
 ```bash
-python -m fly_stocker_v2.cli get-allele-refs ./gene_lists
+python -m fl_ai_reagent_stocker find-stocks ./gene_lists
 ```
 
 Main output:
 
-- `./gene_lists/Stocks/aggregated_bdsc_stock_refs.xlsx`
-
-Workbook sheets:
-
-- `Stocks`
-- `References`
+- `./gene_lists/Stocks/aggregated_stock_refs.xlsx`
 
 Common options:
 
 - `--config`, `-c`
 - `--skip-fbgnid-conversion`
-- `--run-validation`
-- `--soft-run`
-- `--test-log`
-- `--max-gpt-calls-per-stock` (default: `5`)
+- `--gene-col`
+- `--input-gene-col`
+- `--batch-size`
 
-### Step 2: Organize and Prioritize
+### Stage 2: `split-stocks`
 
 ```bash
-python -m fly_stocker_v2.cli split-stocks ./gene_lists/Stocks --config ./my_split_config.json
+python -m fl_ai_reagent_stocker split-stocks ./gene_lists/Stocks --config ./my_split_config.json
 ```
 
 Main output folder:
 
 - `./gene_lists/Stocks/Organized Stocks/`
 
-For each input workbook, output is `<input_name>_aggregated.xlsx`.
+Common options:
+
+- `--config`, `-c`
+- `--quiet`, `-q`
+- `--soft-run`
+
+### Stage 3: `validate-stocks`
+
+```bash
+python -m fl_ai_reagent_stocker validate-stocks ./gene_lists/Stocks --config ./my_split_config.json --test-log
+```
+
+Validation is selective by design:
+
+- only `Ref++` output-sheet stocks are considered
+- references must be keyword-relevant
+- validation short-circuits after the first functional hit per stock
 
 Common options:
 
@@ -123,62 +138,29 @@ Common options:
 - `--quiet`, `-q`
 - `--soft-run`
 - `--test-log`
-- `--max-gpt-calls-per-stock` (default: `5`)
+- `--max-gpt-calls-per-stock`
 
-### Full Pipeline
+## Config File Contract
 
-```bash
-python -m fly_stocker_v2.cli run-full-pipeline ./gene_lists --config ./my_split_config.json --test-log
-```
+The stock-splitting JSON files remain under `data/config/` and retain their existing semantics:
 
-Use full-pipeline mode when you want a single end-to-end run. Use separate commands when you want to inspect intermediate outputs.
+- `settings.relevantSearchTerms` still defines `Ref++`
+- `filters` still define reusable predicates
+- `combinations` still define the sheet partitions
+- `filterDescriptions` still control user-facing sheet descriptions
+- `maxStocksPerGene` and `maxStocksPerAllele` still enforce the same stock limits
 
-## Validation Behavior (Important)
+## Helper Scripts
 
-Validation is selective by design. In Step 2, a stock-reference pair is considered for GPT validation only when all are true:
+Canonical helper entry points:
 
-1. The stock survives filtering/limits into a sheet whose combination includes `Ref++`.
-2. The reference is keyword-relevant (from `settings.relevantSearchTerms` in config).
-3. Full-text and pattern checks mark the pair as eligible.
+- `scripts/fetch_fbgn_ids.py`
+- `scripts/build_fbst_derived_stock_components.py`
+- `scripts/build_fbtp_to_fbti_mapping.py`
+- `scripts/refresh_flybase_data.py`
 
-If a stock only appears in non-`Ref++` sheets, it is not sent for GPT validation.
+## Notes
 
-## Config File (Plain Terms)
-
-The JSON split config controls:
-
-- relevance keywords (`settings.relevantSearchTerms`)
-- maximum stocks per gene (`settings.maxStocksPerGene`)
-- maximum stocks per allele (`settings.maxStocksPerAllele`)
-- reusable named filters (`filters`)
-- output sheet definitions (`combinations`)
-- user-facing filter descriptions (`filterDescriptions`)
-
-See:
-
-- `data/JSON/stock_split_config_example.json`
-
-## Reliability and Reproducibility Notes
-
-- Full-text retrieval uses multiple sources and retries transient failures.
-- Caches are used to reduce repeated metadata/full-text method lookups.
-- Duplicate rows with the same PMID are merged with preference for richer IDs (PMCID/DOI).
-- Validation can stop early per stock when functional evidence is already found.
-
-## Quick Troubleshooting
-
-- Validation not running: confirm output sheet is `Ref++` and `OPENAI_API_KEY` is set.
-- Low PMID relevance: check `settings.relevantSearchTerms` in config.
-- Sparse full-text coverage: set `UNPAYWALL_TOKEN` and rerun.
-- Concerned about API usage: start with `--soft-run`.
-
-## Detailed Guides and Visuals
-
-For the complete narrative, full example run-through, and visual flows, use:
-
-- `PIPELINE_USAGE.md`
-- `PIPELINE_USAGE.html`
-- `PIPELINE_USAGE.pdf`
-- `pipeline-flowchart-high-level-standalone.png`
-- `pipeline-flowchart-rules-and-tools-standalone.png`
-- `pipeline-end-to-end-flowchart.png`
+- Stage 1 now supports FBtp -> FBti expansion via `data/flybase/transgenic_insertions/fbtp_to_fbti.csv`.
+- Soft-run mode still stops before GPT execution.
+- Output paths remain unchanged even though the package and command names changed.

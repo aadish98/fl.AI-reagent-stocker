@@ -1,0 +1,3024 @@
+"""
+Stage 2/3 shared stock organization pipeline.
+
+This module provides the StockSplittingPipeline class that:
+1. Loads stock data from Excel files (output of Stage 1)
+2. Computes derived columns (Balancers, multiple_insertions, ALLELE_PAPER_RELEVANCE_SCORE)
+3. Applies configurable filters from JSON to create sheets
+4. Writes organized Excel output
+5. Optionally appends Ref++ validation columns when `run_validation=True`
+
+Usage:
+    from fl_ai_reagent_stocker.pipelines.stock_splitting import StockSplittingPipeline
+    from fl_ai_reagent_stocker.config import Settings
+
+    settings = Settings()
+    pipeline = StockSplittingPipeline(settings)
+    pipeline.run(input_dir, config_path="path/to/config.json")
+"""
+
+import json
+import re
+import shutil
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import pandas as pd
+
+from ..config import Settings, ValidationStatus, DEFAULT_SPLIT_CONFIG_PATH
+from ..integrations.pubmed import PubMedClient, PubMedCache
+from ..integrations.fulltext import FullTextFetcher, FunctionalValidator
+from ..utils import (
+    clean_id,
+    parse_semicolon_list,
+    unique_join,
+    find_keyword_column,
+    find_keyword_title_abstract_column,
+    extract_keywords_from_column,
+    extract_keywords_from_title_abstract_column,
+    has_keyword_validation,
+    generate_keyword_column_name,
+    get_gpt_derived_columns,
+    apply_experimental_prefix,
+    EXPERIMENTAL_PREFIX,
+    find_latest_tsv,
+    load_flybase_tsv,
+)
+from ..validation_runner import run_functional_validation
+
+
+# Human-readable filter type descriptions for Contents sheet
+FILTER_TYPE_PHRASES = {
+    "contains": "contains",
+    "doesnt_contain": "doesn't contain",
+    "equals": "equals",
+    "doesnt_equal": "doesn't equal",
+    "insertion_site": "has single insertion at",
+}
+
+
+###############################################################################
+# JSON Configuration Loading and Validation
+###############################################################################
+
+def load_split_config(config_path: Path) -> Dict[str, Any]:
+    """
+    Load and validate a stock split configuration JSON file.
+    
+    Args:
+        config_path: Path to the JSON configuration file
+        
+    Returns:
+        Parsed configuration dictionary
+        
+    Raises:
+        ValueError: If configuration is invalid
+    """
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    if not isinstance(config, dict):
+        raise ValueError("Config root must be a JSON object")
+    
+    # Validate required keys
+    required_keys = ['filters', 'combinations']
+    for key in required_keys:
+        if key not in config:
+            raise ValueError(f"Config missing required key: {key}")
+
+    filters = config.get('filters')
+    combinations = config.get('combinations')
+    if not isinstance(filters, dict):
+        raise ValueError("Config 'filters' must be an object mapping names to filter specs")
+    if not isinstance(combinations, list):
+        raise ValueError("Config 'combinations' must be a list of filter-name lists")
+    
+    # Set defaults for optional settings
+    if 'settings' not in config:
+        config['settings'] = {}
+    if not isinstance(config['settings'], dict):
+        raise ValueError("Config 'settings' must be an object")
+    if 'filterDescriptions' in config and not isinstance(config['filterDescriptions'], dict):
+        raise ValueError("Config 'filterDescriptions' must be an object when provided")
+    
+    settings = config['settings']
+    settings.setdefault('relevantSearchTerms', [])
+    settings.setdefault('maxStocksPerGene', None)
+    settings.setdefault('maxStocksPerAllele', None)
+    if not isinstance(settings['relevantSearchTerms'], list):
+        raise ValueError("settings.relevantSearchTerms must be a list")
+
+    valid_filter_types = set(FILTER_TYPE_PHRASES)
+    for filter_name, spec in filters.items():
+        if not isinstance(spec, dict):
+            raise ValueError(f"Filter '{filter_name}' must be an object")
+        if not str(spec.get("column", "")).strip():
+            raise ValueError(f"Filter '{filter_name}' is missing a non-empty 'column'")
+        filter_type = spec.get("type")
+        if filter_type not in valid_filter_types:
+            raise ValueError(
+                f"Filter '{filter_name}' has unsupported type '{filter_type}'. "
+                f"Expected one of: {', '.join(sorted(valid_filter_types))}"
+            )
+        if filter_type in {"contains", "doesnt_contain", "equals", "doesnt_equal", "insertion_site"} and "value" not in spec:
+            raise ValueError(f"Filter '{filter_name}' is missing required key 'value'")
+
+    for idx, combo in enumerate(combinations, start=1):
+        if not isinstance(combo, list) or not combo:
+            raise ValueError(f"Combination #{idx} must be a non-empty list of filter names")
+        undefined = [name for name in combo if name not in filters]
+        if undefined:
+            raise ValueError(
+                f"Combination #{idx} references undefined filter(s): {', '.join(undefined)}"
+            )
+    
+    return config
+
+
+def filter_spec_to_string(spec: Dict[str, Any]) -> str:
+    """Convert a filter spec dict to a human-readable string."""
+    col = spec.get("column", "?")
+    typ = spec.get("type", "?")
+    val = spec.get("value")
+    
+    if val is True:
+        val_str = "true"
+    elif val is False:
+        val_str = "false"
+    elif isinstance(val, str):
+        val_str = f'"{val}"'
+    else:
+        val_str = str(val)
+    
+    phrase = FILTER_TYPE_PHRASES.get(typ, typ)
+    return f"{col} {phrase} {val_str}"
+
+
+###############################################################################
+# Column Computation Functions
+###############################################################################
+
+def compute_balancers_column(df: pd.DataFrame) -> pd.Series:
+    """
+    Compute the Balancers column.
+
+    Balancers must come from the FlyBase-derived Stage 1 workbook, where they
+    are backed by `FBba` component associations. No genotype parsing fallback
+    is allowed.
+    """
+    if "Balancers" not in df.columns:
+        raise ValueError(
+            "Input stocks data must include a 'Balancers' column derived from "
+            "FlyBase FBba components."
+        )
+    existing = df["Balancers"].fillna("").astype(str).str.strip()
+    existing = existing.mask(existing.eq(""), "-")
+    existing = existing.mask(existing.str.lower().eq("nan"), "-")
+    return existing
+
+
+def normalize_num_balancers_column(df: pd.DataFrame) -> pd.Series:
+    """Normalize the precomputed FBba-derived balancer count column."""
+    if "num_Balancers" not in df.columns:
+        raise ValueError(
+            "Input stocks data must include a 'num_Balancers' column derived "
+            "from FlyBase FBba components."
+        )
+    values = pd.to_numeric(df["num_Balancers"], errors="coerce").fillna(0)
+    return values.astype(int)
+
+
+def compute_multiple_insertions_column(df: pd.DataFrame) -> pd.Series:
+    """
+    Compute the multiple_insertions column using stock-level construct data.
+
+    Prefers the `all_stock_constructs` column from Pipeline 1, which is now
+    populated from FlyBase-derived stock components. If component data is not
+    available, falls back to counting distinct construct-like elements in the
+    genotype string via regex.
+    
+    Returns True if the stock has more than one unique construct, False otherwise.
+    """
+    # Prefer component-based detection from Pipeline 1 stock-component summaries
+    constructs_col = None
+    for col in ['all_stock_constructs']:
+        if col in df.columns:
+            constructs_col = col
+            break
+    
+    if constructs_col is not None:
+        def _count_from_components(constructs_str) -> bool:
+            if pd.isna(constructs_str) or not str(constructs_str).strip():
+                return False
+            constructs = [c.strip() for c in str(constructs_str).split(';') if c.strip()]
+            return len(set(constructs)) > 1
+        
+        return df[constructs_col].apply(_count_from_components)
+    
+    # Fallback: parse genotype for distinct P-element / PBac / Mi / TI constructs
+    genotype_col = None
+    for col in ['genotype', 'stock_genotype', 'Genotype', 'FB_genotype']:
+        if col in df.columns:
+            genotype_col = col
+            break
+    
+    if genotype_col is None:
+        return pd.Series([False] * len(df), index=df.index)
+    
+    def _count_from_genotype(genotype: str) -> bool:
+        if pd.isna(genotype) or not str(genotype).strip():
+            return False
+        # Match distinct construct elements: P{...}Name, PBac{...}Name, Mi{...}Name, TI{...}Name
+        elements = re.findall(r'(?:P|PBac|Mi|TI|M)\{[^}]+\}\S*', str(genotype))
+        return len(set(elements)) > 1
+    
+    return df[genotype_col].apply(_count_from_genotype)
+
+
+def compute_allele_paper_relevance_score(
+    df: pd.DataFrame,
+    keywords: List[str]
+) -> pd.Series:
+    """
+    Compute ALLELE_PAPER_RELEVANCE_SCORE based on keyword hits in publication
+    title / abstract.
+
+    Score meanings (mapped to filter labels in the split config):
+        0  (Ref-):  Allele has **no** surviving references.
+        1  (Ref+):  Allele has paper references, but **none** contain any of
+                     the search keywords in their title or abstract.
+        2  (Ref++): Allele has at least one paper reference whose title or
+                     abstract contains one or more of the search keywords.
+
+    The determination is based entirely on the title/abstract keyword-hit
+    column (``"<kw> in title/ abstract of publication?"``) and/or the
+    ``keyword_ref_count`` column produced by ``pipeline_references``.  It does
+    **not** depend on GPT / functional-validity output.
+    """
+    # ── Locate the title/abstract keyword boolean column ──────────────
+    kw_title_col = find_keyword_title_abstract_column(df)
+
+    # ── Locate keyword_ref_count (integer, from pipeline_references) ──
+    # pipeline_references renames this column to "<kw> references count",
+    # so use the keywords to construct the exact renamed column name.
+    kw_count_col = None
+    if 'keyword_ref_count' in df.columns:
+        kw_count_col = 'keyword_ref_count'
+    elif keywords:
+        renamed_col = f"{' OR '.join(keywords)} references count"
+        if renamed_col in df.columns:
+            kw_count_col = renamed_col
+
+    # ── Locate PMID column ────────────────────────────────────────────
+    pmid_col = None
+    for col in ['PMID', 'pmid', 'PMIDs']:
+        if col in df.columns:
+            pmid_col = col
+            break
+    
+    # Optional counts for references lacking PMIDs.
+    no_pmid_count_col = 'references_without_pmid_count' if 'references_without_pmid_count' in df.columns else None
+    total_refs_col = 'total_refs' if 'total_refs' in df.columns else None
+
+    def calculate_score(row) -> int:
+        # --- Score 2: at least one keyword hit in title/abstract ------
+        has_keyword_ref = False
+
+        # Primary: boolean column "<kw> in title/ abstract of publication?"
+        if kw_title_col and kw_title_col in row.index:
+            val = row[kw_title_col]
+            if val is True or str(val).lower() in ('true', 'yes'):
+                has_keyword_ref = True
+
+        # Secondary: keyword_ref_count > 0
+        if not has_keyword_ref and kw_count_col and kw_count_col in row.index:
+            try:
+                if int(row[kw_count_col]) > 0:
+                    has_keyword_ref = True
+            except (ValueError, TypeError):
+                pass
+
+        if has_keyword_ref:
+            return 2  # Ref++
+
+        # --- Score 1: has references but no keyword hit ---------------
+        if total_refs_col and total_refs_col in row.index:
+            try:
+                if int(float(row[total_refs_col])) > 0:
+                    return 1  # Ref+
+            except (ValueError, TypeError):
+                pass
+        if no_pmid_count_col and no_pmid_count_col in row.index:
+            try:
+                if int(float(row[no_pmid_count_col])) > 0:
+                    return 1  # Ref+
+            except (ValueError, TypeError):
+                pass
+        if pmid_col and pmid_col in row.index:
+            pmid_val = row[pmid_col]
+            if pd.notna(pmid_val):
+                pmid_str = str(pmid_val).strip()
+                if pmid_str and pmid_str != "-" and pmid_str.lower() != "nan":
+                    return 1  # Ref+
+
+        return 0  # Ref-
+
+    return df.apply(calculate_score, axis=1)
+
+
+###############################################################################
+# Filter Application Logic
+###############################################################################
+
+def apply_filter(
+    df: pd.DataFrame,
+    filter_spec: Dict[str, Any]
+) -> pd.Series:
+    """
+    Apply a single filter specification to a DataFrame.
+    
+    Returns a boolean Series indicating which rows match the filter.
+    """
+    column = filter_spec.get("column")
+    filter_type = filter_spec.get("type")
+    value = filter_spec.get("value")
+    
+    if column not in df.columns:
+        # Column doesn't exist - return all False (no matches)
+        print(f"      Warning: Filter column '{column}' not found in data")
+        return pd.Series([False] * len(df), index=df.index)
+    
+    col_data = df[column]
+    
+    if filter_type == "contains":
+        return col_data.astype(str).str.contains(str(value), case=True, na=False)
+    
+    elif filter_type == "doesnt_contain":
+        return ~col_data.astype(str).str.contains(str(value), case=True, na=False)
+    
+    elif filter_type == "equals":
+        # Handle boolean and numeric comparisons
+        if isinstance(value, bool):
+            return col_data == value
+        elif isinstance(value, (int, float)):
+            return col_data == value
+        else:
+            return col_data.astype(str) == str(value)
+    
+    elif filter_type == "doesnt_equal":
+        if isinstance(value, bool):
+            return col_data != value
+        elif isinstance(value, (int, float)):
+            return col_data != value
+        else:
+            return col_data.astype(str) != str(value)
+    
+    elif filter_type == "insertion_site":
+        # Single-construct stock at specific site (contains value AND only one construct)
+        contains_site = col_data.astype(str).str.contains(str(value), case=True, na=False)
+        single_insertion = ~df.get('multiple_insertions', pd.Series([False] * len(df), index=df.index))
+        return contains_site & single_insertion
+    
+    else:
+        print(f"      Warning: Unknown filter type '{filter_type}'")
+        return pd.Series([False] * len(df), index=df.index)
+
+
+def apply_filter_combination(
+    df: pd.DataFrame,
+    combination: List[str],
+    filters_config: Dict[str, Dict[str, Any]]
+) -> pd.DataFrame:
+    """
+    Apply a combination of filters (ANDed together) to get matching stocks.
+    
+    Args:
+        df: DataFrame to filter
+        combination: List of filter names to apply
+        filters_config: Dict mapping filter names to specifications
+        
+    Returns:
+        Filtered DataFrame containing only matching rows
+    """
+    mask = pd.Series([True] * len(df), index=df.index)
+    
+    for filter_name in combination:
+        if filter_name not in filters_config:
+            print(f"      Warning: Filter '{filter_name}' not defined in config")
+            continue
+        
+        filter_mask = apply_filter(df, filters_config[filter_name])
+        mask = mask & filter_mask
+    
+    return df[mask].copy()
+
+
+###############################################################################
+# Stock Limiting Logic
+###############################################################################
+
+def apply_stock_limits(
+    df: pd.DataFrame,
+    max_stocks_per_gene: Optional[int],
+    max_stocks_per_allele: Optional[int],
+    gene_counters: Dict[str, int],
+    allele_counters: Dict[str, int],
+    seen_stocks: Set[str],
+    verbose: bool = True
+) -> pd.DataFrame:
+    """
+    Apply per-gene and per-allele stock limits.
+    
+    Modifies counters and seen_stocks in place.
+    
+    Args:
+        df: DataFrame of stocks to limit
+        max_stocks_per_gene: Maximum stocks per gene (None = no limit)
+        max_stocks_per_allele: Maximum stocks per allele (None = no limit)
+        gene_counters: Dict tracking stocks per gene (modified in place)
+        allele_counters: Dict tracking stocks per allele (modified in place)
+        seen_stocks: Set of already-seen stock IDs (modified in place)
+        verbose: Print progress
+        
+    Returns:
+        Limited DataFrame
+    """
+    
+    # Find relevant columns
+    stock_col = _find_stock_id_column(df)
+    gene_col = _find_gene_id_column(df)
+    allele_col = _find_allele_column(df)
+    
+    selected_indices = []
+    
+    for idx, row in df.iterrows():
+        stock_id = str(row.get(stock_col, '')) if stock_col else str(idx)
+        gene_id = str(row.get(gene_col, '')) if gene_col else ''
+        allele_id = str(row.get(allele_col, '')) if allele_col else ''
+        
+        # Skip if already seen
+        if stock_id in seen_stocks:
+            continue
+        
+        # Check gene limit
+        if max_stocks_per_gene is not None and gene_id:
+            if gene_counters.get(gene_id, 0) >= max_stocks_per_gene:
+                continue
+        
+        # Check allele limit
+        if max_stocks_per_allele is not None and allele_id:
+            if allele_counters.get(allele_id, 0) >= max_stocks_per_allele:
+                continue
+        
+        # Accept this stock
+        selected_indices.append(idx)
+        seen_stocks.add(stock_id)
+        
+        if gene_id:
+            gene_counters[gene_id] = gene_counters.get(gene_id, 0) + 1
+        if allele_id:
+            allele_counters[allele_id] = allele_counters.get(allele_id, 0) + 1
+    
+    return df.loc[selected_indices].copy()
+
+
+def _find_stock_id_column(df: pd.DataFrame) -> Optional[str]:
+    """Find the stock ID column."""
+    for col in ['stock_number', 'StockID', 'stock_id', 'FBst']:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _find_gene_id_column(df: pd.DataFrame) -> Optional[str]:
+    """Find the gene ID column."""
+    for col in ['flybase_gene_id', 'relevant_gene_symbols', 'FBgn', 'gene_id', 'relevant_flybase_gene_ids', 'all_gene_symbols']:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _find_allele_column(df: pd.DataFrame) -> Optional[str]:
+    """Find the allele column."""
+    for col in ['AlleleSymbol', 'flybase_allele_id', 'AlleleID', 'allele_symbol', 'relevant_component_symbols']:
+        if col in df.columns:
+            return col
+    return None
+
+
+###############################################################################
+# Excel Output Functions
+###############################################################################
+
+def _apply_grey_fill_xlsxwriter(
+    worksheet,
+    df: pd.DataFrame,
+    grey_format,
+    dark_header_format=None,
+    dark_header_columns: Optional[Set[str]] = None,
+) -> None:
+    """
+    Apply light grey background to GPT-derived column **headers** via
+    xlsxwriter.  Only the header row (row 0) is shaded.
+
+    GPT-derived columns are detected by the '[EXPERIMENTAL] ' prefix that
+    :func:`apply_experimental_prefix` adds to their header names.
+    """
+    dark_header_columns = dark_header_columns or set()
+    for col_idx, col_name in enumerate(df.columns):
+        col_name_str = str(col_name)
+        if dark_header_format is not None and col_name_str in dark_header_columns:
+            worksheet.write(0, col_idx, col_name, dark_header_format)
+        elif col_name_str.startswith(EXPERIMENTAL_PREFIX):
+            worksheet.write(0, col_idx, col_name, grey_format)
+
+
+def _find_column_with_experimental_fallback(
+    columns: List[str],
+    base_name: str
+) -> Optional[str]:
+    """Find a column by exact name or [EXPERIMENTAL]-prefixed variant."""
+    if base_name in columns:
+        return base_name
+    exp_name = f"{EXPERIMENTAL_PREFIX}{base_name}"
+    if exp_name in columns:
+        return exp_name
+    return None
+
+
+def _find_keyword_ref_count_column(df: pd.DataFrame) -> Optional[str]:
+    """Locate per-stock keyword-hit reference count column."""
+    if 'keyword_ref_count' in df.columns:
+        return 'keyword_ref_count'
+    for col in df.columns:
+        if str(col).endswith(" references count"):
+            return col
+    return None
+
+
+def _find_keyword_ref_pmids_column(df: pd.DataFrame) -> Optional[str]:
+    """Locate per-stock keyword-hit PMID list column."""
+    if 'keyword_ref_pmids' in df.columns:
+        return 'keyword_ref_pmids'
+    for col in df.columns:
+        if re.match(r"^Stock \(.+\) .+ references$", str(col)):
+            return col
+    return None
+
+
+def _normalize_pmid_list_string(value: Any) -> str:
+    """Normalize semicolon-delimited PMID-like strings for sheet display."""
+    items = [clean_id(v) for v in str(value or "").split(";")]
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for item in items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return "; ".join(deduped) if deduped else "-"
+
+
+def _extract_row_pmid_entry(cell_value: Any, row_pmid: str) -> Any:
+    """
+    Keep only the `PMID: <id>: ...` entry matching the current row PMID.
+    Returns original value when no PMID-tagged structure is present.
+    """
+    text = str(cell_value or "").strip()
+    if not text or "PMID:" not in text:
+        return cell_value
+    pmid_clean = clean_id(row_pmid)
+    if not pmid_clean:
+        return cell_value
+
+    pattern = re.compile(
+        r"PMID:\s*([0-9]+)\s*:\s*(.*?)(?=(?:\s*[|;]\s*)?PMID:\s*[0-9]+\s*:|$)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    matches = pattern.findall(text)
+    if not matches:
+        return cell_value
+
+    for pmid_found, content in matches:
+        if clean_id(pmid_found) == pmid_clean:
+            entry = str(content).strip()
+            return entry if entry else f"PMID: {pmid_clean}"
+    return ""
+
+
+def _is_keyword_validation_pmid_column(col_name: str) -> bool:
+    """Return True for dynamic PMID-of-keyword-valid-references column names."""
+    col = str(col_name or "").strip()
+    if col.startswith(EXPERIMENTAL_PREFIX):
+        col = col[len(EXPERIMENTAL_PREFIX):].strip()
+    return bool(
+        re.match(
+            r"^PMID of .+ references that showed stocks functional validity$",
+            col
+        )
+    )
+
+
+def _derive_stock_keyword_refs_header(keyword_pmids_col: Optional[str]) -> str:
+    """
+    Build a Stock Sheet by Gene keyword-reference column header.
+
+    If source column already encodes explicit keywords (for example
+    "Stock (allele) sleep OR circadian references"), preserve that wording.
+    """
+    base = "Stock (FBal / FBtp / FBti) keyword-hit references"
+    raw = str(keyword_pmids_col or "").strip()
+    if raw:
+        if raw.startswith("Stock (") and "references" in raw:
+            base = raw.replace("(all for stock)", "").strip()
+        elif raw == "keyword_ref_pmids":
+            base = "Stock (FBal / FBtp / FBti) keyword-hit references"
+    return f"{base} (all for stock)"
+
+
+def _load_gene_synonyms_map(
+    flybase_data_path: Optional[Path],
+    verbose: bool = False
+) -> Dict[str, str]:
+    """
+    Load FlyBase gene symbol/synonym table and build symbol -> synonyms display.
+
+    Maps both current symbols and known synonyms to a normalized semicolon list.
+    """
+    def _find_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+        lower_map = {str(c).strip().lower(): c for c in df.columns}
+        for cand in candidates:
+            col = lower_map.get(str(cand).strip().lower())
+            if col is not None:
+                return col
+        return None
+
+    def _find_synonym_tsv(base_path: Path) -> Optional[Path]:
+        genes_dir = base_path / "genes"
+        if genes_dir.exists():
+            try:
+                return find_latest_tsv(genes_dir, "fb_synonym")
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+
+        # Fallback: some local data layouts do not include a top-level "Genes"
+        # folder, so search within FlyBase for any fb_synonym TSV/GZ.
+        candidates = sorted(base_path.rglob("fb_synonym*.tsv*"))
+        if candidates:
+            return max(candidates, key=lambda p: p.stat().st_mtime)
+        return None
+
+    if flybase_data_path is None:
+        return {}
+    try:
+        synonym_path = _find_synonym_tsv(Path(flybase_data_path))
+        if synonym_path is None:
+            if verbose:
+                print(
+                    f"    Warning: Could not find fb_synonym TSV under {flybase_data_path}"
+                )
+            return {}
+        syn_df = load_flybase_tsv(synonym_path, keep_default_na=False)
+    except Exception as e:
+        if verbose:
+            print(f"    Warning: Could not load FlyBase gene synonyms: {e}")
+        return {}
+
+    organism_col = _find_col(syn_df, ["organism_abbreviation"])
+    current_symbol_col = _find_col(syn_df, ["current_symbol"])
+    synonyms_col = _find_col(syn_df, ["symbol_synonym(s)", "symbol_synonyms"])
+    primary_fbid_col = _find_col(syn_df, ["primary_FBid", "primary_fbid"])
+
+    if organism_col:
+        syn_df = syn_df[
+            syn_df[organism_col]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .eq("dmel")
+        ].copy()
+    if len(syn_df) == 0 or current_symbol_col is None:
+        return {}
+
+    fbgn_to_names: Dict[str, Set[str]] = {}
+    for _, row in syn_df.iterrows():
+        fbgn = str(row.get(primary_fbid_col, "") or "").strip() if primary_fbid_col else ""
+        if not fbgn:
+            continue
+        names = fbgn_to_names.setdefault(fbgn, set())
+        current_symbol = str(row.get(current_symbol_col, "") or "").strip()
+        if current_symbol:
+            names.add(current_symbol)
+        syn_field = str(row.get(synonyms_col, "") or "").strip() if synonyms_col else ""
+        if syn_field:
+            for syn in syn_field.split("|"):
+                syn = syn.strip()
+                if syn:
+                    names.add(syn)
+
+    name_to_synonyms: Dict[str, str] = {}
+    for names in fbgn_to_names.values():
+        normalized = sorted({n for n in names if n})
+        if not normalized:
+            continue
+        for name in normalized:
+            others = [n for n in normalized if n != name]
+            name_to_synonyms[name] = "; ".join(others) if others else ""
+
+    # Add case-insensitive lookup keys so stock-sheet symbols still resolve even
+    # when casing differs from FlyBase's synonym table.
+    for name, syns in list(name_to_synonyms.items()):
+        key = str(name).strip().casefold()
+        if key and key not in name_to_synonyms:
+            name_to_synonyms[key] = syns
+    if verbose:
+        print(f"    Loaded FlyBase gene synonyms for {len(name_to_synonyms)} symbols")
+    return name_to_synonyms
+
+
+def _lookup_gene_synonyms(
+    gene_label: str,
+    gene_synonyms_map: Optional[Dict[str, str]],
+) -> str:
+    """Resolve synonyms for a gene symbol with robust normalization."""
+    if not gene_synonyms_map:
+        return ""
+    label = str(gene_label or "").strip()
+    if not label:
+        return ""
+    direct = str(gene_synonyms_map.get(label, "") or "").strip()
+    if direct:
+        return direct
+    # Fallback to case-insensitive key.
+    return str(gene_synonyms_map.get(label.casefold(), "") or "").strip()
+
+
+def _normalize_stock_sheet_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop requested columns and normalize empty keyword-reference PMID lists."""
+    if df is None or len(df) == 0:
+        return df
+    out = df.copy()
+    drop_cols = ['FBrf without PMID', 'references_without_pmid_count']
+    out = out.drop(columns=[c for c in drop_cols if c in out.columns], errors='ignore')
+
+    kw_pmids_col = _find_keyword_ref_pmids_column(out)
+    if kw_pmids_col and kw_pmids_col in out.columns:
+        out[kw_pmids_col] = out[kw_pmids_col].apply(
+            lambda v: _normalize_pmid_list_string(v) if str(v or "").strip() else "-"
+        )
+    return out
+
+
+def _extract_flybase_ids(value: Any) -> List[str]:
+    """Extract FlyBase IDs from slash/space-delimited genotype fields."""
+    matches = re.findall(r"FB[a-zA-Z]{2,4}[0-9]+", str(value or ""))
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for match in matches:
+        match_clean = clean_id(match)
+        if not match_clean or match_clean in seen:
+            continue
+        seen.add(match_clean)
+        deduped.append(match_clean)
+    return deduped
+
+
+def _build_stock_phenotype_sheet(
+    combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict]],
+    flybase_data_path: Optional[Path],
+    references_df: Optional[pd.DataFrame] = None,
+    unfiltered_references_df: Optional[pd.DataFrame] = None,
+    pubmed_cache_path: Optional[Path] = None,
+    pubmed_client: Optional[PubMedClient] = None,
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """Build a soft-run replacement sheet from genotype_phenotype_data.
+
+    Reference column contains paper titles (hyperlinked via ``_reference_url``)
+    with author, journal, and publication-date metadata when available.
+    """
+    included_frames: List[pd.DataFrame] = []
+    for _combo, out_df, _summary in combination_outputs:
+        if out_df is None or len(out_df) == 0:
+            continue
+        included_frames.append(out_df.copy())
+
+    if not included_frames or flybase_data_path is None:
+        return pd.DataFrame()
+
+    included_df = pd.concat(included_frames, ignore_index=True)
+    if 'FBst' not in included_df.columns:
+        return pd.DataFrame()
+
+    def _normalize_authors(value: Any) -> str:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return ''
+        if isinstance(value, str):
+            return '; '.join([a.strip() for a in value.split(';') if a.strip()])
+        try:
+            return '; '.join([str(a).strip() for a in list(value) if str(a).strip()])
+        except Exception:
+            return str(value).strip()
+
+    def _empty_reference_meta() -> Dict[str, str]:
+        return {
+            'title': '',
+            'authors': '',
+            'journal': '',
+            'publication_date': '',
+            'miniref': '',
+        }
+
+    def _merge_reference_meta(base: Dict[str, str], incoming: Dict[str, Any]) -> Dict[str, str]:
+        merged = dict(base)
+        normalized = {
+            'title': str(incoming.get('title', '') or '').strip(),
+            'authors': _normalize_authors(incoming.get('authors', '')),
+            'journal': str(incoming.get('journal', '') or '').strip(),
+            'publication_date': str(
+                incoming.get('publication_date', '')
+                or incoming.get('publication date', '')
+                or incoming.get('date of publication', '')
+                or incoming.get('year', '')
+                or ''
+            ).strip(),
+            'miniref': str(incoming.get('miniref', '') or '').strip(),
+        }
+        for key, value in normalized.items():
+            if value and not merged.get(key, '').strip():
+                merged[key] = value
+        return merged
+
+    def _parse_miniref(value: Any) -> Dict[str, str]:
+        text = str(value or '').strip()
+        if not text:
+            return _empty_reference_meta()
+
+        authors = ''
+        publication_date = ''
+        journal = ''
+        parts = [part.strip() for part in text.split(',') if part.strip()]
+        if parts:
+            authors = parts[0]
+            year_idx = None
+            for idx, part in enumerate(parts[1:], start=1):
+                year_match = re.search(r'\b(19|20)\d{2}\b', part)
+                if year_match:
+                    publication_date = year_match.group(0)
+                    year_idx = idx
+                    break
+
+            if year_idx is not None:
+                journal = ', '.join(parts[year_idx + 1:]).strip()
+            elif len(parts) > 1:
+                journal = ', '.join(parts[1:]).strip()
+
+        return {
+            'title': '',
+            'authors': authors,
+            'journal': journal,
+            'publication_date': publication_date,
+            'miniref': text,
+        }
+
+    def _needs_reference_enrichment(meta: Dict[str, str]) -> bool:
+        return not all(
+            str(meta.get(key, '') or '').strip()
+            for key in ('title', 'authors', 'journal', 'publication_date')
+        )
+
+    if 'FBst' in included_df.columns:
+        included_df['FBst'] = included_df['FBst'].apply(clean_id)
+    else:
+        included_df['FBst'] = ''
+    included_df['stock_number'] = included_df.get('stock_number', '').apply(clean_id)
+    included_df['collection'] = included_df.get('collection', '').fillna('').astype(str).str.strip()
+    included_df['relevant_gene_symbols'] = included_df.get('relevant_gene_symbols', '').fillna('').astype(str)
+
+    def _is_custom_row(row):
+        v = row.get('custom_stock', False)
+        return v is True or str(v).strip().lower() in ('true', '1', 'yes')
+
+    custom_included_df = pd.DataFrame()
+    if 'custom_stock' in included_df.columns:
+        custom_mask = included_df.apply(_is_custom_row, axis=1)
+        custom_included_df = included_df[custom_mask].copy()
+
+    included_df = included_df[included_df['FBst'].astype(bool)].copy()
+    if len(included_df) == 0 and len(custom_included_df) == 0:
+        return pd.DataFrame()
+
+    flybase_data_path = Path(flybase_data_path)
+    alleles_dir = flybase_data_path / 'alleles_and_stocks'
+    derived_components_path = alleles_dir / 'fbst_to_derived_stock_component.csv'
+
+    derived_df = pd.DataFrame()
+    if len(included_df) > 0:
+        if not derived_components_path.exists():
+            if verbose:
+                print(f"    Warning: Derived stock component CSV not found: {derived_components_path}")
+        else:
+            derived_df = pd.read_csv(derived_components_path, dtype=str).fillna('')
+
+    try:
+        phenotype_path = find_latest_tsv(alleles_dir, 'genotype_phenotype_data')
+        phenotype_df = load_flybase_tsv(phenotype_path)
+    except FileNotFoundError:
+        if verbose:
+            print(f"    Warning: Could not find genotype_phenotype_data under {alleles_dir}")
+        return pd.DataFrame()
+
+    if len(phenotype_df) == 0:
+        return pd.DataFrame()
+
+    if len(derived_df) > 0:
+        if 'collection_short_name' in derived_df.columns and 'collection' not in derived_df.columns:
+            derived_df = derived_df.rename(columns={'collection_short_name': 'collection'})
+        for col in ('FBst', 'derived_stock_component', 'object_symbol', 'GeneSymbol'):
+            if col not in derived_df.columns:
+                derived_df[col] = ''
+        derived_df['FBst'] = derived_df['FBst'].apply(clean_id)
+        derived_df['derived_stock_component'] = derived_df['derived_stock_component'].apply(clean_id)
+        derived_df = derived_df[derived_df['FBst'].isin(set(included_df['FBst']))].copy()
+        relevant_component_pairs: Set[Tuple[str, str]] = set()
+        if 'relevant_component_ids' in included_df.columns:
+            for _, included_row in included_df[['FBst', 'relevant_component_ids']].iterrows():
+                fbst = clean_id(included_row.get('FBst', ''))
+                if not fbst:
+                    continue
+                for component_id in parse_semicolon_list(included_row.get('relevant_component_ids', '')):
+                    component_id = clean_id(component_id)
+                    if component_id:
+                        relevant_component_pairs.add((fbst, component_id))
+        if relevant_component_pairs:
+            derived_pairs = pd.Series(
+                list(zip(derived_df['FBst'], derived_df['derived_stock_component'])),
+                index=derived_df.index,
+            )
+            derived_df = derived_df[derived_pairs.isin(relevant_component_pairs)].copy()
+
+    if len(derived_df) == 0 and len(custom_included_df) == 0:
+        return pd.DataFrame()
+
+    phenotype_df['reference'] = phenotype_df.get('reference', '').fillna('').astype(str)
+    phenotype_df['phenotype_name'] = phenotype_df.get('phenotype_name', '').fillna('').astype(str)
+    phenotype_df['genotype_FBids'] = phenotype_df.get('genotype_FBids', '').fillna('').astype(str)
+    phenotype_df['genotype_symbols'] = phenotype_df.get('genotype_symbols', '').fillna('').astype(str)
+
+    all_relevant_ids = set()
+    if len(derived_df) > 0:
+        all_relevant_ids.update(derived_df['derived_stock_component'].astype(str).str.strip())
+    if 'relevant_component_ids' in included_df.columns:
+        for ids_str in included_df['relevant_component_ids'].fillna('').astype(str):
+            all_relevant_ids.update(cid for cid in parse_semicolon_list(ids_str) if cid)
+    if len(custom_included_df) > 0 and 'relevant_component_ids' in custom_included_df.columns:
+        for ids_str in custom_included_df['relevant_component_ids'].fillna('').astype(str):
+            all_relevant_ids.update(cid for cid in parse_semicolon_list(ids_str) if cid)
+    all_relevant_ids.discard('')
+
+    def _row_has_relevant_component(fbids_str):
+        return bool(set(_extract_flybase_ids(fbids_str)) & all_relevant_ids)
+
+    relevant_mask = phenotype_df['genotype_FBids'].apply(_row_has_relevant_component)
+    phenotype_df = phenotype_df[relevant_mask].copy()
+
+    if len(phenotype_df) == 0:
+        return pd.DataFrame()
+
+    # ------------------------------------------------------------------
+    # FBrf → title / URL resolution
+    # ------------------------------------------------------------------
+    refs_dir = flybase_data_path / 'references'
+    fbrf_to_pmid: Dict[str, str] = {}
+    fbrf_to_pmcid: Dict[str, str] = {}
+    fbrf_to_doi: Dict[str, str] = {}
+    fbrf_to_miniref: Dict[str, str] = {}
+    reference_meta_by_pmid: Dict[str, Dict[str, str]] = {}
+    pmid_to_resolved_doi: Dict[str, str] = {}
+    try:
+        refs_path = find_latest_tsv(refs_dir, 'fbrf_pmid_pmcid_doi')
+        refs_tsv = load_flybase_tsv(refs_path)
+        for c in ('FBrf', 'PMID', 'PMCID', 'DOI', 'miniref'):
+            if c not in refs_tsv.columns:
+                refs_tsv[c] = ''
+        refs_tsv['FBrf'] = refs_tsv['FBrf'].apply(clean_id)
+        refs_tsv['PMID'] = refs_tsv['PMID'].apply(clean_id)
+        refs_tsv['PMCID'] = refs_tsv['PMCID'].fillna('').astype(str).str.strip()
+        refs_tsv['DOI'] = refs_tsv['DOI'].fillna('').astype(str).str.strip()
+        refs_tsv['miniref'] = refs_tsv['miniref'].fillna('').astype(str).str.strip()
+        fbrf_to_pmid = dict(zip(refs_tsv['FBrf'], refs_tsv['PMID']))
+        fbrf_to_pmcid = dict(zip(refs_tsv['FBrf'], refs_tsv['PMCID']))
+        fbrf_to_doi = dict(zip(refs_tsv['FBrf'], refs_tsv['DOI']))
+        fbrf_to_miniref = dict(zip(refs_tsv['FBrf'], refs_tsv['miniref']))
+        pmid_to_resolved_doi.update({
+            pmid: doi
+            for pmid, doi in zip(refs_tsv['PMID'], refs_tsv['DOI'])
+            if pmid and doi
+        })
+    except FileNotFoundError:
+        if verbose:
+            print(f"    Warning: Could not find fbrf_pmid_pmcid_doi under {refs_dir}")
+
+    reference_sources: List[pd.DataFrame] = []
+    if unfiltered_references_df is not None and len(unfiltered_references_df) > 0:
+        reference_sources.append(unfiltered_references_df)
+    elif references_df is not None and len(references_df) > 0:
+        reference_sources.append(references_df)
+
+    for reference_source_df in reference_sources:
+        if 'PMID' not in reference_source_df.columns:
+            continue
+        for _, ref_row in reference_source_df.iterrows():
+            pmid = clean_id(ref_row.get('PMID', ''))
+            if not pmid:
+                continue
+            doi = str(
+                ref_row.get('DOI', ref_row.get('doi', '')) or ''
+            ).strip()
+            reference_meta_by_pmid[pmid] = _merge_reference_meta(
+                reference_meta_by_pmid.get(pmid, _empty_reference_meta()),
+                {
+                    'title': ref_row.get('title', ''),
+                    'authors': ref_row.get('author(s)', ref_row.get('authors', '')),
+                    'journal': ref_row.get('journal', ''),
+                    'publication_date': ref_row.get(
+                        'publication_date',
+                        ref_row.get('publication date', ref_row.get('date of publication', '')),
+                    ),
+                },
+            )
+            if doi:
+                pmid_to_resolved_doi[pmid] = doi
+
+    cache_to_read = (
+        pubmed_client.cache if pubmed_client is not None and pubmed_client.cache is not None
+        else PubMedCache(pubmed_cache_path) if pubmed_cache_path
+        else None
+    )
+    if cache_to_read is not None:
+        try:
+            cache_data = cache_to_read.load()
+            for pmid, meta in cache_data.items():
+                doi = str(meta.get('doi', '') or '').strip()
+                reference_meta_by_pmid[pmid] = _merge_reference_meta(
+                    reference_meta_by_pmid.get(pmid, _empty_reference_meta()),
+                    {
+                        'title': meta.get('title', ''),
+                        'authors': meta.get('authors', ''),
+                        'journal': meta.get('journal', ''),
+                        'publication_date': meta.get('year', ''),
+                    },
+                )
+                if doi:
+                    pmid_to_resolved_doi[pmid] = doi
+        except Exception as exc:
+            print(f"    Warning: Could not load PubMed cache: {exc}")
+
+    phenotype_fbrfs: Set[str] = set()
+    for raw_reference_ids in phenotype_df['reference'].dropna().astype(str):
+        for value in raw_reference_ids.split('|'):
+            fbrf = clean_id(value)
+            if fbrf:
+                phenotype_fbrfs.add(fbrf)
+
+    phenotype_pmids = sorted({
+        pmid
+        for fbrf in phenotype_fbrfs
+        for pmid in [clean_id(fbrf_to_pmid.get(fbrf, ''))]
+        if pmid
+    })
+    pmids_to_fetch = [
+        pmid
+        for pmid in phenotype_pmids
+        if _needs_reference_enrichment(reference_meta_by_pmid.get(pmid, _empty_reference_meta()))
+    ]
+    if pmids_to_fetch and pubmed_client is not None:
+        try:
+            fetched_metadata = pubmed_client.fetch_metadata(pmids_to_fetch)
+            for pmid, meta in fetched_metadata.items():
+                doi = str(meta.get('doi', '') or '').strip()
+                reference_meta_by_pmid[pmid] = _merge_reference_meta(
+                    reference_meta_by_pmid.get(pmid, _empty_reference_meta()),
+                    {
+                        'title': meta.get('title', ''),
+                        'authors': meta.get('authors', ''),
+                        'journal': meta.get('journal', ''),
+                        'publication_date': meta.get('year', ''),
+                    },
+                )
+                if doi:
+                    pmid_to_resolved_doi[pmid] = doi
+        except Exception as exc:
+            print(f"    Warning: Could not fetch PubMed metadata for phenotype references: {exc}")
+
+    def _resolve_fbrf(fbrf: str) -> Dict[str, str]:
+        """Return hyperlink display + metadata for an FBrf ID."""
+        pmid = fbrf_to_pmid.get(fbrf, '')
+        pmcid = fbrf_to_pmcid.get(fbrf, '')
+        doi = fbrf_to_doi.get(fbrf, '')
+        meta = _empty_reference_meta()
+        if pmid:
+            meta = dict(reference_meta_by_pmid.get(pmid, _empty_reference_meta()))
+            doi = pmid_to_resolved_doi.get(pmid, '') or doi
+        miniref = fbrf_to_miniref.get(fbrf, '')
+        if miniref:
+            meta = _merge_reference_meta(meta, _parse_miniref(miniref))
+        if doi:
+            url = f"https://doi.org/{doi}" if not doi.startswith('http') else doi
+        elif pmid:
+            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+        elif pmcid:
+            normalized_pmcid = pmcid if pmcid.startswith('PMC') else f"PMC{pmcid}"
+            url = f"https://pmc.ncbi.nlm.nih.gov/articles/{normalized_pmcid}/"
+        else:
+            url = f"https://flybase.org/reports/{fbrf}"
+        display = meta.get('title', '') or meta.get('miniref', '') or doi or fbrf
+        return {
+            'display': display,
+            'url': url,
+            'authors': meta.get('authors', ''),
+            'journal': meta.get('journal', ''),
+            'publication_date': meta.get('publication_date', ''),
+        }
+
+    # ------------------------------------------------------------------
+
+    stock_meta_by_fbst: Dict[str, Dict] = {}
+    if len(included_df) > 0:
+        stock_meta = (
+            included_df.groupby('FBst', sort=False)
+            .agg(
+                stock_number=('stock_number', lambda s: unique_join(s.tolist())),
+                collection=('collection', lambda s: unique_join(s.tolist())),
+                gene_symbol=('relevant_gene_symbols', lambda s: unique_join([g for raw in s.tolist() for g in parse_semicolon_list(raw)])),
+            )
+            .reset_index()
+        )
+        stock_meta_by_fbst = stock_meta.set_index('FBst').to_dict('index')
+
+    # Build metadata for custom_stock rows keyed by stock_number (allele symbol)
+    custom_meta_by_stock_num: Dict[str, Dict] = {}
+    if len(custom_included_df) > 0:
+        for _, crow in custom_included_df.iterrows():
+            sn = str(crow.get('stock_number', '') or '').strip()
+            if not sn:
+                continue
+            custom_meta_by_stock_num[sn] = {
+                'stock_number': sn,
+                'collection': str(crow.get('collection', '') or '').strip(),
+                'gene_symbol': unique_join(parse_semicolon_list(str(crow.get('relevant_gene_symbols', '')))),
+            }
+
+    # Build reverse index: component_id -> set of stock keys (FBst for
+    # stock-backed rows, stock_number for custom rows), using both
+    # derived_stock_component (Chado-level) and relevant_component_ids
+    # (Stage 1 allele-level) so phenotype rows referencing FBal IDs can
+    # still resolve to stocks whose Chado entries only have FBti/FBtp.
+    component_to_stock_keys: Dict[str, Set[str]] = {}
+    if len(derived_df) > 0:
+        for _, row in derived_df.iterrows():
+            cid = clean_id(row.get('derived_stock_component', ''))
+            fbst = clean_id(row.get('FBst', ''))
+            if cid and fbst:
+                component_to_stock_keys.setdefault(cid, set()).add(fbst)
+    if 'relevant_component_ids' in included_df.columns:
+        for _, row in included_df.iterrows():
+            fbst = clean_id(row.get('FBst', ''))
+            if not fbst:
+                continue
+            for cid in parse_semicolon_list(str(row.get('relevant_component_ids', ''))):
+                cid = clean_id(cid)
+                if cid:
+                    component_to_stock_keys.setdefault(cid, set()).add(fbst)
+    if len(custom_included_df) > 0 and 'relevant_component_ids' in custom_included_df.columns:
+        for _, crow in custom_included_df.iterrows():
+            sn = str(crow.get('stock_number', '') or '').strip()
+            if not sn:
+                continue
+            for cid in parse_semicolon_list(str(crow.get('relevant_component_ids', ''))):
+                cid = clean_id(cid)
+                if cid:
+                    component_to_stock_keys.setdefault(cid, set()).add(sn)
+
+    # Build component_id -> symbol lookup from derived_df and included_df
+    component_id_to_symbol: Dict[str, str] = {}
+    if len(derived_df) > 0:
+        for _, row in derived_df.iterrows():
+            cid = clean_id(row.get('derived_stock_component', ''))
+            sym = str(row.get('object_symbol', '') or '').strip()
+            if cid and sym:
+                component_id_to_symbol[cid] = sym
+    for src_df in [included_df, custom_included_df]:
+        if len(src_df) > 0 and 'relevant_fbal_ids' in src_df.columns and 'relevant_fbal_symbols' in src_df.columns:
+            for _, row in src_df.iterrows():
+                for cid, sym in zip(
+                    parse_semicolon_list(str(row.get('relevant_fbal_ids', ''))),
+                    parse_semicolon_list(str(row.get('relevant_fbal_symbols', ''))),
+                ):
+                    cid = clean_id(cid)
+                    sym = str(sym).strip()
+                    if cid and sym and cid not in component_id_to_symbol:
+                        component_id_to_symbol[cid] = sym
+
+    phenotype_rows: List[Dict[str, str]] = []
+    for _, pheno_row in phenotype_df.iterrows():
+        component_ids = _extract_flybase_ids(pheno_row.get('genotype_FBids', ''))
+        if not component_ids:
+            continue
+
+        matched_keys: Dict[str, Set[str]] = {}
+        for cid in component_ids:
+            for key in component_to_stock_keys.get(cid, set()):
+                matched_keys.setdefault(key, set()).add(cid)
+        if not matched_keys:
+            continue
+
+        phenotype_name = str(pheno_row.get('phenotype_name', '') or '').strip()
+        genotype_label = str(pheno_row.get('genotype_symbols', '') or '').strip()
+        raw_fbrfs = [clean_id(v) for v in str(pheno_row.get('reference', '') or '').split('|') if clean_id(v)]
+        if not phenotype_name and not raw_fbrfs:
+            continue
+
+        for stock_key, matched_cids in matched_keys.items():
+            stock_info = stock_meta_by_fbst.get(stock_key) or custom_meta_by_stock_num.get(stock_key)
+            if not stock_info:
+                continue
+            component_symbols = unique_join(
+                component_id_to_symbol.get(cid, cid) for cid in matched_cids
+            )
+            component_gene_symbols = ''
+            if len(derived_df) > 0:
+                matched_derived = derived_df[
+                    (derived_df['FBst'] == stock_key)
+                    & derived_df['derived_stock_component'].isin(matched_cids)
+                ]
+                if len(matched_derived) > 0:
+                    component_gene_symbols = unique_join(
+                        matched_derived.get('GeneSymbol', pd.Series(dtype=str)).tolist()
+                    )
+            if not component_gene_symbols:
+                component_gene_symbols = str(stock_info.get('gene_symbol', '') or '').strip()
+
+            refs_to_emit = raw_fbrfs if raw_fbrfs else ['']
+            for fbrf in refs_to_emit:
+                ref_details = _resolve_fbrf(fbrf) if fbrf else {
+                    'display': '',
+                    'url': '',
+                    'authors': '',
+                    'journal': '',
+                    'publication_date': '',
+                }
+                stock_num = str(stock_info.get('stock_number', '') or '').strip()
+                collection = str(stock_info.get('collection', '') or '').strip()
+                source_stock = f"{collection} ({stock_num})" if collection and stock_num else stock_num or collection
+                phenotype_rows.append({
+                    'FBst': stock_key if stock_key.startswith('FBst') else '',
+                    'Gene': component_gene_symbols,
+                    'Reagent Type or Allele Symbol': component_symbols,
+                    'Source/ Stock #': source_stock,
+                    'Genotype': genotype_label,
+                    'Phenotype': phenotype_name,
+                    'Reference': ref_details['display'],
+                    'Authors': ref_details['authors'],
+                    'Journal': ref_details['journal'],
+                    'Year of Publication': ref_details['publication_date'],
+                    '_reference_url': ref_details['url'],
+                })
+
+    if not phenotype_rows:
+        return pd.DataFrame()
+
+    phenotype_sheet = pd.DataFrame(phenotype_rows)
+    phenotype_sheet = (
+        phenotype_sheet.groupby(
+            [
+                'Source/ Stock #',
+                'Genotype',
+                'Reference',
+                'Authors',
+                'Journal',
+                'Year of Publication',
+                '_reference_url',
+            ],
+            sort=False,
+            as_index=False,
+        )
+        .agg({
+            'Gene': lambda s: unique_join(s.tolist()),
+            'Reagent Type or Allele Symbol': lambda s: unique_join(s.tolist()),
+            'Phenotype': lambda s: unique_join(s.tolist()),
+        })
+    )
+    # Order rows by:
+    # 1) Gene blocks (genes with more unique reagents first),
+    # 2) Reagent blocks within each gene (reagents with more unique phenotypes first),
+    # while keeping rows for the same reagent adjacent.
+    def _split_sheet_values(value: Any) -> List[str]:
+        return [v for v in parse_semicolon_list(str(value or '')) if v and v != '-']
+
+    gene_to_reagents: Dict[str, Set[str]] = defaultdict(set)
+    gene_reagent_to_phenotypes: Dict[Tuple[str, str], Set[str]] = defaultdict(set)
+    for _, row in phenotype_sheet.iterrows():
+        genes = _split_sheet_values(row.get('Gene', ''))
+        if not genes:
+            genes = ['']
+        reagent = str(row.get('Source/ Stock #', '') or '').strip()
+        phenotypes = _split_sheet_values(row.get('Phenotype', ''))
+        for gene in genes:
+            if reagent:
+                gene_to_reagents[gene].add(reagent)
+            gene_reagent_to_phenotypes[(gene, reagent)].update(phenotypes)
+
+    gene_sort_order = sorted(
+        gene_to_reagents.keys(),
+        key=lambda gene: (
+            -len(gene_to_reagents.get(gene, set())),
+            str(gene).lower(),
+            str(gene),
+        ),
+    )
+    gene_rank = {gene: idx for idx, gene in enumerate(gene_sort_order)}
+    gene_reagent_count = {
+        gene: len(reagents)
+        for gene, reagents in gene_to_reagents.items()
+    }
+
+    reagent_rank_by_gene: Dict[str, Dict[str, int]] = {}
+    for gene in gene_sort_order:
+        ordered_reagents = sorted(
+            gene_to_reagents.get(gene, set()),
+            key=lambda reagent: (
+                -len(gene_reagent_to_phenotypes.get((gene, reagent), set())),
+                reagent.lower(),
+                reagent,
+            ),
+        )
+        reagent_rank_by_gene[gene] = {
+            reagent: idx for idx, reagent in enumerate(ordered_reagents)
+        }
+
+    phenotype_sheet['_gene_values'] = phenotype_sheet['Gene'].apply(_split_sheet_values)
+    phenotype_sheet['_primary_gene'] = phenotype_sheet['_gene_values'].apply(
+        lambda genes: min(
+            genes if genes else [''],
+            key=lambda gene: (
+                gene_rank.get(gene, float('inf')),
+                str(gene).lower(),
+                str(gene),
+            ),
+        )
+    )
+    phenotype_sheet['_primary_reagent'] = (
+        phenotype_sheet['Source/ Stock #'].fillna('').astype(str).str.strip()
+    )
+    phenotype_sheet['_gene_reagent_count'] = phenotype_sheet['_primary_gene'].map(
+        lambda gene: gene_reagent_count.get(gene, 0)
+    )
+    phenotype_sheet['_reagent_rank_within_gene'] = phenotype_sheet.apply(
+        lambda row: reagent_rank_by_gene.get(row['_primary_gene'], {}).get(
+            row['_primary_reagent'],
+            float('inf'),
+        ),
+        axis=1,
+    )
+
+    phenotype_sheet = phenotype_sheet.sort_values(
+        by=[
+            '_gene_reagent_count',
+            '_primary_gene',
+            '_reagent_rank_within_gene',
+            '_primary_reagent',
+            'Genotype',
+            'Reference',
+            'Authors',
+            'Journal',
+            'Year of Publication',
+        ],
+        ascending=[False, True, True, True, True, True, True, True, True],
+    ).reset_index(drop=True)
+    return phenotype_sheet[[
+        'Gene',
+        'Reagent Type or Allele Symbol',
+        'Source/ Stock #',
+        'Genotype',
+        'Phenotype',
+        'Reference',
+        'Authors',
+        'Journal',
+        'Year of Publication',
+        '_reference_url',
+    ]]
+
+
+def _summarize_stock_phenotype_sheet(phenotype_sheet_df: pd.DataFrame) -> Dict[str, int]:
+    """Return unique gene, stock, and reference counts for the phenotype sheet."""
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return {
+            'genes': 0,
+            'stocks': 0,
+            'references': 0,
+        }
+
+    unique_genes: Set[str] = set()
+    if 'Gene' in phenotype_sheet_df.columns:
+        for raw in phenotype_sheet_df['Gene'].dropna().astype(str):
+            for gene in parse_semicolon_list(raw):
+                gene = gene.strip()
+                if gene and gene != '-':
+                    unique_genes.add(gene)
+
+    unique_stocks: Set[str] = set()
+    source_stocks = (
+        phenotype_sheet_df['Source/ Stock #'].fillna('').astype(str)
+        if 'Source/ Stock #' in phenotype_sheet_df.columns
+        else pd.Series(dtype=str)
+    )
+    for source_stock in source_stocks:
+        source_stock = source_stock.strip()
+        if source_stock and source_stock != '-':
+            unique_stocks.add(source_stock)
+
+    unique_references: Set[Tuple[str, str]] = set()
+    reference_labels = (
+        phenotype_sheet_df['Reference'].fillna('').astype(str)
+        if 'Reference' in phenotype_sheet_df.columns
+        else pd.Series(dtype=str)
+    )
+    reference_urls = (
+        phenotype_sheet_df['_reference_url'].fillna('').astype(str)
+        if '_reference_url' in phenotype_sheet_df.columns
+        else pd.Series(dtype=str)
+    )
+    for reference_label, reference_url in zip(reference_labels, reference_urls):
+        reference_label = reference_label.strip()
+        reference_url = reference_url.strip()
+        if reference_label or reference_url:
+            unique_references.add((reference_label, reference_url))
+
+    return {
+        'genes': len(unique_genes),
+        'stocks': len(unique_stocks),
+        'references': len(unique_references),
+    }
+
+
+def _build_stock_sheet_by_gene(
+    combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict]],
+    references_df: Optional[pd.DataFrame],
+    csv_input_genes: Optional[Set[str]] = None,
+    gene_synonyms_map: Optional[Dict[str, str]] = None,
+    current_to_input_map: Optional[Dict[str, str]] = None,
+) -> pd.DataFrame:
+    """
+    Build a grouped sheet with unique (stock, PMID) keyword-hit rows.
+    
+    Inclusion rules:
+    - Stocks must come from defined output categories (Sheet1..N dataframes).
+    - Stocks must be Ref++ (>=1 keyword-hit title/abstract reference).
+    - Rows are unique (stock, PMID) pairs for keyword-hit PMIDs only.
+    """
+    # Collect all stocks that made it into defined category sheets.
+    included_rows: List[pd.Series] = []
+    for _combo, out_df, _summary in combination_outputs:
+        if out_df is None or len(out_df) == 0:
+            continue
+        included_rows.extend([row for _, row in out_df.iterrows()])
+    
+    if not included_rows:
+        return pd.DataFrame()
+    
+    # Build PMID -> reference metadata map and keyword-hit set from References sheet.
+    ref_meta: Dict[str, Dict[str, str]] = {}
+    keyword_hit_pmids: Set[str] = set()
+    if references_df is not None and len(references_df) > 0 and 'PMID' in references_df.columns:
+        kw_ref_col = find_keyword_title_abstract_column(references_df)
+        for _, r in references_df.iterrows():
+            pmid = clean_id(r.get('PMID', ''))
+            if not pmid:
+                continue
+            ref_meta[pmid] = {
+                'title': str(r.get('title', '') or ''),
+                'journal': str(r.get('journal', '') or ''),
+                'publication_date': str(r.get('publication_date', '') or ''),
+                'authors': str(r.get('author(s)', '') or ''),
+            }
+            if kw_ref_col:
+                kw_val = r.get(kw_ref_col, False)
+                if kw_val is True or str(kw_val).strip().lower() in ('true', '1', 'yes'):
+                    keyword_hit_pmids.add(pmid)
+    
+    # If keyword-hit PMIDs are unavailable from references, we can still use stock-level
+    # keyword PMID lists where present.
+    sample_df = pd.DataFrame(included_rows)
+    stock_col = _find_stock_id_column(sample_df)
+    if stock_col is None:
+        return pd.DataFrame()
+    
+    pmid_col = None
+    for c in ['PMID', 'pmid', 'PMIDs']:
+        if c in sample_df.columns:
+            pmid_col = c
+            break
+    if pmid_col is None:
+        return pd.DataFrame()
+    
+    kw_count_col = _find_keyword_ref_count_column(sample_df)
+    kw_pmids_col = _find_keyword_ref_pmids_column(sample_df)
+    keyword_refs_header = _derive_stock_keyword_refs_header(kw_pmids_col)
+    has_keyword_signal = bool(kw_count_col or kw_pmids_col or keyword_hit_pmids)
+    if not has_keyword_signal:
+        return pd.DataFrame()
+    validity_col = _find_column_with_experimental_fallback(
+        list(sample_df.columns), "Functionally Valid Stock?"
+    )
+    
+    gpt_cols = []
+    seen_gpt = set()
+    for c in get_gpt_derived_columns(sample_df):
+        if c not in seen_gpt:
+            gpt_cols.append(c)
+            seen_gpt.add(c)
+    for c in sample_df.columns:
+        if str(c).startswith(EXPERIMENTAL_PREFIX) and c not in seen_gpt:
+            gpt_cols.append(c)
+            seen_gpt.add(c)
+    
+    rows: List[Dict[str, Any]] = []
+    seen_pairs: Set[Tuple[str, str]] = set()
+    
+    for row in included_rows:
+        stock_num = clean_id(row.get(stock_col, ''))
+        if not stock_num:
+            continue
+        
+        # Pick a single gene label per stock (prefer genes from input list).
+        genes = parse_semicolon_list(row.get('relevant_gene_symbols', ''))
+        if not genes:
+            # Gene curation for this sheet is exclusively from relevant_gene_symbols.
+            continue
+        if csv_input_genes:
+            genes_filtered = [g for g in genes if g in csv_input_genes]
+            if not genes_filtered:
+                continue
+            gene_label = genes_filtered[0]
+        else:
+            gene_label = genes[0]
+        
+        if current_to_input_map:
+            gene_label = current_to_input_map.get(gene_label, gene_label)
+        
+        # Determine keyword-hit PMIDs for this stock.
+        pmids_all = [clean_id(p) for p in str(row.get(pmid_col, '')).split(';') if clean_id(p)]
+        
+        pmids_hit: List[str] = []
+        if kw_pmids_col and str(row.get(kw_pmids_col, '')).strip():
+            pmids_hit = [clean_id(p) for p in str(row.get(kw_pmids_col, '')).split(';') if clean_id(p)]
+        elif keyword_hit_pmids:
+            pmids_hit = [p for p in pmids_all if p in keyword_hit_pmids]
+        else:
+            pmids_hit = pmids_all
+        
+        # Ref++ stock gate: must have at least one keyword-hit PMID.
+        kw_ref_count = 0
+        if kw_count_col:
+            try:
+                kw_ref_count = int(row.get(kw_count_col, 0))
+            except (ValueError, TypeError):
+                kw_ref_count = 0
+        if kw_ref_count <= 0:
+            kw_ref_count = len(set(pmids_hit))
+        if kw_ref_count <= 0:
+            continue
+        
+        # Determine stock-level functional validity ordering.
+        is_functionally_valid = False
+        if validity_col:
+            validity_val = str(row.get(validity_col, '') or '').strip().lower()
+            is_functionally_valid = validity_val == ValidationStatus.FUNCTIONALLY_VALIDATED.lower()
+        
+        for pmid in sorted(set(pmids_hit)):
+            pair = (stock_num, pmid)
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            
+            meta = ref_meta.get(pmid, {})
+            kw_refs_for_stock = (
+                _normalize_pmid_list_string(row.get(kw_pmids_col, ""))
+                if kw_pmids_col and kw_pmids_col in row.index
+                else _normalize_pmid_list_string(";".join(pmids_hit))
+            )
+            all_refs_for_stock = _normalize_pmid_list_string(row.get(pmid_col, ""))
+
+            out_row: Dict[str, Any] = {
+                'gene': gene_label,
+                'gene synonyms': _lookup_gene_synonyms(gene_label, gene_synonyms_map),
+                'stock #': stock_num,
+                'pmid': pmid,
+                'title': meta.get('title', ''),
+                'journal': meta.get('journal', ''),
+                'publication date': meta.get('publication_date', ''),
+                'authors': meta.get('authors', ''),
+                keyword_refs_header: kw_refs_for_stock,
+                'Stock (FBal / FBtp / FBti) all references (all for stock)': all_refs_for_stock,
+                '_is_functionally_valid': 1 if is_functionally_valid else 0,
+                '_keyword_ref_count': kw_ref_count,
+            }
+            for gc in gpt_cols:
+                cell_val = row.get(gc, '')
+                out_row[gc] = _extract_row_pmid_entry(cell_val, pmid)
+            rows.append(out_row)
+    
+    if not rows:
+        return pd.DataFrame()
+    
+    out_df = pd.DataFrame(rows)
+    
+    # Group order: genes with more distinct Ref++ stocks first.
+    gene_stock_counts = (
+        out_df.groupby('gene')['stock #']
+        .nunique()
+        .sort_values(ascending=False)
+        .to_dict()
+    )
+    out_df['_gene_stock_count'] = out_df['gene'].map(lambda g: gene_stock_counts.get(g, 0))
+    
+    # Parse publication date for deterministic within-stock PMID sorting.
+    out_df['_pub_date_sort'] = pd.to_datetime(out_df['publication date'], errors='coerce')
+    
+    out_df = out_df.sort_values(
+        by=[
+            '_gene_stock_count',    # gene groups with most Ref++ stocks first
+            'gene',
+            '_is_functionally_valid',  # functionally valid stocks first
+            '_keyword_ref_count',      # then more keyword refs first
+            'stock #',                 # keep same stock adjacent
+            '_pub_date_sort',
+            'pmid',
+        ],
+        ascending=[False, True, False, False, True, False, True],
+    ).reset_index(drop=True)
+    
+    # Final column order: core columns, then non-aggregate GPT columns.
+    keyword_validation_col = None
+    for gc in gpt_cols:
+        if _is_keyword_validation_pmid_column(gc):
+            keyword_validation_col = gc
+            break
+
+    ordered_cols = [
+        'gene', 'gene synonyms', 'stock #', 'pmid', 'title', 'journal',
+        'publication date', 'authors',
+    ]
+    for gc in gpt_cols:
+        if gc == keyword_validation_col:
+            continue
+        if gc not in ordered_cols and gc in out_df.columns:
+            ordered_cols.append(gc)
+
+    # Stock-level aggregate reference columns should appear last, in this order.
+    aggregate_cols = [
+        keyword_refs_header,
+        'Stock (FBal / FBtp / FBti) all references (all for stock)',
+    ]
+    for col in aggregate_cols:
+        if col in out_df.columns and col not in ordered_cols:
+            ordered_cols.append(col)
+    if keyword_validation_col and keyword_validation_col in out_df.columns:
+        ordered_cols.append(keyword_validation_col)
+
+    return out_df[ordered_cols]
+
+
+def write_aggregated_excel(
+    output_path: Path,
+    config: Dict[str, Any],
+    combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict]],
+    references_df: Optional[pd.DataFrame],
+    unfiltered_references_df: Optional[pd.DataFrame] = None,
+    verbose: bool = True,
+    all_input_genes: Optional[Set[str]] = None,
+    genes_no_stocks: Optional[Set[str]] = None,
+    csv_input_genes: Optional[Set[str]] = None,
+    gene_synonyms_map: Optional[Dict[str, str]] = None,
+    soft_run: bool = False,
+    flybase_data_path: Optional[Path] = None,
+    pubmed_cache_path: Optional[Path] = None,
+    pubmed_client: Optional[PubMedClient] = None,
+    current_to_input_map: Optional[Dict[str, str]] = None,
+) -> None:
+    """
+    Write aggregated Excel file with Contents, Sheet1..N, References.
+    
+    Args:
+        output_path: Path to output Excel file
+        config: Configuration dictionary
+        combination_outputs: List of (combination, limited_df, summary_dict) tuples
+        references_df: References DataFrame (may be None)
+        unfiltered_references_df: Full References sheet prior to output-sheet PMID trimming.
+        verbose: Print progress
+        all_input_genes: Set of gene symbols from stocks_df (genes that have
+            matched stocks). Used to identify genes not in any split sheet.
+        genes_no_stocks: Set of gene symbols from the original CSV input that
+            had 0 matched stocks found by Pipeline 1. Displayed separately from
+            genes that have stocks but were filtered out by combinations.
+        csv_input_genes: Set of unique gene symbols from the original CSV input.
+        gene_synonyms_map: Optional map of gene symbol -> semicolon-delimited synonyms.
+        pubmed_cache_path: Path to PubMed cache CSV (for resolving reference titles).
+        pubmed_client: PubMed client used for targeted phenotype-reference enrichment.
+    """
+    filters_config = config.get('filters', {})
+    filter_descriptions = config.get('filterDescriptions', {})
+    settings = config.get('settings', {})
+    max_per_gene = settings.get('maxStocksPerGene')
+    max_per_allele = settings.get('maxStocksPerAllele')
+    
+    # Build summary data, assigning sheet names based on stock presence
+    summary_rows = []
+    sheet_name_idx = 0
+    for combo, limited_df, summary_dict in combination_outputs:
+        has_stocks = len(limited_df) > 0 if limited_df is not None else False
+        if has_stocks:
+            sheet_name_idx += 1
+            summary_dict["Sheet Name"] = f"Sheet{sheet_name_idx}"
+        else:
+            summary_dict["Sheet Name"] = "-"
+        summary_rows.append(summary_dict)
+    summary_df = pd.DataFrame(summary_rows)
+    # Reorder columns to place Sheet Name last
+    cols = summary_df.columns.tolist()
+    if "Sheet Name" in cols:
+        cols.remove("Sheet Name")
+        cols.append("Sheet Name")
+        summary_df = summary_df[cols]
+    
+    # Get used filter names
+    used_filters = set()
+    for combo, _, _ in combination_outputs:
+        used_filters.update(combo)
+    
+    # Build filter definitions with human-readable descriptions
+    filter_def_rows = []
+    for name in sorted(used_filters):
+        if name not in filters_config:
+            continue
+        spec = filters_config[name]
+        meaning = filter_descriptions.get(name, "Filter applied (see config for technical details).")
+        exact_str = filter_spec_to_string(spec)
+        filter_def_rows.append((name, f"{meaning} [{exact_str}]"))
+    
+    # Determine which combinations have stocks
+    combo_has_stocks = [
+        (combo, limited_df, len(limited_df) > 0 if limited_df is not None else False)
+        for combo, limited_df, _ in combination_outputs
+    ]
+    
+    stock_sheet_by_gene_df = pd.DataFrame()
+    stock_phenotype_sheet_df = pd.DataFrame()
+    stock_phenotype_sheet_counts = {
+        'genes': 0,
+        'stocks': 0,
+        'references': 0,
+    }
+    if soft_run:
+        stock_phenotype_sheet_df = _build_stock_phenotype_sheet(
+            combination_outputs,
+            flybase_data_path,
+            references_df=references_df,
+            unfiltered_references_df=unfiltered_references_df,
+            pubmed_cache_path=pubmed_cache_path,
+            pubmed_client=pubmed_client,
+            verbose=verbose,
+        )
+        stock_phenotype_sheet_counts = _summarize_stock_phenotype_sheet(
+            stock_phenotype_sheet_df
+        )
+    else:
+        stock_sheet_by_gene_df = _build_stock_sheet_by_gene(
+            combination_outputs,
+            references_df,
+            csv_input_genes=csv_input_genes,
+            gene_synonyms_map=gene_synonyms_map,
+            current_to_input_map=current_to_input_map,
+        )
+    
+    # Pre-compute gene symbols that appear in at least one sheet
+    genes_in_sheets: Set[str] = set()
+    for _combo, _ldf, _has in combo_has_stocks:
+        if _ldf is not None and len(_ldf) > 0:
+            if 'relevant_gene_symbols' in _ldf.columns:
+                for syms in _ldf['relevant_gene_symbols'].dropna():
+                    for s in str(syms).split(';'):
+                        s = s.strip()
+                        if s and s != '-':
+                            genes_in_sheets.add(s)
+            else:
+                _g_col = _find_gene_id_column(_ldf)
+                if _g_col:
+                    for val in _ldf[_g_col].dropna().astype(str):
+                        for v in val.split(';'):
+                            v = v.strip()
+                            if v and v != '-':
+                                genes_in_sheets.add(v)
+    
+    # Write Excel
+    with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+        workbook = writer.book
+        
+        # Formats
+        fmt_13 = workbook.add_format({'font_size': 13, 'align': 'left'})
+        fmt_13_bold = workbook.add_format({'font_size': 13, 'bold': True, 'align': 'left'})
+        bold_bottom = workbook.add_format({'bold': True, 'bottom': 2, 'font_size': 13, 'align': 'left'})
+        fmt_faint_bottom = workbook.add_format({'font_size': 13, 'bottom': 2, 'bottom_color': '#808080', 'align': 'left'})
+        fmt_grey = workbook.add_format({'bg_color': '#D9D9D9'})
+        fmt_dark_grey_white = workbook.add_format(
+            {'bg_color': '#595959', 'font_color': '#FFFFFF'}
+        )
+        
+        # Contents sheet
+        contents_ws = workbook.add_worksheet("Contents")
+        col_widths = defaultdict(int)
+        
+        def write_cell(r, c, val, fmt=None):
+            f = fmt if fmt else fmt_13
+            if isinstance(val, bool):
+                s = str(val)
+                contents_ws.write_string(r, c, s, f)
+                col_widths[c] = max(col_widths[c], len(s))
+            elif isinstance(val, (int, float)) and not pd.isna(val):
+                contents_ws.write_number(r, c, val, f)
+                col_widths[c] = max(col_widths[c], len(str(val)))
+            else:
+                s = str(val) if val is not None and not (isinstance(val, float) and pd.isna(val)) else ""
+                contents_ws.write_string(r, c, s, f)
+                col_widths[c] = max(col_widths[c], len(s))
+        
+        def write_row(r, c, vals, fmt=None):
+            for i, v in enumerate(vals):
+                write_cell(r, c + i, v, fmt)
+        
+        row = 0
+        
+        # Section 1: Counts table
+        write_cell(row, 0, "Stock / Allele / Gene counts per combination")
+        row += 1
+        
+        # Format limits (treat very large numbers as unlimited)
+        gene_limit_str = 'unlimited' if (max_per_gene is None or max_per_gene >= 1000000) else str(max_per_gene)
+        allele_limit_str = 'unlimited' if (max_per_allele is None or max_per_allele >= 1000000) else str(max_per_allele)
+        limits_str = f"Limits: up to {gene_limit_str} stocks per gene, up to {allele_limit_str} stocks per allele"
+        write_cell(row, 0, limits_str)
+        row += 1
+        
+        # Show gene counts (intersect with input genes to avoid counting hitchhiker genes)
+        n_in_sheets = len(genes_in_sheets & csv_input_genes) if csv_input_genes else len(genes_in_sheets)
+        n_no_stocks = len(genes_no_stocks) if genes_no_stocks else 0
+        if csv_input_genes is not None:
+            n_input_csv = len(csv_input_genes)
+            input_genes_str = str(n_input_csv)
+            counts_str = (
+                f"Total Input Genes (across all sets): {input_genes_str}\n"
+                f"Total Genes Included in below Categories: {n_in_sheets}\n"
+                f"Input Genes with 0 matched stocks: {n_no_stocks}"
+            )
+        else:
+            counts_str = (
+                f"Total Input Genes (across all sets): unknown (no CSV gene lists found)\n"
+                f"Total Genes Included in below Categories: {n_in_sheets}"
+            )
+        write_cell(row, 0, counts_str)
+        row += 1
+        
+        # Show search terms used for Ref++ determination
+        keywords_list = settings.get('relevantSearchTerms', [])
+        if keywords_list:
+            write_cell(row, 0, f"Search terms (for Ref++ status, case-insensitive): {', '.join(keywords_list)}")
+            row += 1
+            kw_ref_col_name = f"{' OR '.join(keywords_list)} references count"
+            write_cell(row, 0, f"Keyword reference count column: \"{kw_ref_col_name}\"")
+            row += 1
+        
+        if len(summary_df) > 0:
+            write_row(row, 0, summary_df.columns.tolist(), bold_bottom)
+            row += 1
+            for i, (_, r) in enumerate(summary_df.iterrows()):
+                row_fmt = fmt_faint_bottom if (i + 1) % 3 == 0 else fmt_13
+                write_row(row, 0, ["" if pd.isna(x) else x for x in r.tolist()], row_fmt)
+                row += 1
+            
+            # Total row with unique counts across all combinations
+            all_stock_ids = set()
+            all_gene_ids = set()
+            all_allele_ids = set()
+            for combo, limited_df, _ in combination_outputs:
+                if limited_df is not None and len(limited_df) > 0:
+                    s_col = _find_stock_id_column(limited_df)
+                    # Prefer relevant_gene_symbols for gene counting (consistent
+                    # with csv_input_genes which contains symbols, not FBgn IDs)
+                    g_col = 'relevant_gene_symbols' if 'relevant_gene_symbols' in limited_df.columns else _find_gene_id_column(limited_df)
+                    a_col = _find_allele_column(limited_df)
+                    if s_col:
+                        all_stock_ids.update(
+                            v for v in limited_df[s_col].dropna().astype(str).unique()
+                            if v and v != '-'
+                        )
+                    if g_col:
+                        for cell in limited_df[g_col].dropna().astype(str).unique():
+                            for v in cell.split(';'):
+                                v = v.strip()
+                                if v and v != '-':
+                                    all_gene_ids.add(v)
+                    if a_col:
+                        # Only count alleles from rows whose gene(s) are in the input set
+                        for _, _row in limited_df.iterrows():
+                            if csv_input_genes is not None and g_col:
+                                row_genes = set()
+                                raw_g = str(_row.get(g_col, ''))
+                                for g in raw_g.split(';'):
+                                    g = g.strip()
+                                    if g and g != '-' and g.lower() != 'nan':
+                                        row_genes.add(g)
+                                if not (row_genes & csv_input_genes):
+                                    continue
+                            raw_a = str(_row.get(a_col, ''))
+                            for v in raw_a.split(';'):
+                                v = v.strip()
+                                if v and v != '-' and v.lower() != 'nan':
+                                    all_allele_ids.add(v)
+            # Filter gene IDs to only input genes (exclude hitchhiker genes)
+            if csv_input_genes is not None:
+                all_gene_ids &= csv_input_genes
+            fmt_total = workbook.add_format({'bold': True, 'font_size': 13, 'top': 2, 'align': 'left'})
+            total_row = []
+            for col in summary_df.columns.tolist():
+                if col == "Category":
+                    total_row.append("Total (unique across sheets)")
+                elif col == "# Stocks":
+                    total_row.append(len(all_stock_ids))
+                elif col == "# Alleles":
+                    total_row.append(len(all_allele_ids))
+                elif col == "# Genes":
+                    total_row.append(len(all_gene_ids))
+                else:
+                    total_row.append("")
+            write_row(row, 0, total_row, fmt_total)
+            row += 1
+        row += 2
+        
+        # Section 2: Filter definitions
+        write_cell(row, 0, "What each filter means")
+        row += 1
+        
+        if len(filter_def_rows) > 0:
+            write_row(row, 0, ["Filter / Meaning"], bold_bottom)
+            row += 1
+            for name, meaning in filter_def_rows:
+                combined_text = f"{name}: {meaning}"
+                contents_ws.write_rich_string(
+                    row, 0,
+                    fmt_13_bold, name,
+                    fmt_13, f": {meaning}",
+                )
+                col_widths[0] = max(col_widths[0], len(combined_text))
+                row += 1
+        row += 2
+        
+        # Section 3: Sheet / combination and gene lists
+        write_cell(row, 0, "Unique gene symbols per defined sheet")
+        row += 1
+        
+        sheet_index = 0
+        wrote_any_sheet = False
+        for combo, limited_df, has_stocks in combo_has_stocks:
+            if not has_stocks or limited_df is None or len(limited_df) == 0:
+                continue
+            
+            combo_label = " >> ".join(combo)
+            sheet_index += 1
+            label = f"Sheet{sheet_index}: {combo_label}"
+            
+            write_cell(row, 0, label, fmt_13_bold)
+            row += 1
+            wrote_any_sheet = True
+            
+            gene_col = _find_gene_id_column(limited_df)
+            if gene_col:
+                gene_ids = limited_df[gene_col].dropna().astype(str).unique()
+                # Try to get gene symbols from relevant_gene_symbols column
+                symbols = set()
+                if 'relevant_gene_symbols' in limited_df.columns:
+                    for syms in limited_df['relevant_gene_symbols'].dropna():
+                        for s in str(syms).split(';'):
+                            s = s.strip()
+                            if s and s != '-':
+                                symbols.add(s)
+                if not symbols:
+                    symbols = set(gene_ids)
+                
+                for sym in sorted(symbols):
+                    write_cell(row, 0, sym)
+                    row += 1
+            else:
+                write_cell(row, 0, "(no gene column found)")
+                row += 1
+            row += 1
+        
+        if not wrote_any_sheet:
+            write_cell(row, 0, "(no sheets with stocks)")
+            row += 2
+
+        # Section 4: What the references-focused sheets include.
+        sheet_label = "Stock Phenotype Sheet" if soft_run else "Stock Sheet by Gene"
+        write_cell(row, 0, f"References and {sheet_label} inclusion criteria", fmt_13_bold)
+        row += 1
+        write_cell(
+            row,
+            0,
+            "References sheet includes PMIDs cited by stocks that are present in output sheets (Sheet1..N).",
+        )
+        row += 1
+        if soft_run:
+            write_cell(
+                row,
+                0,
+                "Stock Phenotype Sheet includes unique (source/stock, genotype, reference) rows for stocks present in output sheets, based on shared gene-relevant stock-component IDs found in FlyBase genotype_phenotype_data. Genes, reagent type or allele symbols, and phenotype terms are aggregated within each row.",
+            )
+            row += 1
+            write_cell(
+                row,
+                0,
+                "Stock Phenotype Sheet totals: "
+                f"{stock_phenotype_sheet_counts['genes']} unique genes, "
+                f"{stock_phenotype_sheet_counts['stocks']} unique stocks, "
+                f"{stock_phenotype_sheet_counts['references']} unique references.",
+            )
+        else:
+            write_cell(
+                row,
+                0,
+                "Stock Sheet by Gene includes unique (stock, keyword-hit PMID) rows for stocks present in output sheets.",
+            )
+        row += 2
+        
+        # Section 5a: Genes with stocks but not included in any split sheet
+        if all_input_genes is not None:
+            genes_not_in_sheets = sorted(all_input_genes - genes_in_sheets)
+            
+            write_cell(
+                row, 0,
+                f"Genes with matched stocks but not included in any split sheet "
+                f"({len(genes_not_in_sheets)} of {len(all_input_genes)} genes with stocks)",
+                fmt_13_bold,
+            )
+            row += 1
+            
+            if genes_not_in_sheets:
+                _c2i = current_to_input_map or {}
+                for sym in genes_not_in_sheets:
+                    write_cell(row, 0, _c2i.get(sym, sym))
+                    row += 1
+            else:
+                write_cell(row, 0, "(all genes with stocks appear in at least one sheet)")
+                row += 1
+            row += 1
+        
+        # Section 5b: Input genes with 0 matched stocks
+        if csv_input_genes is not None:
+            genes_no_stocks_sorted = sorted(genes_no_stocks) if genes_no_stocks else []
+            write_cell(
+                row, 0,
+                f"Input Genes with 0 matched stocks "
+                f"({len(genes_no_stocks_sorted)} of {len(csv_input_genes)} input genes)",
+                fmt_13_bold,
+            )
+            row += 1
+            
+            if genes_no_stocks_sorted:
+                for sym in genes_no_stocks_sorted:
+                    write_cell(row, 0, sym)
+                    row += 1
+            else:
+                write_cell(row, 0, "(none)")
+                row += 1
+            row += 1
+        
+        # Auto-resize Contents columns
+        for c, w in col_widths.items():
+            contents_ws.set_column(c, c, min(w + 2, 255))
+        
+        # Data sheets (Sheet1, Sheet2, ...)
+        sheet_index = 0
+        for combo, limited_df, has_stocks in combo_has_stocks:
+            if has_stocks and limited_df is not None and len(limited_df) > 0:
+                sheet_index += 1
+                sheet_name = f"Sheet{sheet_index}"
+                # Prefix GPT-derived column headers with [EXPERIMENTAL]
+                cleaned_df = _normalize_stock_sheet_columns(limited_df)
+                limited_df_out = apply_experimental_prefix(cleaned_df)
+                limited_df_out.to_excel(writer, sheet_name=sheet_name, index=False)
+                # Apply light grey fill to GPT-derived column headers
+                _apply_grey_fill_xlsxwriter(
+                    writer.sheets[sheet_name], limited_df_out, fmt_grey
+                )
+        
+        # References sheet
+        if references_df is not None and len(references_df) > 0:
+            references_df.to_excel(writer, sheet_name="References", index=False)
+            kw_title_col = find_keyword_title_abstract_column(references_df)
+            if kw_title_col and kw_title_col in references_df.columns:
+                refs_ws = writer.sheets["References"]
+                true_fmt = workbook.add_format({'bg_color': '#CFE8CF'})
+                false_fmt = workbook.add_format({'bg_color': '#EBC7C7'})
+                kw_col_idx = references_df.columns.get_loc(kw_title_col)
+                for excel_row_idx, value in enumerate(references_df[kw_title_col].tolist(), start=1):
+                    val_norm = str(value).strip().lower()
+                    if value is True or val_norm in ("true", "1", "yes"):
+                        refs_ws.write_boolean(excel_row_idx, kw_col_idx, True, true_fmt)
+                    elif value is False or val_norm in ("false", "0", "no"):
+                        refs_ws.write_boolean(excel_row_idx, kw_col_idx, False, false_fmt)
+        
+        if soft_run:
+            if stock_phenotype_sheet_df is not None and len(stock_phenotype_sheet_df) > 0:
+                ref_urls = (
+                    stock_phenotype_sheet_df.pop('_reference_url')
+                    if '_reference_url' in stock_phenotype_sheet_df.columns
+                    else None
+                )
+                stock_phenotype_sheet_df.to_excel(
+                    writer, sheet_name="Stock Phenotype Sheet", index=False
+                )
+                if ref_urls is not None and 'Reference' in stock_phenotype_sheet_df.columns:
+                    pheno_ws = writer.sheets["Stock Phenotype Sheet"]
+                    ref_col_idx = stock_phenotype_sheet_df.columns.get_loc('Reference')
+                    url_fmt = workbook.add_format({'font_color': 'blue', 'underline': 1})
+                    for excel_row, url in enumerate(ref_urls, start=1):
+                        url = str(url or '').strip()
+                        if not url:
+                            continue
+                        display = str(
+                            stock_phenotype_sheet_df.iloc[excel_row - 1]['Reference'] or ''
+                        ).strip()
+                        if display:
+                            pheno_ws.write_url(excel_row, ref_col_idx, url, url_fmt, display)
+        else:
+            if stock_sheet_by_gene_df is not None and len(stock_sheet_by_gene_df) > 0:
+                stock_sheet_by_gene_out = apply_experimental_prefix(stock_sheet_by_gene_df)
+                stock_sheet_by_gene_out.to_excel(
+                    writer, sheet_name="Stock Sheet by Gene", index=False
+                )
+                stock_aggregate_columns: Set[str] = set()
+                for col_name in stock_sheet_by_gene_out.columns:
+                    col_name_str = str(col_name)
+                    if (
+                        col_name_str.startswith("Stock (")
+                        and col_name_str.endswith("(all for stock)")
+                    ) or _is_keyword_validation_pmid_column(col_name_str):
+                        stock_aggregate_columns.add(col_name_str)
+                _apply_grey_fill_xlsxwriter(
+                    writer.sheets["Stock Sheet by Gene"],
+                    stock_sheet_by_gene_out,
+                    fmt_grey,
+                    dark_header_format=fmt_dark_grey_white,
+                    dark_header_columns=stock_aggregate_columns,
+                )
+    
+    if verbose:
+        print(f"    Saved: {output_path.name}")
+
+
+###############################################################################
+# Main Pipeline Class
+###############################################################################
+
+class StockSplittingPipeline:
+    """
+    Pipeline for organizing stocks using JSON-based filter configurations.
+    
+    This is Pipeline 2 in the fly-stocker workflow:
+    Input: Excel files from Stage 1 (`find-stocks`) output
+    Output: Aggregated Excel file with Contents, Sheet1..N, References sheets
+    """
+    
+    def __init__(self, settings: Optional[Settings] = None):
+        """
+        Initialize the pipeline.
+        
+        Args:
+            settings: Configuration settings (uses defaults if None)
+        """
+        self.settings = settings or Settings()
+        self._pubmed_cache = PubMedCache(self.settings.pubmed_cache_path)
+        self._pubmed_client = PubMedClient(
+            cache=self._pubmed_cache,
+            api_key=self.settings.ncbi_api_key,
+        )
+        self._fulltext_fetcher = FullTextFetcher(
+            unpaywall_token=self.settings.unpaywall_token,
+            ncbi_api_key=self.settings.ncbi_api_key,
+            method_cache_path=self.settings.fulltext_method_cache_path,
+        )
+        self._validator = FunctionalValidator(
+            openai_api_key=self.settings.openai_api_key,
+            model=self.settings.openai_model,
+            log_dir=self.settings.gpt_log_dir / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            if self.settings.enable_gpt_logging
+            else None,
+        )
+    
+    def _find_genes_without_stocks(
+        self,
+        input_dir: Path,
+        stocks_df: pd.DataFrame,
+        verbose: bool = True,
+    ) -> Tuple[Set[str], Optional[Set[str]], Dict[str, str]]:
+        """
+        Identify input genes that have 0 matched stocks.
+
+        Uses FBgn IDs as ground truth so that renamed/synonym gene symbols
+        do not cause false negatives.
+
+        Returns
+        -------
+        genes_no_stocks : set[str]
+            Gene symbols from the input that had zero matched stocks.
+        csv_input_genes : set[str] | None
+            All unique gene symbols from the input CSVs **augmented** with
+            FlyBase current symbols for input genes, or ``None`` if no
+            suitable CSVs were found.
+        current_to_input_map : dict[str, str]
+            Mapping of FlyBase current gene symbols to the user's original
+            input symbols (via FBgn bridge).  Empty when unavailable.
+        """
+        # ── 1. Collect FBgn IDs + gene symbols from input CSVs ──────
+        csv_dirs = [input_dir]
+        if input_dir.parent != input_dir:
+            csv_dirs.append(input_dir.parent)
+
+        fbgn_to_symbol: Dict[str, str] = {}   # FBgn  → display symbol
+        symbol_to_fbgn: Dict[str, str] = {}   # symbol → FBgn (reverse)
+
+        for d in csv_dirs:
+            for csv_path in sorted(d.glob("*.csv")):
+                try:
+                    df = pd.read_csv(csv_path, dtype=str)
+                    if 'flybase_gene_id' not in df.columns:
+                        continue
+
+                    sym_col = next(
+                        (c for c in ('ext_gene', 'gene', 'gene_symbol',
+                                     'Gene', 'Gene_Symbol')
+                         if c in df.columns),
+                        None,
+                    )
+
+                    for _, row in df.iterrows():
+                        fbgn = str(row.get('flybase_gene_id', '')).strip()
+                        if not fbgn.startswith('FBgn'):
+                            continue
+                        sym = fbgn
+                        if sym_col:
+                            s = str(row.get(sym_col, '')).strip()
+                            if s and s.lower() != 'nan':
+                                sym = s
+                        fbgn_to_symbol[fbgn] = sym
+                        symbol_to_fbgn[sym] = fbgn
+                except Exception:
+                    continue
+
+        if not fbgn_to_symbol:
+            if verbose:
+                print("    Note: No CSV gene lists with flybase_gene_id "
+                      "found; cannot identify genes with 0 stocks")
+            return set(), None, {}
+
+        input_fbgns = set(fbgn_to_symbol.keys())
+        csv_input_genes = set(fbgn_to_symbol.values())
+
+        # ── 2. Determine stock FBgn IDs ──────────────────────────────
+        if 'relevant_gene_symbols' not in stocks_df.columns:
+            if verbose:
+                print("    Warning: 'relevant_gene_symbols' column missing "
+                      "from stocks data; cannot compute 0-stock genes")
+            return set(), csv_input_genes, {}
+
+        current_to_input_map: Dict[str, str] = {}
+        stock_fbgns: Set[str] = set()
+
+        has_fbgn_col = 'relevant_flybase_gene_ids' in stocks_df.columns
+
+        if has_fbgn_col:
+            # Preferred path: read FBgn IDs directly from the stocks sheet,
+            # no symbol indirection needed.
+            for _, row in stocks_df[['relevant_gene_symbols', 'relevant_flybase_gene_ids']].iterrows():
+                symbols = [s.strip() for s in str(row.get('relevant_gene_symbols', '')).split(';') if s.strip() and s.strip().lower() != 'nan']
+                fbgns = [f.strip() for f in str(row.get('relevant_flybase_gene_ids', '')).split(';') if f.strip() and f.strip().lower() != 'nan']
+                stock_fbgns.update(f for f in fbgns if f.startswith('FBgn'))
+                for sym, fbgn in zip(symbols, fbgns):
+                    if not fbgn.startswith('FBgn'):
+                        continue
+                    input_sym = fbgn_to_symbol.get(fbgn)
+                    if input_sym and input_sym != sym:
+                        current_to_input_map[sym] = input_sym
+                        csv_input_genes.add(sym)
+        else:
+            # Fallback for old Stage 1 outputs without the FBgn column.
+            stock_symbols: Set[str] = set()
+            for val in stocks_df['relevant_gene_symbols'].dropna().astype(str):
+                for s in val.split(';'):
+                    s = s.strip()
+                    if s and s.lower() != 'nan':
+                        stock_symbols.add(s)
+            for sym in stock_symbols:
+                fbgn = symbol_to_fbgn.get(sym)
+                if fbgn:
+                    stock_fbgns.add(fbgn)
+
+        # ── 3. Compare the two FBgn sets ─────────────────────────────
+        missing_fbgns = input_fbgns - stock_fbgns
+        genes_no_stocks = {fbgn_to_symbol[fbgn] for fbgn in missing_fbgns}
+
+        if verbose:
+            print(f"    Input genes (from CSVs): {len(input_fbgns)}")
+            print(f"    Genes covered in stocks: "
+                  f"{len(input_fbgns - missing_fbgns)}")
+            print(f"    Genes with 0 matched stocks: {len(genes_no_stocks)}")
+            if current_to_input_map:
+                print(f"    Gene symbols remapped (FlyBase current -> input): "
+                      f"{len(current_to_input_map)}")
+
+        return genes_no_stocks, csv_input_genes, current_to_input_map
+    
+    def _compute_derived_columns(
+        self,
+        df: pd.DataFrame,
+        keywords: List[str],
+        verbose: bool = True
+    ) -> pd.DataFrame:
+        """
+        Compute derived columns needed for filtering.
+        
+        Adds: Balancers, multiple_insertions, ALLELE_PAPER_RELEVANCE_SCORE
+        """
+        if verbose:
+            print("    Computing derived columns...")
+        
+        df = df.copy()
+        
+        # Compute Balancers
+        df['num_Balancers'] = normalize_num_balancers_column(df)
+        df['Balancers'] = compute_balancers_column(df)
+        if verbose:
+            has_balancers = (df['num_Balancers'] > 0).sum()
+            print(f"      Balancers: {has_balancers} stocks with balancers")
+        
+        # Compute multiple_insertions
+        df['multiple_insertions'] = compute_multiple_insertions_column(df)
+        if verbose:
+            multi_count = df['multiple_insertions'].sum()
+            print(f"      Multiple insertions: {multi_count} stocks")
+        
+        # Compute ALLELE_PAPER_RELEVANCE_SCORE
+        df['ALLELE_PAPER_RELEVANCE_SCORE'] = compute_allele_paper_relevance_score(df, keywords)
+        if verbose:
+            score_counts = df['ALLELE_PAPER_RELEVANCE_SCORE'].value_counts().to_dict()
+            print(f"      Relevance scores: Ref++ (2)={score_counts.get(2, 0)}, Ref+ (1)={score_counts.get(1, 0)}, Ref- (0)={score_counts.get(0, 0)}")
+        
+        # Normalize PMID column for filtering
+        pmid_col = None
+        for col in ['PMID', 'pmid', 'PMIDs']:
+            if col in df.columns:
+                pmid_col = col
+                break
+        
+        if pmid_col:
+            # Replace empty/NaN with "-" for consistent filtering
+            df[pmid_col] = df[pmid_col].fillna("-").astype(str)
+            df.loc[df[pmid_col].str.strip() == "", pmid_col] = "-"
+        
+        return df
+    
+    def _load_stocks_from_excel(
+        self,
+        excel_path: Path,
+        verbose: bool = True
+    ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], List[str]]:
+        """Load stocks and references from an Excel file."""
+        if verbose:
+            print(f"\n  Loading: {excel_path.name}")
+        
+        # Read Stocks sheet
+        stocks_df = pd.read_excel(excel_path, sheet_name='Stocks')
+        
+        # Read References sheet if it exists
+        references_df = None
+        try:
+            references_df = pd.read_excel(excel_path, sheet_name='References')
+        except ValueError:
+            pass
+        
+        # Extract keywords from the title/abstract keyword-hit column
+        keywords = []
+        kw_ta_col = find_keyword_title_abstract_column(stocks_df)
+        if kw_ta_col:
+            keywords = extract_keywords_from_title_abstract_column(kw_ta_col)
+        else:
+            # Fallback: try the legacy GPT-derived column (for older files)
+            kw_col = find_keyword_column(stocks_df)
+            if kw_col:
+                keywords = extract_keywords_from_column(kw_col)
+        
+        if verbose:
+            print(f"    Loaded {len(stocks_df)} stocks")
+            if references_df is not None:
+                print(f"    Loaded {len(references_df)} references")
+            if keywords:
+                print(f"    Keywords: {', '.join(keywords)}")
+        
+        return stocks_df, references_df, keywords
+    
+    def _sort_stocks_for_priority(
+        self,
+        df: pd.DataFrame,
+        keywords: List[str]
+    ) -> pd.DataFrame:
+        """
+        Sort stocks for priority selection (best stocks first).
+        
+        Priority order:
+        1. Higher ALLELE_PAPER_RELEVANCE_SCORE (2 > 1 > 0)
+        2. More keyword-matching references (keyword_ref_count)
+        3. More total references
+        """
+        df = df.copy()
+        
+        # pipeline_references renames keyword_ref_count to "<kw> references count"
+        kw_count_col = None
+        if 'keyword_ref_count' in df.columns:
+            kw_count_col = 'keyword_ref_count'
+        elif keywords:
+            renamed_col = f"{' OR '.join(keywords)} references count"
+            if renamed_col in df.columns:
+                kw_count_col = renamed_col
+        
+        def get_sort_key(row):
+            score = row.get('ALLELE_PAPER_RELEVANCE_SCORE', 0)
+            
+            # Count keyword refs (title/abstract hits from pipeline_references)
+            kw_ref_count = 0
+            if kw_count_col:
+                try:
+                    kw_ref_count = int(row.get(kw_count_col, 0))
+                except (ValueError, TypeError):
+                    kw_ref_count = 0
+            
+            # Count total refs
+            total_refs = 0
+            pmid_val = row.get('PMID', '')
+            if pd.notna(pmid_val) and str(pmid_val).strip() and str(pmid_val).strip() != "-":
+                total_refs = len([p for p in str(pmid_val).split(";") if p.strip()])
+            
+            return (-score, -kw_ref_count, -total_refs)
+        
+        df['_sort_key'] = df.apply(get_sort_key, axis=1)
+        df = df.sort_values('_sort_key')
+        df = df.drop(columns=['_sort_key'], errors='ignore')
+        
+        return df
+
+    def _build_refpp_validation_tasks(
+        self,
+        combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict]],
+        references_df: Optional[pd.DataFrame],
+        verbose: bool = True,
+    ) -> Tuple[Set[str], Dict[str, List[Tuple[str, str]]]]:
+        """
+        Build (stock -> [(allele, pmid), ...]) tasks only from output sheets whose
+        combinations include Ref++.
+        """
+        keyword_hit_pmids: Set[str] = set()
+        if references_df is not None and len(references_df) > 0 and "PMID" in references_df.columns:
+            kw_ref_col = find_keyword_title_abstract_column(references_df)
+            if kw_ref_col:
+                for _, r in references_df.iterrows():
+                    pmid = clean_id(r.get("PMID", ""))
+                    if not pmid:
+                        continue
+                    kw_val = r.get(kw_ref_col, False)
+                    if kw_val is True or str(kw_val).strip().lower() in ("true", "1", "yes"):
+                        keyword_hit_pmids.add(pmid)
+
+        selected_stock_ids: Set[str] = set()
+        stock_tasks: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+
+        for combo, out_df, _summary in combination_outputs:
+            if "Ref++" not in combo:
+                continue
+            if out_df is None or len(out_df) == 0:
+                continue
+
+            stock_col = _find_stock_id_column(out_df)
+            allele_col = _find_allele_column(out_df)
+            kw_pmids_col = _find_keyword_ref_pmids_column(out_df)
+            pmid_col = None
+            for c in ["PMID", "pmid", "PMIDs"]:
+                if c in out_df.columns:
+                    pmid_col = c
+                    break
+
+            if stock_col is None or allele_col is None:
+                continue
+
+            for _, row in out_df.iterrows():
+                stock_num = clean_id(row.get(stock_col, ""))
+                if not stock_num:
+                    continue
+                selected_stock_ids.add(stock_num)
+
+                alleles = parse_semicolon_list(row.get(allele_col, ""))
+                if not alleles:
+                    continue
+
+                pmids_hit: List[str] = []
+                if kw_pmids_col and str(row.get(kw_pmids_col, "")).strip():
+                    pmids_hit = [
+                        clean_id(p) for p in str(row.get(kw_pmids_col, "")).split(";") if clean_id(p)
+                    ]
+                elif pmid_col and keyword_hit_pmids:
+                    pmids_all = [clean_id(p) for p in str(row.get(pmid_col, "")).split(";") if clean_id(p)]
+                    pmids_hit = [p for p in pmids_all if p in keyword_hit_pmids]
+
+                if not pmids_hit:
+                    continue
+
+                for allele in alleles:
+                    allele_clean = str(allele).strip()
+                    if not allele_clean:
+                        continue
+                    for pmid in sorted(set(pmids_hit)):
+                        stock_tasks[stock_num].append((allele_clean, pmid))
+
+        # De-duplicate tasks per stock
+        deduped_tasks: Dict[str, List[Tuple[str, str]]] = {}
+        for stock_num, tasks in stock_tasks.items():
+            seen: Set[Tuple[str, str]] = set()
+            ordered: List[Tuple[str, str]] = []
+            for allele, pmid in tasks:
+                key = (allele, pmid)
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered.append(key)
+            deduped_tasks[stock_num] = ordered
+
+        if verbose:
+            num_task_stocks = len([s for s, t in deduped_tasks.items() if t])
+            num_tasks = sum(len(t) for t in deduped_tasks.values())
+            print(f"\n    Ref++ output-sheet stocks selected for validation: {len(selected_stock_ids)}")
+            print(f"    Ref++ stocks with keyword-hit validation tasks: {num_task_stocks}")
+            print(f"    Ref++ (stock, allele, PMID) tasks: {num_tasks}")
+
+        return selected_stock_ids, deduped_tasks
+
+    def _run_refpp_functional_validation(
+        self,
+        stocks_df: pd.DataFrame,
+        references_df: Optional[pd.DataFrame],
+        combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict]],
+        keywords: List[str],
+        verbose: bool = True,
+    ) -> Tuple[pd.DataFrame, List[Tuple[List[str], pd.DataFrame, Dict]]]:
+        """
+        Run GPT validation only for stocks appearing in Ref++ output sheets.
+        """
+        selected_stock_ids, stock_tasks = self._build_refpp_validation_tasks(
+            combination_outputs, references_df, verbose=verbose
+        )
+        if not selected_stock_ids:
+            if verbose:
+                print("    No Ref++ output-sheet stocks found; skipping GPT validation.")
+            return stocks_df, combination_outputs
+
+        stock_col = _find_stock_id_column(stocks_df)
+        if stock_col is None:
+            if verbose:
+                print("    Warning: stock ID column not found in stocks_df; skipping GPT validation.")
+            return stocks_df, combination_outputs
+
+        stock_clean_series = stocks_df[stock_col].apply(clean_id)
+        selected_mask = stock_clean_series.isin(selected_stock_ids)
+        selected_stocks_df = stocks_df.loc[selected_mask].copy()
+
+        if len(selected_stocks_df) == 0:
+            if verbose:
+                print("    No selected Ref++ stocks found in source stocks dataframe; skipping GPT validation.")
+            return stocks_df, combination_outputs
+
+        selected_stocks_df = run_functional_validation(
+            stocks_df=selected_stocks_df,
+            references_df=references_df,
+            keywords=keywords,
+            soft_run=self.settings.soft_run,
+            validator=self._validator,
+            fulltext_fetcher=self._fulltext_fetcher,
+            pubmed_client=self._pubmed_client,
+            pubmed_cache=self._pubmed_cache,
+            max_gpt_calls_per_stock=self.settings.max_gpt_calls_per_stock,
+            stock_tasks_override=stock_tasks,
+        )
+
+        if self.settings.soft_run:
+            return stocks_df, combination_outputs
+
+        gpt_cols = get_gpt_derived_columns(selected_stocks_df)
+        if not gpt_cols:
+            return stocks_df, combination_outputs
+
+        validated_values = selected_stocks_df[[stock_col] + gpt_cols].copy()
+        validated_values["_stock_clean"] = validated_values[stock_col].apply(clean_id)
+        validated_values = validated_values.drop(columns=[stock_col]).drop_duplicates("_stock_clean")
+
+        # Merge GPT results back onto full stocks dataframe (non-selected stocks remain empty).
+        stocks_df = stocks_df.copy()
+        stocks_df = stocks_df.drop(columns=[c for c in gpt_cols if c in stocks_df.columns], errors="ignore")
+        stocks_df["_stock_clean"] = stocks_df[stock_col].apply(clean_id)
+        stocks_df = stocks_df.merge(validated_values, on="_stock_clean", how="left")
+        for col in gpt_cols:
+            if col not in stocks_df.columns:
+                stocks_df[col] = ""
+            stocks_df[col] = stocks_df[col].fillna("")
+        stocks_df = stocks_df.drop(columns=["_stock_clean"])
+
+        # Merge GPT columns into each output sheet dataframe.
+        merged_outputs: List[Tuple[List[str], pd.DataFrame, Dict]] = []
+        for combo, out_df, summary in combination_outputs:
+            if out_df is None or len(out_df) == 0:
+                merged_outputs.append((combo, out_df, summary))
+                continue
+
+            out_stock_col = _find_stock_id_column(out_df)
+            if out_stock_col is None:
+                merged_outputs.append((combo, out_df, summary))
+                continue
+
+            out_df2 = out_df.copy()
+            out_df2 = out_df2.drop(columns=[c for c in gpt_cols if c in out_df2.columns], errors="ignore")
+            out_df2["_stock_clean"] = out_df2[out_stock_col].apply(clean_id)
+            out_df2 = out_df2.merge(validated_values, on="_stock_clean", how="left")
+            out_df2 = out_df2.drop(columns=["_stock_clean"])
+            for col in gpt_cols:
+                if col in out_df2.columns:
+                    out_df2[col] = out_df2[col].fillna("")
+            merged_outputs.append((combo, out_df2, summary))
+
+        return stocks_df, merged_outputs
+    
+    def run(
+        self,
+        input_dir: Path,
+        config_path: Optional[Path] = None,
+        verbose: bool = True,
+        run_validation: bool = False,
+    ) -> Optional[Path]:
+        """
+        Run the stock splitting pipeline.
+        
+        Args:
+            input_dir: Directory containing Excel files from Pipeline 1
+            config_path: Path to JSON configuration file (uses default if None)
+            verbose: Print progress information
+            run_validation: If True, append GPT-derived validation columns to
+                Ref++ output-sheet stocks. If False, perform split/filtering only.
+        
+        Returns:
+            Path to output directory, or None if failed
+        """
+        input_dir = Path(input_dir)
+        if not input_dir.is_dir():
+            raise ValueError(f"Input path is not a directory: {input_dir}")
+        
+        # Load configuration
+        if config_path is None:
+            config_path = self.settings.split_config_path
+        
+        if not config_path.exists():
+            raise ValueError(f"Config file not found: {config_path}")
+        
+        print(f"\n{'='*70}")
+        if run_validation:
+            print("STOCK VALIDATION PIPELINE (JSON Configuration)")
+        else:
+            print("STOCK SPLITTER PIPELINE (JSON Configuration)")
+        print(f"{'='*70}")
+        print(f"  Config: {config_path}")
+        
+        config = load_split_config(config_path)
+        settings = config.get('settings', {})
+        filters_config = config.get('filters', {})
+        combinations = config.get('combinations', [])
+        
+        keywords = settings.get('relevantSearchTerms', [])
+        max_per_gene = settings.get('maxStocksPerGene')
+        max_per_allele = settings.get('maxStocksPerAllele')
+        
+        print(f"  Keywords: {', '.join(keywords) if keywords else '(none)'}")
+        gene_limit_display = 'unlimited' if (max_per_gene is None or max_per_gene >= 1000000) else str(max_per_gene)
+        allele_limit_display = 'unlimited' if (max_per_allele is None or max_per_allele >= 1000000) else str(max_per_allele)
+        print(f"  Max per gene: {gene_limit_display}")
+        print(f"  Max per allele: {allele_limit_display}")
+        print(f"  Combinations: {len(combinations)}")
+
+        def _filtered_excel_files(directory: Path) -> List[Path]:
+            return [
+                f for f in directory.glob("*.xlsx")
+                if "Organized Stocks" not in str(f)
+                and "Organized Stock Sheets" not in str(f)
+                and "Uncategorized" not in str(f)
+                and not f.name.startswith("~$")  # Excel temp files
+                and not f.name.startswith(".")   # Hidden files
+            ]
+
+        stocks_dir = input_dir / "Stocks"
+        direct_excel_files = _filtered_excel_files(input_dir)
+        stocks_excel_files = _filtered_excel_files(stocks_dir) if stocks_dir.exists() else []
+
+        # Prefer the canonical Stocks/ workspace when it contains Stage 1 workbooks.
+        workbook_dir = stocks_dir if stocks_excel_files else input_dir
+        excel_files = stocks_excel_files if stocks_excel_files else direct_excel_files
+
+        if verbose and workbook_dir != input_dir:
+            print(f"  Resolved workbook directory: {workbook_dir}")
+
+        # Filter out files in output directories and temp files
+        excel_files = [
+            f for f in excel_files
+            if "Organized Stocks" not in str(f)
+            and "Organized Stock Sheets" not in str(f)
+            and "Uncategorized" not in str(f)
+            and not f.name.startswith("~$")  # Excel temp files
+            and not f.name.startswith(".")   # Hidden files
+        ]
+
+        if not excel_files:
+            print(f"No Excel files found in {input_dir}")
+            return None
+
+        print(f"\n  Found {len(excel_files)} Excel file(s)")
+
+        # Create output directory under the resolved workbook directory.
+        output_dir = workbook_dir / "Organized Stocks"
+        output_dir.mkdir(exist_ok=True)
+
+        # Carry forward no-PMID FBrf report from pipeline 1, if present.
+        # Keep exactly one report file in the final Organized Stocks output.
+        no_pmid_report_name = "references_without_pmid_fbrf.txt"
+        no_pmid_sources = [
+            workbook_dir / no_pmid_report_name,
+            input_dir / no_pmid_report_name,
+        ]
+        existing_sources = []
+        for path in no_pmid_sources:
+            if path.exists() and path not in existing_sources:
+                existing_sources.append(path)
+        if existing_sources:
+            dst = output_dir / no_pmid_report_name
+            # Prefer the report that lives alongside the workbook(s) we resolved.
+            preferred_src = workbook_dir / no_pmid_report_name
+            src = preferred_src if preferred_src.exists() else existing_sources[0]
+            shutil.move(str(src), str(dst))
+            print(f"  Moved no-PMID FBrf report to: {dst}")
+            
+            # Remove any leftover duplicate source reports.
+            for extra in existing_sources:
+                if extra != src and extra.exists():
+                    try:
+                        extra.unlink()
+                        print(f"  Removed duplicate no-PMID report: {extra}")
+                    except Exception as e:
+                        print(f"  Warning: Could not remove duplicate report {extra}: {e}")
+        else:
+            print("  No no-PMID FBrf report found to copy")
+
+        gene_synonyms_map = _load_gene_synonyms_map(
+            self.settings.flybase_data_path,
+            verbose=verbose,
+        )
+        
+        # Process each file
+        for excel_path in excel_files:
+            # Load data
+            stocks_df, references_df, file_keywords = self._load_stocks_from_excel(excel_path, verbose)
+            
+            # Identify genes from original CSV input with 0 matched stocks
+            genes_no_stocks, csv_input_genes, current_to_input_map = self._find_genes_without_stocks(
+                workbook_dir, stocks_df, verbose
+            )
+            
+            # Use keywords from config, fallback to file keywords
+            active_keywords = keywords if keywords else file_keywords
+            
+            # Compute derived columns
+            stocks_df = self._compute_derived_columns(stocks_df, active_keywords, verbose)
+            
+            # Sort for priority selection
+            stocks_df = self._sort_stocks_for_priority(stocks_df, active_keywords)
+            
+            # Extract gene symbols from stocks_df (genes that have matched stocks)
+            # Filter to input genes only so counts exclude hitchhiker genes
+            all_input_genes: Set[str] = set()
+            if 'relevant_gene_symbols' in stocks_df.columns:
+                for syms in stocks_df['relevant_gene_symbols'].dropna():
+                    for s in str(syms).split(';'):
+                        s = s.strip()
+                        if s and s != '-':
+                            all_input_genes.add(s)
+            else:
+                _input_gene_col = _find_gene_id_column(stocks_df)
+                if _input_gene_col:
+                    for val in stocks_df[_input_gene_col].dropna().astype(str):
+                        for v in val.split(';'):
+                            v = v.strip()
+                            if v and v != '-':
+                                all_input_genes.add(v)
+            if csv_input_genes is not None:
+                all_input_genes &= csv_input_genes
+            if verbose:
+                print(f"    Genes with matched stocks: {len(all_input_genes)}")
+            
+            # Initialize counters for stock limits
+            gene_counters: Dict[str, int] = {}
+            allele_counters: Dict[str, int] = {}
+            seen_stocks: Set[str] = set()
+            
+            # Process each combination
+            combination_outputs = []
+            
+            # Debug: Show filter match counts for first combination
+            if verbose and combinations:
+                print(f"\n    Filter match summary (before combinations):")
+                for filter_name, filter_spec in filters_config.items():
+                    col = filter_spec.get('column', '')
+                    if col in stocks_df.columns:
+                        mask = apply_filter(stocks_df, filter_spec)
+                        print(f"      {filter_name}: {mask.sum()}/{len(stocks_df)} stocks match")
+                    else:
+                        print(f"      {filter_name}: column '{col}' not found")
+                print()
+            
+            for combo in combinations:
+                # Apply filters
+                filtered_df = apply_filter_combination(stocks_df, combo, filters_config)
+                
+                if verbose:
+                    print(f"    Combination: {' >> '.join(combo)}")
+                    print(f"      Matched: {len(filtered_df)} stocks")
+                
+                # Apply stock limits
+                limited_df = apply_stock_limits(
+                    filtered_df,
+                    max_per_gene,
+                    max_per_allele,
+                    gene_counters,
+                    allele_counters,
+                    seen_stocks,
+                    verbose
+                )
+                
+                if verbose:
+                    print(f"      After limits: {len(limited_df)} stocks")
+                
+                # Build summary
+                stock_col = _find_stock_id_column(limited_df)
+                gene_col = _find_gene_id_column(limited_df)
+                allele_col = _find_allele_column(limited_df)
+                
+                num_stocks = limited_df[stock_col].nunique() if stock_col and len(limited_df) > 0 else 0
+                # Split semicolon-separated values before counting unique genes/alleles
+                # Prefer relevant_gene_symbols (symbols) so counts are consistent
+                # with csv_input_genes; filter to input genes only.
+                _gene_sym_col = 'relevant_gene_symbols' if 'relevant_gene_symbols' in limited_df.columns else gene_col
+                if _gene_sym_col and len(limited_df) > 0:
+                    _genes = set()
+                    for cell in limited_df[_gene_sym_col].dropna().astype(str):
+                        for v in cell.split(';'):
+                            v = v.strip()
+                            if v and v != '-':
+                                _genes.add(v)
+                    if csv_input_genes is not None:
+                        _genes &= csv_input_genes
+                    num_genes = len(_genes)
+                else:
+                    num_genes = 0
+                if allele_col and len(limited_df) > 0:
+                    _alleles = set()
+                    # Only count alleles from rows whose gene(s) are in the input set
+                    for _, _row in limited_df.iterrows():
+                        if csv_input_genes is not None and _gene_sym_col:
+                            row_genes = set()
+                            raw = str(_row.get(_gene_sym_col, ''))
+                            for g in raw.split(';'):
+                                g = g.strip()
+                                if g and g != '-' and g.lower() != 'nan':
+                                    row_genes.add(g)
+                            if not (row_genes & csv_input_genes):
+                                continue
+                        raw_a = str(_row.get(allele_col, ''))
+                        for v in raw_a.split(';'):
+                            v = v.strip()
+                            if v and v != '-' and v.lower() != 'nan':
+                                _alleles.add(v)
+                    num_alleles = len(_alleles)
+                else:
+                    num_alleles = 0
+                
+                summary_dict = {
+                    "Category": " >> ".join(combo),
+                    "# Stocks": num_stocks,
+                    "# Alleles": num_alleles,
+                    "# Genes": num_genes,
+                }
+                
+                # Remove internal columns before output
+                internal_cols = ['multiple_insertions', 'ALLELE_PAPER_RELEVANCE_SCORE', '_stock_type', '_stock_collection', '_sort_key', '_priority_key']
+                output_df = limited_df.drop(columns=[c for c in internal_cols if c in limited_df.columns], errors='ignore')
+                
+                combination_outputs.append((combo, output_df, summary_dict))
+
+            if run_validation:
+                # Run GPT validation only for stocks that actually made it into
+                # Ref++ output sheets (post-filters and post-limits).
+                stocks_df, combination_outputs = self._run_refpp_functional_validation(
+                    stocks_df=stocks_df,
+                    references_df=references_df,
+                    combination_outputs=combination_outputs,
+                    keywords=active_keywords,
+                    verbose=verbose,
+                )
+            elif verbose:
+                print("    Skipping GPT validation in split-stocks.")
+            
+            unfiltered_references_df = references_df.copy() if references_df is not None else None
+
+            # Filter references to only those cited by stocks in output sheets
+            if references_df is not None and len(references_df) > 0:
+                included_pmids: Set[str] = set()
+                for _combo, _out_df, _ in combination_outputs:
+                    if _out_df is not None and len(_out_df) > 0:
+                        _pmid_col = None
+                        for col in ['PMID', 'pmid', 'PMIDs']:
+                            if col in _out_df.columns:
+                                _pmid_col = col
+                                break
+                        if _pmid_col:
+                            for pmids_str in _out_df[_pmid_col].dropna().astype(str):
+                                for p in pmids_str.split(';'):
+                                    p = clean_id(p)
+                                    if p and p != '-':
+                                        included_pmids.add(p)
+                
+                if 'PMID' in references_df.columns and included_pmids:
+                    original_ref_count = len(references_df)
+                    references_df = references_df[
+                        references_df['PMID'].apply(
+                            lambda x: clean_id(x) in included_pmids
+                            if pd.notna(x) else False
+                        )
+                    ].copy()
+                    if verbose:
+                        print(f"    References filtered: {original_ref_count} → {len(references_df)} "
+                              f"(kept only references cited by stocks in output sheets)")
+            
+            # Create aggregated Excel
+            output_name = f"{excel_path.stem}_aggregated.xlsx"
+            output_path = output_dir / output_name
+            
+            write_aggregated_excel(
+                output_path,
+                config,
+                combination_outputs,
+                references_df,
+                unfiltered_references_df=unfiltered_references_df,
+                verbose=verbose,
+                all_input_genes=all_input_genes,
+                genes_no_stocks=genes_no_stocks,
+                csv_input_genes=csv_input_genes,
+                gene_synonyms_map=gene_synonyms_map,
+                soft_run=self.settings.soft_run,
+                flybase_data_path=self.settings.flybase_data_path,
+                pubmed_cache_path=self.settings.pubmed_cache_path,
+                pubmed_client=self._pubmed_client,
+                current_to_input_map=current_to_input_map,
+            )
+        
+        # Print summary
+        self._fulltext_fetcher.save_cache()
+        self._fulltext_fetcher.clear_cache()
+
+        print(f"\n{'='*70}")
+        print("PROCESSING COMPLETE")
+        print(f"  Processed: {len(excel_files)} file(s)")
+        print(f"  Output directory: {output_dir}")
+        
+        return output_dir

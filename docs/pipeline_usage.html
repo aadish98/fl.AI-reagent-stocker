@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fl_ai_reagent_stocker: Practical Pipeline Guide</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff;
+      --fg: #17212b;
+      --muted: #52606d;
+      --border: #d9e2ec;
+      --accent: #145ea8;
+      --panel: #f8fbff;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+    }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 40px 24px 64px;
+    }
+    h1, h2, h3 {
+      line-height: 1.2;
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 2.2rem;
+    }
+    h2 {
+      margin-top: 2.2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    pre {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      overflow-x: auto;
+    }
+    img {
+      max-width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin: 12px 0 20px;
+    }
+    .note {
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 10px;
+      background: var(--panel);
+    }
+    .muted {
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>fl_ai_reagent_stocker: Practical Pipeline Guide</h1>
+    <p>This guide explains how to go from a gene list to a curated set of candidate fly stocks with supporting literature, config-driven organization, and optional AI validation.</p>
+
+    <h2>What You Get</h2>
+    <ul>
+      <li>A stock-level workbook linked to references</li>
+      <li>Organized output sheets based on your JSON rules</li>
+      <li>A references table narrowed to papers relevant to selected stocks</li>
+      <li>Optional validation columns for <code>Ref++</code> output-sheet stocks</li>
+    </ul>
+
+    <h2>Visual Overview</h2>
+    <h3>Data Flow</h3>
+    <img src="images/pipeline-data-flowchart.png" alt="Pipeline data flowchart">
+    <h3>High-Level Overview</h3>
+    <img src="images/pipeline-flowchart-high-level-standalone.png" alt="High-level pipeline flowchart">
+    <h3>Rules And Evidence Decisions</h3>
+    <img src="images/pipeline-flowchart-rules-and-tools-standalone.png" alt="Rules and evidence flowchart">
+
+    <h2>Quick Start</h2>
+    <p>Install dependencies from the repository root:</p>
+    <pre><code>pip install -r requirements.txt</code></pre>
+
+    <p>Run the full workflow:</p>
+    <pre><code>python -m fl_ai_reagent_stocker run-full-pipeline ./gene_lists --config ./my_split_config.json --test-log</code></pre>
+
+    <p>Or run the three explicit stages:</p>
+    <pre><code>python -m fl_ai_reagent_stocker find-stocks ./gene_lists
+python -m fl_ai_reagent_stocker split-stocks ./gene_lists/Stocks --config ./my_split_config.json
+python -m fl_ai_reagent_stocker validate-stocks ./gene_lists/Stocks --config ./my_split_config.json --test-log</code></pre>
+
+    <h2>Stage 1: find-stocks</h2>
+    <pre><code>python -m fl_ai_reagent_stocker find-stocks ./gene_lists</code></pre>
+    <ul>
+      <li>Converts gene symbols to FBgn IDs unless skipped</li>
+      <li>Maps genes to alleles, constructs, insertions, and stocks</li>
+      <li>Expands FBtp constructs through <code>data/flybase/transgenic_insertions/fbtp_to_fbti.csv</code></li>
+      <li>Links matched components to references and PMIDs</li>
+      <li>Writes <code>./gene_lists/Stocks/aggregated_stock_refs.xlsx</code></li>
+    </ul>
+
+    <h2>Stage 2: split-stocks</h2>
+    <pre><code>python -m fl_ai_reagent_stocker split-stocks ./gene_lists/Stocks --config ./my_split_config.json</code></pre>
+    <ul>
+      <li>Loads the Stage 1 workbook</li>
+      <li>Computes derived columns such as <code>Balancers</code>, <code>multiple_insertions</code>, and <code>ALLELE_PAPER_RELEVANCE_SCORE</code></li>
+      <li>Applies JSON filters and combinations from <code>data/config/</code></li>
+      <li>Writes organized workbooks to <code>./gene_lists/Stocks/Organized Stocks/</code></li>
+      <li>Does not run GPT validation</li>
+    </ul>
+
+    <h2>Stage 3: validate-stocks</h2>
+    <pre><code>python -m fl_ai_reagent_stocker validate-stocks ./gene_lists/Stocks --config ./my_split_config.json --test-log</code></pre>
+    <ul>
+      <li>Rebuilds the same split outputs using the same config</li>
+      <li>Selectively validates only <code>Ref++</code> output-sheet stocks</li>
+      <li>Merges validation columns back into the organized workbook</li>
+      <li>Supports <code>--soft-run</code>, <code>--test-log</code>, and <code>--max-gpt-calls-per-stock</code></li>
+    </ul>
+
+    <h2>Config File Contract</h2>
+    <div class="note">
+      <p>The JSON config files stay in <code>data/config/</code> and keep the same splitting behavior through the refactor.</p>
+      <ul>
+        <li><code>settings.relevantSearchTerms</code> still defines keyword relevance and <code>Ref++</code></li>
+        <li><code>filters</code> still defines reusable predicates</li>
+        <li><code>combinations</code> still defines sheet partitions</li>
+        <li><code>filterDescriptions</code> still defines user-facing sheet descriptions</li>
+      </ul>
+    </div>
+
+    <h2>Helper Scripts</h2>
+    <ul>
+      <li><code>scripts/fetch_fbgn_ids.py</code></li>
+      <li><code>scripts/build_fbst_derived_stock_components.py</code></li>
+      <li><code>scripts/build_fbtp_to_fbti_mapping.py</code></li>
+      <li><code>scripts/refresh_flybase_data.py</code></li>
+    </ul>
+
+    <h2>Outputs</h2>
+    <ul>
+      <li>Stage 1 workbook: <code>./gene_lists/Stocks/aggregated_stock_refs.xlsx</code></li>
+      <li>Organized output directory: <code>./gene_lists/Stocks/Organized Stocks/</code></li>
+      <li>Output paths remain unchanged even though the package and command names changed</li>
+    </ul>
+
+    <p class="muted">Canonical package namespace: <code>fl_ai_reagent_stocker</code>.</p>
+  </main>
+</body>
+</html>

@@ -48,7 +48,13 @@ htmlcov/
 !.env.example
 
 # Large local datasets (keep out of git history)
-data/FlyBase/FlyBase_References/entity_publication_fb_2025_05.tsv
+data/flybase/references/entity_publication_fb_*.tsv
+data/flybase/references/entity_publication_fb_*.tsv.gz
+data/cache/
+data/gene_sets/
+data/config/
+data/logs/
+data/test/
 
 # Logs
 *.log
