@@ -965,6 +965,7 @@ def _build_stock_phenotype_sheet(
 
     phenotype_df['reference'] = phenotype_df.get('reference', '').fillna('').astype(str)
     phenotype_df['phenotype_name'] = phenotype_df.get('phenotype_name', '').fillna('').astype(str)
+    phenotype_df['qualifier_names'] = phenotype_df.get('qualifier_names', '').fillna('').astype(str)
     phenotype_df['genotype_FBids'] = phenotype_df.get('genotype_FBids', '').fillna('').astype(str)
     phenotype_df['genotype_symbols'] = phenotype_df.get('genotype_symbols', '').fillna('').astype(str)
 
@@ -1237,6 +1238,11 @@ def _build_stock_phenotype_sheet(
             continue
 
         phenotype_name = str(pheno_row.get('phenotype_name', '') or '').strip()
+        qualifier_raw = str(pheno_row.get('qualifier_names', '') or '').strip()
+        if phenotype_name and qualifier_raw:
+            qualifiers = [q.strip() for q in qualifier_raw.split('|') if q.strip()]
+            if qualifiers:
+                phenotype_name = f"{phenotype_name} ({', '.join(qualifiers)})"
         genotype_label = str(pheno_row.get('genotype_symbols', '') or '').strip()
         raw_fbrfs = [clean_id(v) for v in str(pheno_row.get('reference', '') or '').split('|') if clean_id(v)]
         if not phenotype_name and not raw_fbrfs:
@@ -1297,6 +1303,7 @@ def _build_stock_phenotype_sheet(
             [
                 'Source/ Stock #',
                 'Genotype',
+                'Phenotype',
                 'Reference',
                 'Authors',
                 'Journal',
@@ -1309,7 +1316,6 @@ def _build_stock_phenotype_sheet(
         .agg({
             'Gene': lambda s: unique_join(s.tolist()),
             'Reagent Type or Allele Symbol': lambda s: unique_join(s.tolist()),
-            'Phenotype': lambda s: unique_join(s.tolist()),
         })
     )
     # Order rows by:
@@ -1392,12 +1398,13 @@ def _build_stock_phenotype_sheet(
             '_reagent_rank_within_gene',
             '_primary_reagent',
             'Genotype',
+            'Phenotype',
             'Reference',
             'Authors',
             'Journal',
             'Year of Publication',
         ],
-        ascending=[False, True, True, True, True, True, True, True, True],
+        ascending=[False, True, True, True, True, True, True, True, True, True],
     ).reset_index(drop=True)
     return phenotype_sheet[[
         'Gene',
