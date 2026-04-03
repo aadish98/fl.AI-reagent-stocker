@@ -1710,6 +1710,7 @@ def write_aggregated_excel(
     all_input_genes: Optional[Set[str]] = None,
     genes_no_stocks: Optional[Set[str]] = None,
     csv_input_genes: Optional[Set[str]] = None,
+    n_input_genes: Optional[int] = None,
     gene_synonyms_map: Optional[Dict[str, str]] = None,
     soft_run: bool = False,
     flybase_data_path: Optional[Path] = None,
@@ -1732,7 +1733,10 @@ def write_aggregated_excel(
         genes_no_stocks: Set of gene symbols from the original CSV input that
             had 0 matched stocks found by Pipeline 1. Displayed separately from
             genes that have stocks but were filtered out by combinations.
-        csv_input_genes: Set of unique gene symbols from the original CSV input.
+        csv_input_genes: Set of unique gene symbols from the original CSV input
+            (augmented with FlyBase current symbols for filtering purposes).
+        n_input_genes: True count of unique input genes from CSVs (before
+            augmentation with remapped symbols). Used for display.
         gene_synonyms_map: Optional map of gene symbol -> semicolon-delimited synonyms.
         pubmed_cache_path: Path to PubMed cache CSV (for resolving reference titles).
         pubmed_client: PubMed client used for targeted phenotype-reference enrichment.
@@ -1837,6 +1841,7 @@ def write_aggregated_excel(
         
         # Formats
         fmt_13 = workbook.add_format({'font_size': 13, 'align': 'left'})
+        fmt_13_wrap = workbook.add_format({'font_size': 13, 'align': 'left', 'text_wrap': True, 'valign': 'top'})
         fmt_13_bold = workbook.add_format({'font_size': 13, 'bold': True, 'align': 'left'})
         bold_bottom = workbook.add_format({'bold': True, 'bottom': 2, 'font_size': 13, 'align': 'left'})
         fmt_faint_bottom = workbook.add_format({'font_size': 13, 'bottom': 2, 'bottom_color': '#808080', 'align': 'left'})
@@ -1849,19 +1854,22 @@ def write_aggregated_excel(
         contents_ws = workbook.add_worksheet("Contents")
         col_widths = defaultdict(int)
         
-        def write_cell(r, c, val, fmt=None):
+        def write_cell(r, c, val, fmt=None, skip_width=False):
             f = fmt if fmt else fmt_13
             if isinstance(val, bool):
                 s = str(val)
                 contents_ws.write_string(r, c, s, f)
-                col_widths[c] = max(col_widths[c], len(s))
+                if not skip_width:
+                    col_widths[c] = max(col_widths[c], len(s))
             elif isinstance(val, (int, float)) and not pd.isna(val):
                 contents_ws.write_number(r, c, val, f)
-                col_widths[c] = max(col_widths[c], len(str(val)))
+                if not skip_width:
+                    col_widths[c] = max(col_widths[c], len(str(val)))
             else:
                 s = str(val) if val is not None and not (isinstance(val, float) and pd.isna(val)) else ""
                 contents_ws.write_string(r, c, s, f)
-                col_widths[c] = max(col_widths[c], len(s))
+                if not skip_width:
+                    col_widths[c] = max(col_widths[c], len(s))
         
         def write_row(r, c, vals, fmt=None):
             for i, v in enumerate(vals):
@@ -1884,10 +1892,9 @@ def write_aggregated_excel(
         n_in_sheets = len(genes_in_sheets & csv_input_genes) if csv_input_genes else len(genes_in_sheets)
         n_no_stocks = len(genes_no_stocks) if genes_no_stocks else 0
         if csv_input_genes is not None:
-            n_input_csv = len(csv_input_genes)
-            input_genes_str = str(n_input_csv)
+            display_input_count = n_input_genes if n_input_genes else len(csv_input_genes)
             counts_str = (
-                f"Total Input Genes (across all sets): {input_genes_str}\n"
+                f"Total Input Genes (across all sets): {display_input_count}\n"
                 f"Total Genes Included in below Categories: {n_in_sheets}\n"
                 f"Input Genes with 0 matched stocks: {n_no_stocks}"
             )
@@ -2045,6 +2052,8 @@ def write_aggregated_excel(
             row,
             0,
             "References sheet includes PMIDs cited by stocks that are present in output sheets (Sheet1..N).",
+            fmt_13_wrap,
+            skip_width=True,
         )
         row += 1
         if soft_run:
@@ -2052,6 +2061,8 @@ def write_aggregated_excel(
                 row,
                 0,
                 "Stock Phenotype Sheet includes unique (source/stock, genotype, reference) rows for stocks present in output sheets, based on shared gene-relevant stock-component IDs found in FlyBase genotype_phenotype_data. Genes, reagent type or allele symbols, and phenotype terms are aggregated within each row.",
+                fmt_13_wrap,
+                skip_width=True,
             )
             row += 1
             write_cell(
@@ -2061,12 +2072,16 @@ def write_aggregated_excel(
                 f"{stock_phenotype_sheet_counts['genes']} unique genes, "
                 f"{stock_phenotype_sheet_counts['stocks']} unique stocks, "
                 f"{stock_phenotype_sheet_counts['references']} unique references.",
+                fmt_13_wrap,
+                skip_width=True,
             )
         else:
             write_cell(
                 row,
                 0,
                 "Stock Sheet by Gene includes unique (stock, keyword-hit PMID) rows for stocks present in output sheets.",
+                fmt_13_wrap,
+                skip_width=True,
             )
         row += 2
         
@@ -2098,7 +2113,7 @@ def write_aggregated_excel(
             write_cell(
                 row, 0,
                 f"Input Genes with 0 matched stocks "
-                f"({len(genes_no_stocks_sorted)} of {len(csv_input_genes)} input genes)",
+                f"({len(genes_no_stocks_sorted)} of {n_input_genes or len(csv_input_genes)} input genes)",
                 fmt_13_bold,
             )
             row += 1
@@ -2240,7 +2255,7 @@ class StockSplittingPipeline:
         input_dir: Path,
         stocks_df: pd.DataFrame,
         verbose: bool = True,
-    ) -> Tuple[Set[str], Optional[Set[str]], Dict[str, str]]:
+    ) -> Tuple[Set[str], Optional[Set[str]], Dict[str, str], int]:
         """
         Identify input genes that have 0 matched stocks.
 
@@ -2258,6 +2273,9 @@ class StockSplittingPipeline:
         current_to_input_map : dict[str, str]
             Mapping of FlyBase current gene symbols to the user's original
             input symbols (via FBgn bridge).  Empty when unavailable.
+        n_input_genes : int
+            The true count of unique input genes (FBgn IDs) from the CSVs,
+            before augmentation with remapped symbols.
         """
         # ── 1. Collect FBgn IDs + gene symbols from input CSVs ──────
         csv_dirs = [input_dir]
@@ -2299,7 +2317,7 @@ class StockSplittingPipeline:
             if verbose:
                 print("    Note: No CSV gene lists with flybase_gene_id "
                       "found; cannot identify genes with 0 stocks")
-            return set(), None, {}
+            return set(), None, {}, 0
 
         input_fbgns = set(fbgn_to_symbol.keys())
         csv_input_genes = set(fbgn_to_symbol.values())
@@ -2309,7 +2327,7 @@ class StockSplittingPipeline:
             if verbose:
                 print("    Warning: 'relevant_gene_symbols' column missing "
                       "from stocks data; cannot compute 0-stock genes")
-            return set(), csv_input_genes, {}
+            return set(), csv_input_genes, {}, len(input_fbgns)
 
         current_to_input_map: Dict[str, str] = {}
         stock_fbgns: Set[str] = set()
@@ -2356,7 +2374,7 @@ class StockSplittingPipeline:
                 print(f"    Gene symbols remapped (FlyBase current -> input): "
                       f"{len(current_to_input_map)}")
 
-        return genes_no_stocks, csv_input_genes, current_to_input_map
+        return genes_no_stocks, csv_input_genes, current_to_input_map, len(input_fbgns)
     
     def _compute_derived_columns(
         self,
@@ -2819,7 +2837,7 @@ class StockSplittingPipeline:
             stocks_df, references_df, file_keywords = self._load_stocks_from_excel(excel_path, verbose)
             
             # Identify genes from original CSV input with 0 matched stocks
-            genes_no_stocks, csv_input_genes, current_to_input_map = self._find_genes_without_stocks(
+            genes_no_stocks, csv_input_genes, current_to_input_map, n_input_genes = self._find_genes_without_stocks(
                 workbook_dir, stocks_df, verbose
             )
             
@@ -3011,6 +3029,7 @@ class StockSplittingPipeline:
                 all_input_genes=all_input_genes,
                 genes_no_stocks=genes_no_stocks,
                 csv_input_genes=csv_input_genes,
+                n_input_genes=n_input_genes,
                 gene_synonyms_map=gene_synonyms_map,
                 soft_run=self.settings.soft_run,
                 flybase_data_path=self.settings.flybase_data_path,
