@@ -51,11 +51,31 @@ htmlcov/
 data/flybase/**/chado_*.xml.gz
 data/flybase/references/entity_publication_fb_*.tsv
 data/flybase/references/entity_publication_fb_*.tsv.gz
+data/flybase/*.sql.gz
+data/flybase/sequence_features/
+data/flybase/alleles_and_stocks/fbal_to_fbgn_fb_*.tsv
+data/flybase/transgenic_constructs/transgenic_construct_descriptions_fb_*.tsv
 data/cache/
 data/gene_sets/
 data/config/
 data/logs/
 data/test/
+
+# Local analysis / generated report artifacts
+audit_outputs/
+
+# Presentation build artifacts and temp files
+.tmp_pptx_build/
+tmp_pptx_qa/
+tmp_pptx_qa_overview/
+tmp_pptx_qa_stock_mapping/
+AI_Semantic_Matching.pptx
+embeddings.pptx
+embeddings_for_neuroscientists copy.pptx
+embeddings_for_neuroscientists_electronic.pptx
+openai_embeddings_project_overview.pptx
+stock_phenotype_sheet_mapping_flow.pptx
+~$*.pptx
 
 # Logs
 *.log

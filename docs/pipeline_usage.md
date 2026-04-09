@@ -109,6 +109,9 @@ python -m fl_ai_reagent_stocker split-stocks ./gene_lists/Stocks --config ./my_s
 
 For each input workbook, output is `<input_name>_aggregated.xlsx`.
 
+When `--soft-run --OAI-embedding` are both enabled, the pipeline also writes
+`<input_name>_aggregated_similarity_tiers.xlsx`.
+
 ### What is inside
 
 - `Contents`
@@ -118,11 +121,47 @@ For each input workbook, output is `<input_name>_aggregated.xlsx`.
 
 In `--soft-run` mode, the workbook includes a `Stock Phenotype Sheet` built from `genotype_phenotype_data` instead of GPT validation output.
 
+When `--soft-run --OAI-embedding` are used together, a second workbook is
+written with:
+
+- `Contents` as the first tab
+- `Gene Set` as the second tab, copied from the input gene-list CSV data when available
+- `Stock Phenotype Sheet` as the third tab
+- fixed cosine-similarity threshold tabs after it
+- tier assignment based on the maximum cosine score across the configured
+  phenotype similarity targets
+- sheets defined by 0.05 cosine steps from highest to lowest similarity:
+  `0.95-1.0`, `0.9-0.95`, ..., with a final `<0.05` bucket
+- empty threshold buckets are skipped
+
+This phenotype-similarity embedding path is pinned to the OpenAI embedding
+model `text-embedding-3-large`.
+
+When `--soft-run --OAI-embedding --simple-buckets` are used together, the same
+workbook switches to rule-based combination tabs instead of cosine-threshold
+tiers:
+
+- `Contents` lists one row per `collection/UAS/sleep-circ/balancer` combination
+- each row includes `Sheet name`, `# Stocks`, `# Alleles`, and `# Genes`
+- one sheet is written for every listed combination, including zero-count rows
+- genes, alleles, and reagents are assigned once and are never double-counted
+  within or across combinations
+- column headers always show all three dimensions:
+  - **UAS / non-UAS** — whether the stock genotype contains a UAS construct
+  - **slp/ circ / Non slp/ circ** — whether any linked phenotype mentions
+    "sleep" or "circadian"
+  - **No bal / Has bal** — whether the stock carries at least one balancer
+    chromosome
+- rows are ordered by collection first, then `UAS=true`, `sleep/circ=true`, and
+  `No bal` before `Has bal`
+
 ### Common options
 
 - `--config`, `-c`
 - `--quiet`, `-q`
 - `--soft-run`
+- `--OAI-embedding`
+- `--simple-buckets`
 
 ## Stage 3: Validate Ref++ Stocks (`validate-stocks`)
 
@@ -170,6 +209,7 @@ Output paths stay the same as before:
 The JSON config files stay in `data/config/` and keep the same effect on stock splitting:
 
 - `settings.relevantSearchTerms` still defines keyword relevance and `Ref++`
+- `settings.phenotypeSimilarityTargets` is required for phenotype-sheet cosine similarity targets
 - `filters` still defines reusable filter predicates
 - `combinations` still defines the sheet partitions
 - `filterDescriptions` still defines user-facing explanations

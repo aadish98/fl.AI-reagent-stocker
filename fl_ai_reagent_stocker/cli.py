@@ -51,6 +51,17 @@ Examples:
         action="store_true",
         help="Produce the soft-run phenotype sheet instead of normal downstream summary sheets.",
     )
+    split_parser.add_argument(
+        "--OAI-embedding",
+        dest="oai_embedding",
+        action="store_true",
+        help="When combined with --soft-run, add OpenAI embedding cosine similarity to the Stock Phenotype Sheet.",
+    )
+    split_parser.add_argument(
+        "--simple-buckets",
+        action="store_true",
+        help="When combined with --soft-run --OAI-embedding, replace cosine-threshold tier tabs with rule-based combination tabs in the phenotype similarity workbook.",
+    )
 
     validate_parser = subparsers.add_parser(
         "validate-stocks",
@@ -60,6 +71,17 @@ Examples:
     validate_parser.add_argument("--config", "-c", type=Path, default=None)
     validate_parser.add_argument("--quiet", "-q", action="store_true")
     validate_parser.add_argument("--soft-run", action="store_true")
+    validate_parser.add_argument(
+        "--OAI-embedding",
+        dest="oai_embedding",
+        action="store_true",
+        help="When combined with --soft-run, add OpenAI embedding cosine similarity to the Stock Phenotype Sheet.",
+    )
+    validate_parser.add_argument(
+        "--simple-buckets",
+        action="store_true",
+        help="When combined with --soft-run --OAI-embedding, replace cosine-threshold tier tabs with rule-based combination tabs in the phenotype similarity workbook.",
+    )
     validate_parser.add_argument("--test-log", action="store_true")
     validate_parser.add_argument("--max-gpt-calls-per-stock", type=int, default=5)
 
@@ -75,6 +97,17 @@ Examples:
     full_parser.add_argument("--skip-fbgnid-conversion", action="store_true")
     full_parser.add_argument("--quiet", "-q", action="store_true")
     full_parser.add_argument("--soft-run", action="store_true")
+    full_parser.add_argument(
+        "--OAI-embedding",
+        dest="oai_embedding",
+        action="store_true",
+        help="When combined with --soft-run, add OpenAI embedding cosine similarity to the Stock Phenotype Sheet.",
+    )
+    full_parser.add_argument(
+        "--simple-buckets",
+        action="store_true",
+        help="When combined with --soft-run --OAI-embedding, replace cosine-threshold tier tabs with rule-based combination tabs in the phenotype similarity workbook.",
+    )
     full_parser.add_argument("--test-log", action="store_true")
     full_parser.add_argument("--max-gpt-calls-per-stock", type=int, default=5)
 
@@ -104,7 +137,11 @@ def run_find_stocks(args) -> int:
 
 
 def run_split_stocks(args) -> int:
-    settings = Settings(soft_run=args.soft_run)
+    settings = Settings(
+        soft_run=args.soft_run,
+        enable_oai_embedding=args.oai_embedding,
+        simple_buckets=args.simple_buckets,
+    )
     if args.config:
         settings.split_config_path = args.config
     pipeline = StockSplittingPipeline(settings)
@@ -119,6 +156,8 @@ def run_split_stocks(args) -> int:
 def run_validate_stocks(args) -> int:
     settings = Settings(
         soft_run=args.soft_run,
+        enable_oai_embedding=args.oai_embedding,
+        simple_buckets=args.simple_buckets,
         enable_gpt_logging=args.test_log,
         max_gpt_calls_per_stock=args.max_gpt_calls_per_stock,
     )
@@ -139,9 +178,15 @@ def run_full_pipeline(args) -> int:
         batch_size=args.batch_size,
         skip_fbgnid_conversion=args.skip_fbgnid_conversion,
     )
-    split_settings = Settings(soft_run=args.soft_run)
+    split_settings = Settings(
+        soft_run=args.soft_run,
+        enable_oai_embedding=args.oai_embedding,
+        simple_buckets=args.simple_buckets,
+    )
     validate_settings = Settings(
         soft_run=args.soft_run,
+        enable_oai_embedding=args.oai_embedding,
+        simple_buckets=args.simple_buckets,
         enable_gpt_logging=args.test_log,
         max_gpt_calls_per_stock=args.max_gpt_calls_per_stock,
     )

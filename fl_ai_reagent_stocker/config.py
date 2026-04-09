@@ -10,7 +10,7 @@ This module contains:
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -182,6 +182,7 @@ DATA_ROOT = _get_data_root()
 FLYBASE_DATA = DATA_ROOT / "flybase"
 FLYBASE_ALLELES_STOCKS = FLYBASE_DATA / "alleles_and_stocks"
 FLYBASE_REFERENCES = FLYBASE_DATA / "references"
+FLYBASE_SEQUENCE_FEATURES = FLYBASE_DATA / "sequence_features"
 FLYBASE_TRANSGENIC_CONSTRUCTS = FLYBASE_DATA / "transgenic_constructs"
 FLYBASE_TRANSGENIC_INSERTIONS = FLYBASE_DATA / "transgenic_insertions"
 
@@ -198,6 +199,8 @@ DEFAULT_SPLIT_CONFIG_PATH = CONFIG_DIR / "stock_split_config_example.json"
 CACHE_DIR = REPO_ROOT / "data" / "cache"
 PUBMED_CACHE_PATH = CACHE_DIR / "pmid_to_title_abstract.csv"
 FULLTEXT_METHOD_CACHE_PATH = CACHE_DIR / "pmid_to_fulltext_method.csv"
+PHENOTYPE_EMBEDDING_CACHE_PATH = CACHE_DIR / "phenotype_text_embeddings.csv"
+PHENOTYPE_TARGET_EMBEDDING_CACHE_PATH = CACHE_DIR / "phenotype_target_embeddings.csv"
 
 # Helper scripts
 HELPER_SCRIPTS = REPO_ROOT / "scripts"
@@ -206,6 +209,53 @@ GET_FBGN_IDS_SCRIPT = HELPER_SCRIPTS / "fetch_fbgn_ids.py"
 # Logs directory (repo-local)
 LOGS_DIR = REPO_ROOT / "data" / "logs"
 GPT_LOGS_DIR = LOGS_DIR / "gpt_queries"
+
+def normalize_phenotype_similarity_targets(
+    raw_targets: Optional[List[Dict[str, Any]]],
+) -> List[Dict[str, str]]:
+    """Return validated phenotype similarity targets."""
+    if raw_targets is None:
+        raise ValueError("settings.phenotypeSimilarityTargets is required")
+    if not isinstance(raw_targets, list) or not raw_targets:
+        raise ValueError("settings.phenotypeSimilarityTargets must be a non-empty list")
+
+    normalized: List[Dict[str, str]] = []
+    seen_keywords = set()
+    for idx, raw_target in enumerate(raw_targets, start=1):
+        if not isinstance(raw_target, dict):
+            raise ValueError(
+                f"settings.phenotypeSimilarityTargets[{idx}] must be an object"
+            )
+
+        keyword = str(raw_target.get("keyword", "") or "").strip()
+        embedding_text = str(raw_target.get("embedding_text", "") or "").strip()
+
+        missing = [
+            name
+            for name, value in (
+                ("keyword", keyword),
+                ("embedding_text", embedding_text),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(
+                "settings.phenotypeSimilarityTargets[%d] is missing required field(s): %s"
+                % (idx, ", ".join(missing))
+            )
+        if keyword.lower() in seen_keywords:
+            raise ValueError(
+                f"Duplicate phenotype similarity target keyword: {keyword}"
+            )
+        seen_keywords.add(keyword.lower())
+        normalized.append(
+            {
+                "keyword": keyword,
+                "embedding_text": embedding_text,
+            }
+        )
+
+    return normalized
 
 
 def is_portable_mode() -> bool:
@@ -236,6 +286,7 @@ class Settings:
     
     # OpenAI configuration
     openai_model: str = "gpt-5-mini"
+    openai_embedding_model: str = "text-embedding-3-large"
     
     # Processing configuration
     batch_size: int = 50
@@ -245,6 +296,8 @@ class Settings:
     flybase_derived_stock_components_path: Optional[Path] = None
     pubmed_cache_path: Optional[Path] = None
     fulltext_method_cache_path: Optional[Path] = None
+    phenotype_embedding_cache_path: Optional[Path] = None
+    phenotype_target_embedding_cache_path: Optional[Path] = None
     split_config_path: Optional[Path] = None
     
     # Logging configuration
@@ -252,8 +305,11 @@ class Settings:
     gpt_log_dir: Optional[Path] = None
     
     # Feature flags
-    soft_run: bool = False  # If True, stop before OpenAI calls
+    soft_run: bool = False  # If True, use the phenotype-sheet soft-run path
+    enable_oai_embedding: bool = False
+    simple_buckets: bool = False
     skip_fbgnid_conversion: bool = False
+    phenotype_similarity_targets: Optional[List[Dict[str, str]]] = None
     
     # Functional validation limits
     max_gpt_calls_per_stock: Optional[int] = 5  # Max OpenAI GPT calls per stock (None = no limit)
@@ -276,6 +332,9 @@ class Settings:
         env_model = os.getenv("OPENAI_MODEL")
         if env_model:
             self.openai_model = env_model
+        env_embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL")
+        if env_embedding_model:
+            self.openai_embedding_model = env_embedding_model
         
         # Set default paths if not provided
         if self.flybase_data_path is None:
@@ -294,8 +353,19 @@ class Settings:
         if self.fulltext_method_cache_path is None:
             self.fulltext_method_cache_path = FULLTEXT_METHOD_CACHE_PATH
         
+        if self.phenotype_embedding_cache_path is None:
+            self.phenotype_embedding_cache_path = PHENOTYPE_EMBEDDING_CACHE_PATH
+
+        if self.phenotype_target_embedding_cache_path is None:
+            self.phenotype_target_embedding_cache_path = PHENOTYPE_TARGET_EMBEDDING_CACHE_PATH
+        
         if self.gpt_log_dir is None:
             self.gpt_log_dir = GPT_LOGS_DIR
+
+        if self.phenotype_similarity_targets is not None:
+            self.phenotype_similarity_targets = normalize_phenotype_similarity_targets(
+                self.phenotype_similarity_targets
+            )
     
     @property
     def flybase_alleles_stocks_path(self) -> Path:
@@ -307,6 +377,11 @@ class Settings:
         """Path to FlyBase references directory."""
         return self.flybase_data_path / "references"
     
+    @property
+    def flybase_sequence_features_path(self) -> Path:
+        """Path to FlyBase sequence_features directory."""
+        return self.flybase_data_path / "sequence_features"
+
     @property
     def flybase_transgenic_constructs_path(self) -> Path:
         """Path to FlyBase transgenic constructs directory."""
@@ -344,6 +419,12 @@ class Settings:
         # Check API keys
         if not self.openai_api_key:
             issues.append("OPENAI_API_KEY not set - functional validation will be disabled")
+        elif self.enable_oai_embedding and not self.soft_run:
+            issues.append("--OAI-embedding is enabled without --soft-run; phenotype similarity embeddings only run in soft-run mode")
+        elif self.simple_buckets and not self.enable_oai_embedding:
+            issues.append("--simple-buckets is enabled without --OAI-embedding; simple bucket workbooks only run in the phenotype similarity embedding path")
+        elif self.simple_buckets and not self.soft_run:
+            issues.append("--simple-buckets is enabled without --soft-run; simple bucket workbooks only run in soft-run mode")
         
         if not self.ncbi_api_key:
             issues.append("NCBI_API_KEY not set - PubMed queries may be rate-limited")

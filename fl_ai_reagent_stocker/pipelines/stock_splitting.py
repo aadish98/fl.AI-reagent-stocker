@@ -27,9 +27,22 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
-from ..config import Settings, ValidationStatus, DEFAULT_SPLIT_CONFIG_PATH
+from ..config import (
+    DEFAULT_SPLIT_CONFIG_PATH,
+    Settings,
+    ValidationStatus,
+    normalize_phenotype_similarity_targets,
+)
 from ..integrations.pubmed import PubMedClient, PubMedCache
 from ..integrations.fulltext import FullTextFetcher, FunctionalValidator
+from ..integrations.phenotype_similarity import (
+    EmbeddingSimilarityScorer,
+    PhenotypeSimilarityTarget,
+    build_similarity_targets,
+    normalize_phenotype_text,
+    normalize_qualifier_text,
+    plot_similarity_outputs,
+)
 from ..utils import (
     clean_id,
     parse_semicolon_list,
@@ -57,6 +70,10 @@ FILTER_TYPE_PHRASES = {
     "doesnt_equal": "doesn't equal",
     "insertion_site": "has single insertion at",
 }
+
+PHENOTYPE_SIMILARITY_EMBEDDING_MODEL = "text-embedding-3-large"
+SIMILARITY_TIER_BIN_WIDTH = 0.05
+SIMILARITY_TIER_SHEET_COUNT = int(round(1.0 / SIMILARITY_TIER_BIN_WIDTH))
 
 
 ###############################################################################
@@ -104,6 +121,11 @@ def load_split_config(config_path: Path) -> Dict[str, Any]:
     
     settings = config['settings']
     settings.setdefault('relevantSearchTerms', [])
+    if 'phenotypeSimilarityTargets' not in settings:
+        raise ValueError("Config 'settings.phenotypeSimilarityTargets' is required")
+    settings['phenotypeSimilarityTargets'] = normalize_phenotype_similarity_targets(
+        settings.get('phenotypeSimilarityTargets')
+    )
     settings.setdefault('maxStocksPerGene', None)
     settings.setdefault('maxStocksPerAllele', None)
     if not isinstance(settings['relevantSearchTerms'], list):
@@ -772,6 +794,42 @@ def _normalize_stock_sheet_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _build_phenotype_similarity_context(
+    config: Dict[str, Any],
+    pipeline_settings: Optional[Settings],
+    verbose: bool = False,
+) -> Tuple[
+    List[PhenotypeSimilarityTarget],
+    Optional[EmbeddingSimilarityScorer],
+]:
+    """Instantiate similarity targets and scorers for the soft-run sheet."""
+    config_settings = config.get("settings", {})
+    raw_targets = config_settings.get("phenotypeSimilarityTargets")
+    targets = build_similarity_targets(
+        normalize_phenotype_similarity_targets(raw_targets)
+    )
+
+    embedding_scorer: Optional[EmbeddingSimilarityScorer] = None
+
+    if pipeline_settings is None:
+        return targets, embedding_scorer
+
+    if pipeline_settings.soft_run and pipeline_settings.enable_oai_embedding:
+        embedding_scorer = EmbeddingSimilarityScorer(
+            openai_api_key=pipeline_settings.openai_api_key,
+            model=PHENOTYPE_SIMILARITY_EMBEDDING_MODEL,
+            phenotype_cache_path=pipeline_settings.phenotype_embedding_cache_path,
+            target_cache_path=pipeline_settings.phenotype_target_embedding_cache_path,
+        )
+        if verbose and not embedding_scorer.is_available:
+            print(
+                "    Warning: OpenAI embedding similarity requested, but the embedding "
+                "client is unavailable or OPENAI_API_KEY is not set."
+            )
+
+    return targets, embedding_scorer
+
+
 def _extract_flybase_ids(value: Any) -> List[str]:
     """Extract FlyBase IDs from slash/space-delimited genotype fields."""
     matches = re.findall(r"FB[a-zA-Z]{2,4}[0-9]+", str(value or ""))
@@ -787,29 +845,21 @@ def _extract_flybase_ids(value: Any) -> List[str]:
 
 
 def _build_stock_phenotype_sheet(
-    combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict]],
+    all_stocks_df: pd.DataFrame,
     flybase_data_path: Optional[Path],
     references_df: Optional[pd.DataFrame] = None,
     unfiltered_references_df: Optional[pd.DataFrame] = None,
     pubmed_cache_path: Optional[Path] = None,
     pubmed_client: Optional[PubMedClient] = None,
+    similarity_targets: Optional[List[PhenotypeSimilarityTarget]] = None,
+    embedding_scorer: Optional[EmbeddingSimilarityScorer] = None,
     verbose: bool = False,
 ) -> pd.DataFrame:
-    """Build a soft-run replacement sheet from genotype_phenotype_data.
-
-    Reference column contains paper titles (hyperlinked via ``_reference_url``)
-    with author, journal, and publication-date metadata when available.
-    """
-    included_frames: List[pd.DataFrame] = []
-    for _combo, out_df, _summary in combination_outputs:
-        if out_df is None or len(out_df) == 0:
-            continue
-        included_frames.append(out_df.copy())
-
-    if not included_frames or flybase_data_path is None:
+    """Build a soft-run replacement sheet from genotype_phenotype_data."""
+    if all_stocks_df is None or len(all_stocks_df) == 0 or flybase_data_path is None:
         return pd.DataFrame()
 
-    included_df = pd.concat(included_frames, ignore_index=True)
+    included_df = all_stocks_df.copy()
     if 'FBst' not in included_df.columns:
         return pd.DataFrame()
 
@@ -965,6 +1015,7 @@ def _build_stock_phenotype_sheet(
 
     phenotype_df['reference'] = phenotype_df.get('reference', '').fillna('').astype(str)
     phenotype_df['phenotype_name'] = phenotype_df.get('phenotype_name', '').fillna('').astype(str)
+    phenotype_df['phenotype_id'] = phenotype_df.get('phenotype_id', '').fillna('').astype(str)
     phenotype_df['qualifier_names'] = phenotype_df.get('qualifier_names', '').fillna('').astype(str)
     phenotype_df['genotype_FBids'] = phenotype_df.get('genotype_FBids', '').fillna('').astype(str)
     phenotype_df['genotype_symbols'] = phenotype_df.get('genotype_symbols', '').fillna('').astype(str)
@@ -988,6 +1039,30 @@ def _build_stock_phenotype_sheet(
 
     if len(phenotype_df) == 0:
         return pd.DataFrame()
+
+    similarity_targets = similarity_targets or []
+    cosine_similarity_columns = [
+        target.cosine_similarity_column for target in similarity_targets
+    ]
+    similarity_columns: List[str] = list(cosine_similarity_columns)
+
+    phenotype_df['phenotype_text'] = phenotype_df['phenotype_name'].apply(
+        normalize_phenotype_text
+    )
+    phenotype_df['qualifier_text'] = phenotype_df['qualifier_names'].apply(
+        normalize_qualifier_text
+    )
+    phenotype_df['phenotype_similarity_text'] = phenotype_df.apply(
+        lambda row: normalize_phenotype_text(row.get('phenotype_name', '')),
+        axis=1,
+    )
+
+    embedding_similarity_by_text: Dict[str, Dict[str, Optional[float]]] = {}
+    if embedding_scorer is not None:
+        embedding_similarity_by_text = embedding_scorer.score_texts(
+            phenotype_df['phenotype_similarity_text'].tolist(),
+            similarity_targets,
+        )
 
     # ------------------------------------------------------------------
     # FBrf → title / URL resolution
@@ -1116,7 +1191,7 @@ def _build_stock_phenotype_sheet(
             print(f"    Warning: Could not fetch PubMed metadata for phenotype references: {exc}")
 
     def _resolve_fbrf(fbrf: str) -> Dict[str, str]:
-        """Return hyperlink display + metadata for an FBrf ID."""
+        """Return reference display + identifier metadata for an FBrf ID."""
         pmid = fbrf_to_pmid.get(fbrf, '')
         pmcid = fbrf_to_pmcid.get(fbrf, '')
         doi = fbrf_to_doi.get(fbrf, '')
@@ -1140,6 +1215,8 @@ def _build_stock_phenotype_sheet(
         return {
             'display': display,
             'url': url,
+            'pmid': pmid,
+            'pmcid': pmcid,
             'authors': meta.get('authors', ''),
             'journal': meta.get('journal', ''),
             'publication_date': meta.get('publication_date', ''),
@@ -1237,16 +1314,20 @@ def _build_stock_phenotype_sheet(
         if not matched_keys:
             continue
 
-        phenotype_name = str(pheno_row.get('phenotype_name', '') or '').strip()
-        qualifier_raw = str(pheno_row.get('qualifier_names', '') or '').strip()
-        if phenotype_name and qualifier_raw:
-            qualifiers = [q.strip() for q in qualifier_raw.split('|') if q.strip()]
-            if qualifiers:
-                phenotype_name = f"{phenotype_name} ({', '.join(qualifiers)})"
+        phenotype_name = str(
+            pheno_row.get('phenotype_text', '')
+            or normalize_phenotype_text(pheno_row.get('phenotype_name', ''))
+        ).strip()
+        qualifier_text = str(
+            pheno_row.get('qualifier_text', '')
+            or normalize_qualifier_text(pheno_row.get('qualifier_names', ''))
+        ).strip()
         genotype_label = str(pheno_row.get('genotype_symbols', '') or '').strip()
         raw_fbrfs = [clean_id(v) for v in str(pheno_row.get('reference', '') or '').split('|') if clean_id(v)]
         if not phenotype_name and not raw_fbrfs:
             continue
+
+        cosine_scores = embedding_similarity_by_text.get(phenotype_name, {})
 
         for stock_key, matched_cids in matched_keys.items():
             stock_info = stock_meta_by_fbst.get(stock_key) or custom_meta_by_stock_num.get(stock_key)
@@ -1273,26 +1354,36 @@ def _build_stock_phenotype_sheet(
                 ref_details = _resolve_fbrf(fbrf) if fbrf else {
                     'display': '',
                     'url': '',
+                    'pmid': '',
+                    'pmcid': '',
                     'authors': '',
                     'journal': '',
                     'publication_date': '',
                 }
                 stock_num = str(stock_info.get('stock_number', '') or '').strip()
                 collection = str(stock_info.get('collection', '') or '').strip()
-                source_stock = f"{collection} ({stock_num})" if collection and stock_num else stock_num or collection
-                phenotype_rows.append({
+                source_stock = _format_source_stock_label(collection, stock_num)
+                phenotype_row = {
                     'FBst': stock_key if stock_key.startswith('FBst') else '',
                     'Gene': component_gene_symbols,
                     'Reagent Type or Allele Symbol': component_symbols,
                     'Source/ Stock #': source_stock,
                     'Genotype': genotype_label,
                     'Phenotype': phenotype_name,
+                    'Qualifier': qualifier_text,
+                    'PMID': ref_details['pmid'],
+                    'PMCID': ref_details['pmcid'],
                     'Reference': ref_details['display'],
                     'Authors': ref_details['authors'],
                     'Journal': ref_details['journal'],
                     'Year of Publication': ref_details['publication_date'],
                     '_reference_url': ref_details['url'],
-                })
+                }
+                for target in similarity_targets:
+                    phenotype_row[target.cosine_similarity_column] = cosine_scores.get(
+                        target.cosine_similarity_column
+                    )
+                phenotype_rows.append(phenotype_row)
 
     if not phenotype_rows:
         return pd.DataFrame()
@@ -1304,6 +1395,9 @@ def _build_stock_phenotype_sheet(
                 'Source/ Stock #',
                 'Genotype',
                 'Phenotype',
+                'Qualifier',
+                'PMID',
+                'PMCID',
                 'Reference',
                 'Authors',
                 'Journal',
@@ -1316,6 +1410,11 @@ def _build_stock_phenotype_sheet(
         .agg({
             'Gene': lambda s: unique_join(s.tolist()),
             'Reagent Type or Allele Symbol': lambda s: unique_join(s.tolist()),
+            **{
+                col: 'max'
+                for col in similarity_columns
+                if col in phenotype_sheet.columns
+            },
         })
     )
     # Order rows by:
@@ -1325,6 +1424,11 @@ def _build_stock_phenotype_sheet(
     def _split_sheet_values(value: Any) -> List[str]:
         return [v for v in parse_semicolon_list(str(value or '')) if v and v != '-']
 
+    def _phenotype_key(row: pd.Series) -> str:
+        phenotype = str(row.get('Phenotype', '') or '').strip()
+        qualifier = str(row.get('Qualifier', '') or '').strip()
+        return f"{phenotype} ({qualifier})" if phenotype and qualifier else phenotype or qualifier
+
     gene_to_reagents: Dict[str, Set[str]] = defaultdict(set)
     gene_reagent_to_phenotypes: Dict[Tuple[str, str], Set[str]] = defaultdict(set)
     for _, row in phenotype_sheet.iterrows():
@@ -1332,7 +1436,7 @@ def _build_stock_phenotype_sheet(
         if not genes:
             genes = ['']
         reagent = str(row.get('Source/ Stock #', '') or '').strip()
-        phenotypes = _split_sheet_values(row.get('Phenotype', ''))
+        phenotypes = [_phenotype_key(row)]
         for gene in genes:
             if reagent:
                 gene_to_reagents[gene].add(reagent)
@@ -1399,12 +1503,14 @@ def _build_stock_phenotype_sheet(
             '_primary_reagent',
             'Genotype',
             'Phenotype',
+            'PMID',
+            'PMCID',
             'Reference',
             'Authors',
             'Journal',
             'Year of Publication',
         ],
-        ascending=[False, True, True, True, True, True, True, True, True, True],
+        ascending=[False, True, True, True, True, True, True, True, True, True, True, True],
     ).reset_index(drop=True)
     return phenotype_sheet[[
         'Gene',
@@ -1412,6 +1518,10 @@ def _build_stock_phenotype_sheet(
         'Source/ Stock #',
         'Genotype',
         'Phenotype',
+        'Qualifier',
+        *[col for col in similarity_columns if col in phenotype_sheet.columns],
+        'PMID',
+        'PMCID',
         'Reference',
         'Authors',
         'Journal',
@@ -1470,6 +1580,846 @@ def _summarize_stock_phenotype_sheet(phenotype_sheet_df: pd.DataFrame) -> Dict[s
         'stocks': len(unique_stocks),
         'references': len(unique_references),
     }
+
+
+def _get_cosine_similarity_columns(phenotype_sheet_df: pd.DataFrame) -> List[str]:
+    """Return the phenotype-sheet cosine similarity columns."""
+    if phenotype_sheet_df is None or len(phenotype_sheet_df.columns) == 0:
+        return []
+    return [
+        str(col)
+        for col in phenotype_sheet_df.columns
+        if str(col).startswith("Cosine Similarity (")
+    ]
+
+
+def _compute_max_cosine_similarity(phenotype_sheet_df: pd.DataFrame) -> pd.Series:
+    """Return the per-row maximum cosine similarity across all target columns."""
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return pd.Series(dtype=float)
+
+    cosine_columns = _get_cosine_similarity_columns(phenotype_sheet_df)
+    if not cosine_columns:
+        return pd.Series(index=phenotype_sheet_df.index, dtype=float)
+
+    cosine_df = phenotype_sheet_df[cosine_columns].apply(pd.to_numeric, errors="coerce")
+    return cosine_df.max(axis=1, skipna=True)
+
+
+def _split_phenotype_sheet_values(value: Any) -> List[str]:
+    """Split semicolon-delimited phenotype sheet cells into non-empty values."""
+    return [v for v in parse_semicolon_list(str(value or '')) if v and v != '-']
+
+
+def _sort_similarity_tier_rows(tier_df: pd.DataFrame) -> pd.DataFrame:
+    """Group tier rows by gene, then sort reagents by tier-local max cosine."""
+    if tier_df is None or len(tier_df) == 0:
+        return pd.DataFrame(columns=tier_df.columns if tier_df is not None else None)
+
+    sorted_df = tier_df.copy().reset_index(drop=True)
+    sorted_df["_tier_original_order"] = range(len(sorted_df))
+    sorted_df["_gene_values"] = (
+        sorted_df.get("Gene", pd.Series("", index=sorted_df.index))
+        .apply(_split_phenotype_sheet_values)
+        .apply(lambda genes: genes if genes else [""])
+    )
+    sorted_df["_primary_reagent"] = (
+        sorted_df.get("Source/ Stock #", pd.Series("", index=sorted_df.index))
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+    sorted_df["_max_cosine_similarity"] = pd.to_numeric(
+        sorted_df.get("Max Cosine Similarity", pd.Series(index=sorted_df.index, dtype=float)),
+        errors="coerce",
+    )
+
+    gene_to_reagents: Dict[str, Set[str]] = defaultdict(set)
+    reagent_score_by_gene: Dict[Tuple[str, str], float] = {}
+    gene_values_list = sorted_df["_gene_values"].tolist()
+    reagent_list = sorted_df["_primary_reagent"].tolist()
+    score_list = sorted_df["_max_cosine_similarity"].tolist()
+
+    for genes, reagent, score in zip(gene_values_list, reagent_list, score_list):
+        for gene in genes:
+            gene_to_reagents.setdefault(gene, set())
+            if reagent:
+                gene_to_reagents[gene].add(reagent)
+                current_score = reagent_score_by_gene.get((gene, reagent), float("-inf"))
+                if pd.notna(score):
+                    reagent_score_by_gene[(gene, reagent)] = max(current_score, float(score))
+                else:
+                    reagent_score_by_gene.setdefault((gene, reagent), current_score)
+
+    gene_sort_order = sorted(
+        gene_to_reagents.keys(),
+        key=lambda gene: (
+            -len(gene_to_reagents.get(gene, set())),
+            str(gene).lower(),
+            str(gene),
+        ),
+    )
+    gene_rank = {gene: idx for idx, gene in enumerate(gene_sort_order)}
+
+    sorted_df["_primary_gene"] = sorted_df["_gene_values"].apply(
+        lambda genes: min(
+            genes if genes else [""],
+            key=lambda gene: (
+                gene_rank.get(gene, float("inf")),
+                str(gene).lower(),
+                str(gene),
+            ),
+        )
+    )
+    sorted_df["_gene_reagent_count"] = sorted_df["_primary_gene"].map(
+        lambda gene: len(gene_to_reagents.get(gene, set()))
+    )
+    sorted_df["_reagent_max_cosine_within_gene"] = sorted_df.apply(
+        lambda row: reagent_score_by_gene.get(
+            (row["_primary_gene"], row["_primary_reagent"]),
+            float("-inf"),
+        ),
+        axis=1,
+    )
+
+    sorted_df = sorted_df.sort_values(
+        by=[
+            "_gene_reagent_count",
+            "_primary_gene",
+            "_reagent_max_cosine_within_gene",
+            "_primary_reagent",
+            "_tier_original_order",
+        ],
+        ascending=[False, True, False, True, True],
+        kind="mergesort",
+        na_position="last",
+    ).reset_index(drop=True)
+
+    helper_columns = {
+        "_tier_original_order",
+        "_gene_values",
+        "_primary_reagent",
+        "_max_cosine_similarity",
+        "_primary_gene",
+        "_gene_reagent_count",
+        "_reagent_max_cosine_within_gene",
+    }
+    return sorted_df.drop(columns=[col for col in helper_columns if col in sorted_df.columns])
+
+
+def _format_similarity_score_for_sheet_name(value: float) -> str:
+    """Format a similarity bound compactly for Excel sheet names."""
+    return f"{float(value):.3f}".rstrip("0").rstrip(".")
+
+
+def _format_similarity_tier_sheet_name(
+    lower_bound: Optional[float],
+    upper_bound: Optional[float],
+) -> str:
+    """Build a compact, Excel-safe tier sheet name."""
+    if lower_bound is None:
+        return f"<{_format_similarity_score_for_sheet_name(float(upper_bound))}"[:31]
+    if upper_bound is None:
+        return _format_similarity_score_for_sheet_name(float(lower_bound))[:31]
+    lower_label = _format_similarity_score_for_sheet_name(lower_bound)
+    upper_label = _format_similarity_score_for_sheet_name(upper_bound)
+    return f"{lower_label}-{upper_label}"[:31]
+
+
+def _build_similarity_threshold_bins() -> List[Tuple[Optional[float], float]]:
+    """Return descending similarity bins using the configured bin width."""
+    bins: List[Tuple[Optional[float], float]] = []
+    upper_bound = 1.0
+    step = float(SIMILARITY_TIER_BIN_WIDTH)
+    for _ in range(max(SIMILARITY_TIER_SHEET_COUNT - 1, 0)):
+        lower_bound = round(upper_bound - step, 10)
+        bins.append((lower_bound, upper_bound))
+        upper_bound = lower_bound
+    bins.append((None, upper_bound))
+    return bins
+
+
+def _build_similarity_tier_sheets(
+    phenotype_sheet_df: pd.DataFrame,
+) -> List[Tuple[str, pd.DataFrame, Dict[str, Any]]]:
+    """Partition scored phenotype rows into fixed max-cosine bins.
+
+    Tier sheets preserve the original Stock Phenotype Sheet row order and skip
+    empty bins entirely so the workbook only contains reagent-bearing tabs.
+    """
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return []
+
+    max_cosine_similarity = _compute_max_cosine_similarity(phenotype_sheet_df)
+    scored_mask = max_cosine_similarity.notna()
+    if not scored_mask.any():
+        return []
+
+    scored_df = phenotype_sheet_df.loc[scored_mask].copy()
+    scored_df.insert(
+        min(len(scored_df.columns), 8),
+        "Max Cosine Similarity",
+        max_cosine_similarity.loc[scored_df.index].round(6),
+    )
+
+    tiers: List[Tuple[str, pd.DataFrame, Dict[str, Any]]] = []
+    threshold_bins = _build_similarity_threshold_bins()
+    scores = pd.to_numeric(scored_df["Max Cosine Similarity"], errors="coerce")
+
+    for lower_bound, upper_bound in threshold_bins:
+        if lower_bound is None:
+            tier_mask = scores < upper_bound
+            range_label = f"<{_format_similarity_score_for_sheet_name(upper_bound)}"
+        elif upper_bound >= 1.0:
+            tier_mask = scores >= lower_bound
+            range_label = (
+                f"{_format_similarity_score_for_sheet_name(lower_bound)}-"
+                f"{_format_similarity_score_for_sheet_name(upper_bound)}"
+            )
+        else:
+            tier_mask = (scores >= lower_bound) & (scores < upper_bound)
+            range_label = (
+                f"{_format_similarity_score_for_sheet_name(lower_bound)}-"
+                f"{_format_similarity_score_for_sheet_name(upper_bound)}"
+            )
+
+        tier_df = _sort_similarity_tier_rows(scored_df.loc[tier_mask].copy())
+        if tier_df.empty:
+            continue
+
+        tier_metadata = {
+            "lower_bound": lower_bound,
+            "upper_bound": upper_bound,
+            "row_count": len(tier_df),
+            "range_label": range_label,
+        }
+        tier_df.insert(
+            0,
+            "Similarity Range",
+            range_label,
+        )
+        tiers.append(
+            (
+                _format_similarity_tier_sheet_name(
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
+                ),
+                tier_df,
+                tier_metadata,
+            )
+        )
+
+    return tiers
+
+
+def _write_reference_hyperlinks(
+    worksheet,
+    workbook,
+    sheet_df: pd.DataFrame,
+    reference_urls: Optional[pd.Series],
+) -> None:
+    """Apply hyperlink formatting to the Reference column when URLs are available."""
+    if reference_urls is None or 'Reference' not in sheet_df.columns:
+        return
+
+    ref_col_idx = sheet_df.columns.get_loc('Reference')
+    url_fmt = workbook.add_format({'font_color': 'blue', 'underline': 1})
+    for excel_row, url in enumerate(reference_urls, start=1):
+        url = str(url or '').strip()
+        if not url:
+            continue
+        display = str(sheet_df.iloc[excel_row - 1]['Reference'] or '').strip()
+        if display:
+            worksheet.write_url(excel_row, ref_col_idx, url, url_fmt, display)
+
+
+def _write_phenotype_similarity_sheet(
+    writer: pd.ExcelWriter,
+    _workbook,
+    sheet_name: str,
+    phenotype_sheet_df: pd.DataFrame,
+) -> None:
+    """Write a phenotype-derived sheet without emitting workbook hyperlinks."""
+    sheet_out = phenotype_sheet_df.copy()
+    sheet_out = sheet_out.drop(columns=['_reference_url'], errors='ignore')
+    sheet_out.to_excel(writer, sheet_name=sheet_name, index=False)
+
+
+def _format_source_stock_label(collection: Any, stock_number: Any) -> str:
+    """Format the stock label used on the Stock Phenotype sheet."""
+    collection_str = str(collection or "").strip()
+    stock_number_str = str(stock_number or "").strip()
+    if collection_str and collection_str.lower() == "nan":
+        collection_str = ""
+    if stock_number_str and stock_number_str.lower() == "nan":
+        stock_number_str = ""
+    if collection_str and stock_number_str:
+        return f"{collection_str} ({stock_number_str})"
+    return stock_number_str or collection_str
+
+
+def _is_truthy(value: Any) -> bool:
+    """Return True for common truthy encodings used in workbook data."""
+    if value is True:
+        return True
+    if value is False or value is None:
+        return False
+    if isinstance(value, (int, float)) and not pd.isna(value):
+        return bool(value)
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+
+def _normalize_simple_bucket_collection(row: pd.Series) -> str:
+    """Normalize the collection label used by simple-bucket summaries."""
+    collection = str(row.get("collection", "") or "").strip()
+    if not collection or collection.lower() == "nan":
+        collection = "Unknown"
+    return collection
+
+
+def _build_simple_bucket_reagent_key(row: pd.Series) -> str:
+    """Return a stable reagent key across stock-center and custom reagents."""
+    fbst = clean_id(row.get("FBst", ""))
+    if fbst:
+        return fbst
+    stock_number = str(row.get("stock_number", "") or "").strip()
+    collection = _normalize_simple_bucket_collection(row)
+    component_ids = unique_join(parse_semicolon_list(str(row.get("relevant_component_ids", "") or "")))
+    return f"CUSTOM::{collection}::{stock_number}::{component_ids}"
+
+
+def _sanitize_simple_bucket_sheet_component(value: str, max_len: int = 12) -> str:
+    """Build a compact Excel-safe sheet-name token."""
+    token = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip()).strip("_")
+    if not token:
+        token = "bucket"
+    return token[:max_len]
+
+
+def _format_simple_bucket_sheet_name(
+    index: int,
+    collection: str,
+    uas: bool,
+    sleep_circ: bool,
+    has_balancer: bool,
+) -> str:
+    """Build a deterministic, Excel-safe simple-bucket sheet name."""
+    collection_token = _sanitize_simple_bucket_sheet_component(collection, max_len=12)
+    base_name = (
+        f"{index:02d}_{collection_token}_u{int(uas)}_s{int(sleep_circ)}_b{int(has_balancer)}"
+    )
+    return base_name[:31]
+
+
+def _format_simple_bucket_combination_label(
+    collection: str,
+    uas: bool,
+    sleep_circ: bool,
+    has_balancer: bool,
+) -> str:
+    """Build the user-facing combination label for simple buckets."""
+    return (
+        f"{collection} > UAS ({str(uas).lower()}) > sleep/ circ ({str(sleep_circ).lower()}) "
+        f"> has balancer ({str(has_balancer).lower()})"
+    )
+
+
+def _read_gene_set_sheet_for_similarity_workbook(source_workbook_path: Path) -> Optional[pd.DataFrame]:
+    """Load the input gene set, preferring the original CSV gene-list inputs."""
+    workbook_path = Path(source_workbook_path)
+    csv_dirs: List[Path] = []
+    for candidate in (workbook_path.parent, workbook_path.parent.parent):
+        if candidate not in csv_dirs:
+            csv_dirs.append(candidate)
+
+    csv_frames: List[pd.DataFrame] = []
+    for csv_dir in csv_dirs:
+        for csv_path in sorted(csv_dir.glob("*.csv")):
+            try:
+                csv_frames.append(pd.read_csv(csv_path, dtype=str))
+            except Exception:
+                continue
+        if csv_frames:
+            break
+
+    if csv_frames:
+        if len(csv_frames) == 1:
+            return csv_frames[0]
+        return pd.concat(csv_frames, ignore_index=True, sort=False)
+
+    source_workbook = pd.ExcelFile(workbook_path)
+    if not source_workbook.sheet_names:
+        return None
+    return pd.read_excel(workbook_path, sheet_name=source_workbook.sheet_names[0], header=None)
+
+
+def _build_simple_bucket_workbook_entries(
+    phenotype_sheet_df: pd.DataFrame,
+    combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict[str, Any]]],
+    csv_input_genes: Optional[Set[str]] = None,
+) -> List[Tuple[str, pd.DataFrame, Dict[str, Any]]]:
+    """Build ordered simple-bucket workbook entries and counts."""
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return []
+
+    phenotype_sources = (
+        phenotype_sheet_df.get("Source/ Stock #", pd.Series(dtype=str))
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+    phenotype_source_set = {value for value in phenotype_sources if value}
+    if not phenotype_source_set:
+        return []
+
+    sleep_circ_sources: Set[str] = set()
+    if "Phenotype" in phenotype_sheet_df.columns:
+        for source_stock, phenotype_group in phenotype_sheet_df.groupby("Source/ Stock #", sort=False):
+            source_stock_str = str(source_stock or "").strip()
+            if not source_stock_str:
+                continue
+            phenotypes = phenotype_group["Phenotype"].fillna("").astype(str)
+            if phenotypes.str.contains(r"sleep|circadian", case=False, na=False).any():
+                sleep_circ_sources.add(source_stock_str)
+
+    reagent_records: List[Dict[str, Any]] = []
+    seen_reagents: Set[str] = set()
+    allele_col_cache: Dict[int, Optional[str]] = {}
+    collection_order: List[str] = []
+
+    for _combo, stock_df, _summary in combination_outputs:
+        if stock_df is None or len(stock_df) == 0:
+            continue
+        allele_col = allele_col_cache.setdefault(id(stock_df), _find_allele_column(stock_df))
+        gene_col = "relevant_gene_symbols" if "relevant_gene_symbols" in stock_df.columns else _find_gene_id_column(stock_df)
+        for _, row in stock_df.iterrows():
+            source_stock = _format_source_stock_label(
+                row.get("collection", ""),
+                row.get("stock_number", ""),
+            )
+            if not source_stock or source_stock not in phenotype_source_set:
+                continue
+
+            reagent_key = _build_simple_bucket_reagent_key(row)
+            if reagent_key in seen_reagents:
+                continue
+            seen_reagents.add(reagent_key)
+
+            collection = _normalize_simple_bucket_collection(row)
+            if collection not in collection_order:
+                collection_order.append(collection)
+
+            genes = {
+                gene.strip()
+                for gene in parse_semicolon_list(str(row.get(gene_col, "") or ""))
+                if gene.strip() and gene.strip() != "-"
+            }
+            if csv_input_genes is not None:
+                genes &= csv_input_genes
+
+            alleles: Set[str] = set()
+            if allele_col:
+                for allele in parse_semicolon_list(str(row.get(allele_col, "") or "")):
+                    allele = allele.strip()
+                    if allele and allele != "-":
+                        alleles.add(allele)
+            if csv_input_genes is not None and not genes:
+                alleles.clear()
+
+            has_balancer = False
+            try:
+                has_balancer = int(float(row.get("num_Balancers", 0) or 0)) > 0
+            except (TypeError, ValueError):
+                balancers_value = str(row.get("Balancers", "") or "").strip()
+                has_balancer = bool(balancers_value and balancers_value not in {"-", "nan"})
+
+            reagent_records.append(
+                {
+                    "reagent_key": reagent_key,
+                    "source_stock": source_stock,
+                    "collection": collection,
+                    "uas": _is_truthy(row.get("UAS", False)),
+                    "sleep_circ": source_stock in sleep_circ_sources,
+                    "has_balancer": has_balancer,
+                    "genes": genes,
+                    "alleles": alleles,
+                }
+            )
+
+    if not reagent_records:
+        return []
+
+    records_by_bucket: Dict[Tuple[str, bool, bool, bool], List[Dict[str, Any]]] = defaultdict(list)
+    for record in reagent_records:
+        bucket_key = (
+            record["collection"],
+            record["uas"],
+            record["sleep_circ"],
+            record["has_balancer"],
+        )
+        records_by_bucket[bucket_key].append(record)
+
+    global_seen_genes: Set[str] = set()
+    global_seen_alleles: Set[str] = set()
+    entries: List[Tuple[str, pd.DataFrame, Dict[str, Any]]] = []
+    entry_index = 1
+    for collection in collection_order:
+        for uas in (True, False):
+            for sleep_circ in (True, False):
+                for has_balancer in (False, True):
+                    bucket_key = (collection, uas, sleep_circ, has_balancer)
+                    bucket_records = records_by_bucket.get(bucket_key, [])
+                    source_stocks = {
+                        record["source_stock"]
+                        for record in bucket_records
+                        if record["source_stock"]
+                    }
+                    bucket_df = phenotype_sheet_df[
+                        phenotype_sources.isin(source_stocks)
+                    ].copy()
+
+                    combo_genes: Set[str] = set()
+                    combo_alleles: Set[str] = set()
+                    for record in bucket_records:
+                        combo_genes.update(record["genes"])
+                        combo_alleles.update(record["alleles"])
+
+                    owned_genes = combo_genes - global_seen_genes
+                    owned_alleles = combo_alleles - global_seen_alleles
+                    global_seen_genes.update(owned_genes)
+                    global_seen_alleles.update(owned_alleles)
+
+                    sheet_name = _format_simple_bucket_sheet_name(
+                        entry_index,
+                        collection=collection,
+                        uas=uas,
+                        sleep_circ=sleep_circ,
+                        has_balancer=has_balancer,
+                    )
+                    entry_index += 1
+
+                    metadata = {
+                        "sheet_name": sheet_name,
+                        "combination": _format_simple_bucket_combination_label(
+                            collection=collection,
+                            uas=uas,
+                            sleep_circ=sleep_circ,
+                            has_balancer=has_balancer,
+                        ),
+                        "collection": collection,
+                        "uas": uas,
+                        "sleep_circ": sleep_circ,
+                        "has_balancer": has_balancer,
+                        "stock_count": len(source_stocks),
+                        "allele_count": len(owned_alleles),
+                        "gene_count": len(owned_genes),
+                    }
+                    entries.append((sheet_name, bucket_df, metadata))
+
+    return entries
+
+
+def _write_similarity_tier_contents_sheet(
+    workbook,
+    similarity_tiers: List[Tuple[str, pd.DataFrame, Dict[str, Any]]],
+) -> None:
+    """Write a concise contents sheet for the similarity tier workbook."""
+    worksheet = workbook.add_worksheet("Contents")
+    title_fmt = workbook.add_format({"bold": True, "font_size": 14})
+    body_fmt = workbook.add_format({"font_size": 11, "text_wrap": True, "valign": "top"})
+    header_fmt = workbook.add_format({"bold": True, "bottom": 1, "font_size": 11})
+
+    worksheet.set_column(0, 0, 26)
+    worksheet.set_column(1, 1, 70)
+    worksheet.set_column(2, 2, 16)
+
+    row = 0
+    worksheet.write(row, 0, "Tier Workbook Contents", title_fmt)
+    row += 2
+    worksheet.write(
+        row,
+        0,
+        "Bucket assignment",
+        header_fmt,
+    )
+    worksheet.write(
+        row,
+        1,
+        "Rows are assigned by Max Cosine Similarity, defined as the per-row maximum across all `Cosine Similarity (...)` columns.",
+        body_fmt,
+    )
+    row += 1
+    worksheet.write(row, 0, "Thresholds", header_fmt)
+    worksheet.write(
+        row,
+        1,
+        "Fixed 0.05 cosine bins are evaluated from 0.95-1.0 downward to <0.05; empty buckets are skipped.",
+        body_fmt,
+    )
+    row += 1
+    worksheet.write(row, 0, "Ordering within tiers", header_fmt)
+    worksheet.write(
+        row,
+        1,
+        "Rows are grouped by gene using only reagents present in that tier. Gene groups with more unique reagents appear first, and reagents within each gene are sorted by max cosine similarity.",
+        body_fmt,
+    )
+    row += 2
+
+    worksheet.write_row(row, 0, ["Sheet", "Meaning", "Rows"], header_fmt)
+    row += 1
+    worksheet.write_row(row, 0, ["Gene Set", "Copied from the input gene-list CSV data when available.", ""])
+    row += 1
+    worksheet.write_row(row, 0, ["Stock Phenotype Sheet", "Full phenotype table used to build all similarity tiers.", ""])
+    row += 1
+    for sheet_name, tier_df, metadata in similarity_tiers:
+        worksheet.write_row(
+            row,
+            0,
+            [
+                sheet_name,
+                f"Tier for similarity range {metadata['range_label']}.",
+                int(len(tier_df)),
+            ],
+        )
+        row += 1
+
+
+def _format_bucket_combo_header(uas: bool, sleep_circ: bool, has_balancer: bool) -> str:
+    """Short human-readable column header for one boolean permutation."""
+    parts: List[str] = []
+    parts.append("UAS" if uas else "non-UAS")
+    parts.append("slp/ circ" if sleep_circ else "Non slp/ circ")
+    parts.append("Has bal" if has_balancer else "No bal")
+    return " | ".join(parts)
+
+
+def _write_simple_bucket_contents_sheet(
+    workbook,
+    simple_bucket_entries: List[Tuple[str, pd.DataFrame, Dict[str, Any]]],
+) -> None:
+    """Write a pivot-matrix contents sheet for simple-bucket workbooks.
+
+    Renders three stacked matrices (Stocks, Alleles, Genes) with rows =
+    collections and columns = boolean permutations that have at least one
+    non-zero cell.  Each matrix includes row totals and a column-total
+    footer row.  A sheet-name legend follows the matrices.
+    """
+    worksheet = workbook.add_worksheet("Contents")
+    title_fmt = workbook.add_format({"bold": True, "font_size": 14})
+    body_fmt = workbook.add_format({"font_size": 11, "text_wrap": True, "valign": "top"})
+    header_fmt = workbook.add_format({"bold": True, "bottom": 1, "font_size": 11})
+    num_fmt = workbook.add_format({"font_size": 11, "align": "center"})
+    num_zero_fmt = workbook.add_format({"font_size": 11, "align": "center", "font_color": "#BFBFBF"})
+    total_fmt = workbook.add_format({"bold": True, "font_size": 11, "top": 1, "align": "center"})
+    total_label_fmt = workbook.add_format({"bold": True, "font_size": 11, "top": 1})
+    row_total_hdr_fmt = workbook.add_format({"bold": True, "bottom": 1, "font_size": 11, "align": "center"})
+    section_fmt = workbook.add_format({"bold": True, "font_size": 12})
+    legend_hdr_fmt = workbook.add_format({"bold": True, "bottom": 1, "font_size": 11})
+    legend_fmt = workbook.add_format({"font_size": 11})
+
+    # -- Collect per-entry data keyed by (collection, combo_tuple) ----------
+    collections_ordered: List[str] = []
+    all_combos_ordered: List[Tuple[bool, bool, bool]] = []
+    data: Dict[Tuple[str, Tuple[bool, bool, bool]], Dict[str, int]] = {}
+    legend_rows: List[Tuple[str, Dict[str, Any]]] = []
+
+    for sheet_name, _bucket_df, metadata in simple_bucket_entries:
+        coll: str = metadata["collection"]
+        combo = (metadata["uas"], metadata["sleep_circ"], metadata["has_balancer"])
+        if coll not in collections_ordered:
+            collections_ordered.append(coll)
+        if combo not in all_combos_ordered:
+            all_combos_ordered.append(combo)
+        data[(coll, combo)] = {
+            "stock_count": metadata["stock_count"],
+            "allele_count": metadata["allele_count"],
+            "gene_count": metadata["gene_count"],
+        }
+        legend_rows.append((sheet_name, metadata))
+
+    # Keep only combos that have at least one non-zero stock across all
+    # collections (avoids entirely-empty columns).
+    active_combos = [
+        combo for combo in all_combos_ordered
+        if any(data.get((c, combo), {}).get("stock_count", 0) for c in collections_ordered)
+    ]
+    if not active_combos:
+        active_combos = all_combos_ordered
+
+    combo_headers = [_format_bucket_combo_header(*c) for c in active_combos]
+    n_combos = len(active_combos)
+
+    # Column widths: col 0 = collection label, cols 1..n = combo columns, col n+1 = total
+    worksheet.set_column(0, 0, 18)
+    for ci in range(1, n_combos + 2):
+        worksheet.set_column(ci, ci, max(14, max((len(h) for h in combo_headers), default=10) + 2))
+
+    row = 0
+    worksheet.write(row, 0, "Simple Bucket Workbook Contents", title_fmt)
+    row += 2
+
+    # -- Preamble ----------------------------------------------------------
+    worksheet.write(row, 0, "Bucket assignment", header_fmt)
+    worksheet.write(
+        row, 1,
+        "Each reagent is assigned to exactly one collection / UAS / sleep-circ / balancer combination. "
+        "The matrices below show per-collection counts for every non-empty combination.",
+        body_fmt,
+    )
+    row += 1
+    worksheet.write(row, 0, "Counting invariant", header_fmt)
+    worksheet.write(
+        row, 1,
+        "Genes, alleles, and reagents are never double-counted within or across combinations. "
+        "Gene and allele counts are owned by the first matching combination in workbook order.",
+        body_fmt,
+    )
+    row += 2
+
+    # -- Column header definitions -----------------------------------------
+    worksheet.write(row, 0, "Column definitions", section_fmt)
+    row += 1
+    worksheet.write(row, 0, "UAS / non-UAS", header_fmt)
+    worksheet.write(
+        row, 1,
+        "Whether the stock genotype contains a UAS (Upstream Activation Sequence) construct. "
+        "UAS stocks carry transgenes driven by the GAL4-UAS binary expression system.",
+        body_fmt,
+    )
+    row += 1
+    worksheet.write(row, 0, "slp/ circ / Non slp/ circ", header_fmt)
+    worksheet.write(
+        row, 1,
+        "Whether any phenotype row linked to the stock mentions 'sleep' or 'circadian'. "
+        "Derived from the FlyBase genotype_phenotype_data phenotype descriptions.",
+        body_fmt,
+    )
+    row += 1
+    worksheet.write(row, 0, "No bal / Has bal", header_fmt)
+    worksheet.write(
+        row, 1,
+        "Whether the stock carries at least one balancer chromosome (e.g. CyO, TM3, TM6B, FM7). "
+        "Derived from the FBba (balancer) component count in the Stage 1 workbook.",
+        body_fmt,
+    )
+    row += 2
+
+    # -- Helper to write one pivot matrix ----------------------------------
+    def _write_matrix(start_row: int, metric_label: str, metric_key: str) -> int:
+        r = start_row
+        worksheet.write(r, 0, metric_label, section_fmt)
+        r += 1
+        # Header row: Collection | combo1 | combo2 | ... | Total
+        worksheet.write(r, 0, "Collection", header_fmt)
+        for ci, hdr in enumerate(combo_headers):
+            worksheet.write(r, 1 + ci, hdr, header_fmt)
+        worksheet.write(r, 1 + n_combos, "Total", row_total_hdr_fmt)
+        r += 1
+
+        col_totals = [0] * n_combos
+        grand_total = 0
+        for coll in collections_ordered:
+            worksheet.write(r, 0, coll, legend_fmt)
+            row_sum = 0
+            for ci, combo in enumerate(active_combos):
+                val = data.get((coll, combo), {}).get(metric_key, 0)
+                fmt = num_zero_fmt if val == 0 else num_fmt
+                worksheet.write_number(r, 1 + ci, val, fmt)
+                col_totals[ci] += val
+                row_sum += val
+            worksheet.write_number(r, 1 + n_combos, row_sum, num_fmt)
+            grand_total += row_sum
+            r += 1
+
+        # Column totals footer
+        worksheet.write(r, 0, "Total", total_label_fmt)
+        for ci, ct in enumerate(col_totals):
+            worksheet.write_number(r, 1 + ci, ct, total_fmt)
+        worksheet.write_number(r, 1 + n_combos, grand_total, total_fmt)
+        r += 1
+        return r
+
+    # -- Write three matrices ----------------------------------------------
+    row = _write_matrix(row, "Stocks per bucket", "stock_count")
+    row += 1
+    row = _write_matrix(row, "Alleles per bucket", "allele_count")
+    row += 1
+    row = _write_matrix(row, "Genes per bucket", "gene_count")
+    row += 2
+
+    # -- Sheet-name legend -------------------------------------------------
+    worksheet.write(row, 0, "Sheet legend", section_fmt)
+    row += 1
+    legend_headers = [
+        "Sheet name", "Combination", "Collection",
+        "UAS", "sleep/ circ", "has balancer",
+        "# Stocks", "# Alleles", "# Genes",
+    ]
+    for ci, hdr in enumerate(legend_headers):
+        worksheet.write(row, ci, hdr, legend_hdr_fmt)
+    row += 1
+    for sn, meta in legend_rows:
+        worksheet.write(row, 0, sn, legend_fmt)
+        worksheet.write(row, 1, meta["combination"], legend_fmt)
+        worksheet.write(row, 2, meta["collection"], legend_fmt)
+        worksheet.write(row, 3, str(meta["uas"]).lower(), legend_fmt)
+        worksheet.write(row, 4, str(meta["sleep_circ"]).lower(), legend_fmt)
+        worksheet.write(row, 5, str(meta["has_balancer"]).lower(), legend_fmt)
+        worksheet.write_number(row, 6, meta["stock_count"], num_fmt)
+        worksheet.write_number(row, 7, meta["allele_count"], num_fmt)
+        worksheet.write_number(row, 8, meta["gene_count"], num_fmt)
+        row += 1
+
+
+def _write_similarity_tier_workbook(
+    output_path: Path,
+    source_workbook_path: Path,
+    stock_phenotype_sheet_df: pd.DataFrame,
+    combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict[str, Any]]],
+    csv_input_genes: Optional[Set[str]] = None,
+    simple_buckets: bool = False,
+    verbose: bool = False,
+) -> Optional[Path]:
+    """Write the phenotype similarity workbook alongside the aggregated workbook."""
+    if stock_phenotype_sheet_df is None or len(stock_phenotype_sheet_df) == 0:
+        return None
+
+    similarity_tiers = _build_similarity_tier_sheets(stock_phenotype_sheet_df)
+    simple_bucket_entries = _build_simple_bucket_workbook_entries(
+        phenotype_sheet_df=stock_phenotype_sheet_df,
+        combination_outputs=combination_outputs,
+        csv_input_genes=csv_input_genes,
+    ) if simple_buckets else []
+    gene_set_df = _read_gene_set_sheet_for_similarity_workbook(source_workbook_path)
+    tier_workbook_path = output_path.parent / f"{output_path.stem}_similarity_tiers.xlsx"
+    with pd.ExcelWriter(tier_workbook_path, engine='xlsxwriter') as writer:
+        workbook = writer.book
+        if simple_buckets:
+            _write_simple_bucket_contents_sheet(workbook, simple_bucket_entries)
+        else:
+            _write_similarity_tier_contents_sheet(workbook, similarity_tiers)
+        if gene_set_df is not None and len(gene_set_df.columns) > 0:
+            write_header = not all(isinstance(col, int) for col in gene_set_df.columns)
+            gene_set_df.to_excel(writer, sheet_name="Gene Set", index=False, header=write_header)
+        _write_phenotype_similarity_sheet(
+            writer,
+            workbook,
+            "Stock Phenotype Sheet",
+            stock_phenotype_sheet_df,
+        )
+        if simple_buckets:
+            for sheet_name, bucket_df, _metadata in simple_bucket_entries:
+                _write_phenotype_similarity_sheet(writer, workbook, sheet_name, bucket_df)
+        else:
+            for sheet_name, tier_df, _metadata in similarity_tiers:
+                _write_phenotype_similarity_sheet(writer, workbook, sheet_name, tier_df)
+
+    if verbose:
+        sheet_count = len(simple_bucket_entries) if simple_buckets else len(similarity_tiers)
+        sheet_kind = "simple bucket" if simple_buckets else "similarity tier"
+        print(f"    Saved: {tier_workbook_path.name} ({sheet_count} {sheet_kind} sheet(s))")
+    return tier_workbook_path
 
 
 def _build_stock_sheet_by_gene(
@@ -1702,8 +2652,10 @@ def _build_stock_sheet_by_gene(
 
 def write_aggregated_excel(
     output_path: Path,
+    source_workbook_path: Path,
     config: Dict[str, Any],
     combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict]],
+    all_stocks_df: Optional[pd.DataFrame],
     references_df: Optional[pd.DataFrame],
     unfiltered_references_df: Optional[pd.DataFrame] = None,
     verbose: bool = True,
@@ -1717,12 +2669,14 @@ def write_aggregated_excel(
     pubmed_cache_path: Optional[Path] = None,
     pubmed_client: Optional[PubMedClient] = None,
     current_to_input_map: Optional[Dict[str, str]] = None,
+    pipeline_settings: Optional[Settings] = None,
 ) -> None:
     """
     Write aggregated Excel file with Contents, Sheet1..N, References.
     
     Args:
         output_path: Path to output Excel file
+        source_workbook_path: Original Stage 1 workbook used to build the aggregate
         config: Configuration dictionary
         combination_outputs: List of (combination, limited_df, summary_dict) tuples
         references_df: References DataFrame (may be None)
@@ -1789,24 +2743,73 @@ def write_aggregated_excel(
     
     stock_sheet_by_gene_df = pd.DataFrame()
     stock_phenotype_sheet_df = pd.DataFrame()
+    similarity_targets: List[PhenotypeSimilarityTarget] = []
+    embedding_scorer: Optional[EmbeddingSimilarityScorer] = None
     stock_phenotype_sheet_counts = {
         'genes': 0,
         'stocks': 0,
         'references': 0,
     }
     if soft_run:
+        similarity_targets, embedding_scorer = _build_phenotype_similarity_context(
+            config,
+            pipeline_settings,
+            verbose=verbose,
+        )
         stock_phenotype_sheet_df = _build_stock_phenotype_sheet(
-            combination_outputs,
+            all_stocks_df if all_stocks_df is not None else pd.DataFrame(),
             flybase_data_path,
             references_df=references_df,
             unfiltered_references_df=unfiltered_references_df,
             pubmed_cache_path=pubmed_cache_path,
             pubmed_client=pubmed_client,
+            similarity_targets=similarity_targets,
+            embedding_scorer=embedding_scorer,
             verbose=verbose,
         )
         stock_phenotype_sheet_counts = _summarize_stock_phenotype_sheet(
             stock_phenotype_sheet_df
         )
+
+        keywords_for_pheno = [
+            kw.lower()
+            for kw in settings.get('relevantSearchTerms', [])
+            if kw
+        ]
+        if (
+            keywords_for_pheno
+            and len(stock_phenotype_sheet_df) > 0
+            and 'Phenotype' in stock_phenotype_sheet_df.columns
+            and 'Source/ Stock #' in stock_phenotype_sheet_df.columns
+        ):
+            pheno_lower = stock_phenotype_sheet_df['Phenotype'].fillna('').str.lower()
+            kw_mask = pheno_lower.apply(
+                lambda p: any(kw in p for kw in keywords_for_pheno)
+            )
+            matched_reagents = (
+                stock_phenotype_sheet_df.loc[kw_mask, 'Source/ Stock #']
+                .dropna()
+                .loc[lambda s: s.str.strip().ne('')]
+            )
+            n_unique = matched_reagents.nunique()
+            kw_display = ' or '.join(f"'{kw}'" for kw in keywords_for_pheno)
+            print(
+                f"\n    Phenotype keyword hits: {n_unique} unique reagent(s) "
+                f"have {kw_display} in their Phenotype "
+                f"(across {int(kw_mask.sum())} phenotype rows in the "
+                f"Stock Phenotype Sheet)."
+            )
+            for kw in keywords_for_pheno:
+                per_kw_mask = pheno_lower.str.contains(kw, na=False)
+                per_kw_reagents = (
+                    stock_phenotype_sheet_df.loc[per_kw_mask, 'Source/ Stock #']
+                    .dropna()
+                    .loc[lambda s: s.str.strip().ne('')]
+                )
+                print(
+                    f"      - '{kw}': {per_kw_reagents.nunique()} unique reagent(s) "
+                    f"across {int(per_kw_mask.sum())} rows"
+                )
     else:
         stock_sheet_by_gene_df = _build_stock_sheet_by_gene(
             combination_outputs,
@@ -2164,27 +3167,12 @@ def write_aggregated_excel(
         
         if soft_run:
             if stock_phenotype_sheet_df is not None and len(stock_phenotype_sheet_df) > 0:
-                ref_urls = (
-                    stock_phenotype_sheet_df.pop('_reference_url')
-                    if '_reference_url' in stock_phenotype_sheet_df.columns
-                    else None
+                _write_phenotype_similarity_sheet(
+                    writer,
+                    workbook,
+                    "Stock Phenotype Sheet",
+                    stock_phenotype_sheet_df,
                 )
-                stock_phenotype_sheet_df.to_excel(
-                    writer, sheet_name="Stock Phenotype Sheet", index=False
-                )
-                if ref_urls is not None and 'Reference' in stock_phenotype_sheet_df.columns:
-                    pheno_ws = writer.sheets["Stock Phenotype Sheet"]
-                    ref_col_idx = stock_phenotype_sheet_df.columns.get_loc('Reference')
-                    url_fmt = workbook.add_format({'font_color': 'blue', 'underline': 1})
-                    for excel_row, url in enumerate(ref_urls, start=1):
-                        url = str(url or '').strip()
-                        if not url:
-                            continue
-                        display = str(
-                            stock_phenotype_sheet_df.iloc[excel_row - 1]['Reference'] or ''
-                        ).strip()
-                        if display:
-                            pheno_ws.write_url(excel_row, ref_col_idx, url, url_fmt, display)
         else:
             if stock_sheet_by_gene_df is not None and len(stock_sheet_by_gene_df) > 0:
                 stock_sheet_by_gene_out = apply_experimental_prefix(stock_sheet_by_gene_df)
@@ -2206,6 +3194,30 @@ def write_aggregated_excel(
                     dark_header_format=fmt_dark_grey_white,
                     dark_header_columns=stock_aggregate_columns,
                 )
+
+    if soft_run and stock_phenotype_sheet_df is not None and len(stock_phenotype_sheet_df) > 0:
+        if pipeline_settings is not None and pipeline_settings.enable_oai_embedding:
+            _write_similarity_tier_workbook(
+                output_path=output_path,
+                source_workbook_path=source_workbook_path,
+                stock_phenotype_sheet_df=stock_phenotype_sheet_df,
+                combination_outputs=combination_outputs,
+                csv_input_genes=csv_input_genes,
+                simple_buckets=bool(pipeline_settings and pipeline_settings.simple_buckets),
+                verbose=verbose,
+            )
+        similarity_output_dir = output_path.parent / f"{output_path.stem}_similarity"
+        written_visuals = plot_similarity_outputs(
+            phenotype_sheet_df=stock_phenotype_sheet_df,
+            targets=similarity_targets,
+            output_dir=similarity_output_dir,
+            embedding_scorer=embedding_scorer,
+        )
+        if verbose and written_visuals:
+            print(
+                f"    Wrote {len(written_visuals)} phenotype similarity plot(s) "
+                f"to {similarity_output_dir}"
+            )
     
     if verbose:
         print(f"    Saved: {output_path.name}")
@@ -3020,10 +4032,12 @@ class StockSplittingPipeline:
             output_path = output_dir / output_name
             
             write_aggregated_excel(
-                output_path,
-                config,
-                combination_outputs,
-                references_df,
+                output_path=output_path,
+                source_workbook_path=excel_path,
+                config=config,
+                combination_outputs=combination_outputs,
+                all_stocks_df=stocks_df,
+                references_df=references_df,
                 unfiltered_references_df=unfiltered_references_df,
                 verbose=verbose,
                 all_input_genes=all_input_genes,
@@ -3036,6 +4050,7 @@ class StockSplittingPipeline:
                 pubmed_cache_path=self.settings.pubmed_cache_path,
                 pubmed_client=self._pubmed_client,
                 current_to_input_map=current_to_input_map,
+                pipeline_settings=self.settings,
             )
         
         # Print summary

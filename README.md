@@ -119,6 +119,8 @@ Common options:
 - `--config`, `-c`
 - `--quiet`, `-q`
 - `--soft-run`
+- `--OAI-embedding`
+- `--simple-buckets`
 
 ### Stage 3: `validate-stocks`
 
@@ -137,6 +139,8 @@ Common options:
 - `--config`, `-c`
 - `--quiet`, `-q`
 - `--soft-run`
+- `--OAI-embedding`
+- `--simple-buckets`
 - `--test-log`
 - `--max-gpt-calls-per-stock`
 
@@ -145,6 +149,7 @@ Common options:
 The stock-splitting JSON files remain under `data/config/` and retain their existing semantics:
 
 - `settings.relevantSearchTerms` still defines `Ref++`
+- `settings.phenotypeSimilarityTargets` is required for phenotype-sheet cosine similarity targets
 - `filters` still define reusable predicates
 - `combinations` still define the sheet partitions
 - `filterDescriptions` still control user-facing sheet descriptions

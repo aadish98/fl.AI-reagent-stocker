@@ -16,6 +16,9 @@ PyPDF2>=3.0.0
 # OpenAI for functional validation
 openai>=1.0.0
 pydantic>=2.0.0
+matplotlib>=3.9.2
+scikit-learn>=1.5.1
+adjustText>=1.2.0
 
 # Optional: Alternative PubMed fetching
 metapub>=0.5.5

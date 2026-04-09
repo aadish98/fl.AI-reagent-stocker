@@ -168,6 +168,22 @@ class StockFindingPipeline:
         tables["fbal_to_fbgn"] = load_flybase_tsv(fbal_to_fbgn_path)
         print(f"    Loaded {len(tables['fbal_to_fbgn'])} allele-to-gene mappings")
 
+        # Load optional FBsf -> FBgn mapping for regulatory-region resolution
+        fbsf_to_fbgn_path = self.settings.flybase_sequence_features_path / "fbsf_to_fbgn.csv"
+        if fbsf_to_fbgn_path.exists():
+            print(f"  Loading: {fbsf_to_fbgn_path.name}")
+            tables["fbsf_to_fbgn"] = pd.read_csv(fbsf_to_fbgn_path, dtype=str).fillna("")
+            print(
+                "    Loaded "
+                f"{len(tables['fbsf_to_fbgn'])} FBsf-to-FBgn mapping rows"
+            )
+        else:
+            print(
+                "  Warning: fbsf_to_fbgn.csv not found; "
+                "FBsf regulatory-region resolution will be skipped"
+            )
+            tables["fbsf_to_fbgn"] = pd.DataFrame(columns=["FBsf", "FBgn"])
+
         # Load transgenic construct descriptions (FBal -> FBtp)
         try:
             construct_path = find_latest_tsv(
@@ -349,19 +365,13 @@ class StockFindingPipeline:
         self,
         input_genes: List[str],
         fbal_to_fbgn_df: pd.DataFrame,
+        fbsf_to_fbgn_df: Optional[pd.DataFrame] = None,
         transgenic_constructs_df: Optional[pd.DataFrame] = None,
         insertion_alleles_df: Optional[pd.DataFrame] = None,
         fbtp_to_fbti_df: Optional[pd.DataFrame] = None,
     ) -> Dict[str, Any]:
         """Build per-allele construct and insertion lookup tables for input genes."""
-        input_gene_set = set(input_genes)
-
-        fbal_df = fbal_to_fbgn_df.copy()
-        fbal_df["GeneID"] = fbal_df["GeneID"].astype(str).str.strip()
-        fbal_df["AlleleID"] = fbal_df["AlleleID"].astype(str).str.strip()
-        fbal_df["GeneSymbol"] = fbal_df.get("GeneSymbol", "").astype(str).str.strip()
-        fbal_df["AlleleSymbol"] = fbal_df.get("AlleleSymbol", "").astype(str).str.strip()
-        gene_alleles = fbal_df[fbal_df["GeneID"].isin(input_gene_set)].copy()
+        input_gene_set = {clean_id(gene_id) for gene_id in input_genes if clean_id(gene_id)}
 
         empty_alleles = pd.DataFrame(
             columns=[
@@ -371,6 +381,7 @@ class StockFindingPipeline:
                 "AlleleSymbol",
                 "AlleleClassTerm",
                 "AlleleSupportingFBrf",
+                "match_provenance",
             ]
         )
         empty_constructs = pd.DataFrame(
@@ -385,6 +396,7 @@ class StockFindingPipeline:
                 "FBtpSymbol",
                 "TransgenicProductClassTerm",
                 "ConstructSupportingFBrf",
+                "match_provenance",
             ]
         )
         empty_insertions = pd.DataFrame(
@@ -398,12 +410,15 @@ class StockFindingPipeline:
                 "FBtiID",
                 "FBtiSymbol",
                 "InsertionSupportingFBrf",
+                "match_provenance",
             ]
         )
 
-        if len(gene_alleles) == 0:
+        if not input_gene_set:
             return {
-                "gene_alleles": gene_alleles,
+                "gene_alleles": pd.DataFrame(
+                    columns=["GeneID", "GeneSymbol", "AlleleID", "AlleleSymbol"]
+                ),
                 "alleles": empty_alleles,
                 "constructs": empty_constructs,
                 "insertions": empty_insertions,
@@ -414,7 +429,7 @@ class StockFindingPipeline:
         def _split_pipe_values(value: Any) -> List[str]:
             if pd.isna(value):
                 return []
-            return [item.strip() for item in str(value).split("|") if item.strip()]
+            return [clean_id(item) for item in str(value).split("|") if clean_id(item)]
 
         def _pipe_unique_join(series: pd.Series) -> str:
             values: List[str] = []
@@ -422,10 +437,134 @@ class StockFindingPipeline:
                 values.extend(_split_pipe_values(raw))
             return unique_join(values)
 
-        allele_rows = gene_alleles[["GeneID", "GeneSymbol", "AlleleID", "AlleleSymbol"]].copy()
-        allele_rows = allele_rows.rename(columns={"GeneID": "FBgnID"})
-        allele_rows = allele_rows.drop_duplicates(subset=["FBgnID", "GeneSymbol", "AlleleID", "AlleleSymbol"])
+        def _series_unique_join(series: pd.Series) -> str:
+            return unique_join(series.tolist())
 
+        fbal_df = fbal_to_fbgn_df.copy()
+        for col in ("GeneID", "AlleleID", "GeneSymbol", "AlleleSymbol"):
+            if col not in fbal_df.columns:
+                fbal_df[col] = ""
+            fbal_df[col] = fbal_df[col].fillna("").astype(str).str.strip()
+        fbal_df["GeneID"] = fbal_df["GeneID"].apply(clean_id)
+        fbal_df["AlleleID"] = fbal_df["AlleleID"].apply(clean_id)
+
+        direct_gene_alleles = fbal_df[fbal_df["GeneID"].isin(input_gene_set)].copy()
+
+        gene_symbol_lookup: Dict[str, str] = {}
+        for gene_id, group in (
+            fbal_df[fbal_df["GeneID"].isin(input_gene_set)]
+            .groupby("GeneID", sort=False)
+        ):
+            gene_symbol_lookup[str(gene_id).strip()] = unique_join(group["GeneSymbol"].tolist())
+
+        fallback_allele_symbol_lookup = (
+            fbal_df[["AlleleID", "AlleleSymbol"]]
+            .drop_duplicates(subset=["AlleleID"])
+            .set_index("AlleleID")["AlleleSymbol"]
+            .to_dict()
+        )
+
+        allele_rows = (
+            direct_gene_alleles[["GeneID", "GeneSymbol", "AlleleID", "AlleleSymbol"]]
+            .rename(columns={"GeneID": "FBgnID"})
+            .copy()
+        )
+        allele_rows["match_provenance"] = "direct_allele"
+
+        construct_seed_rows: List[Dict[str, str]] = []
+        if transgenic_constructs_df is not None and len(transgenic_constructs_df) > 0:
+            construct_source = transgenic_constructs_df.copy()
+            for col in (
+                "Component Allele (id)",
+                "Component Allele (symbol)",
+                "Regulatory region (id)",
+                "Encoded product/tool (id)",
+            ):
+                if col not in construct_source.columns:
+                    construct_source[col] = ""
+            construct_source["Component Allele (id)"] = construct_source[
+                "Component Allele (id)"
+            ].apply(clean_id)
+
+            fbsf_to_gene_ids: Dict[str, Set[str]] = {}
+            if fbsf_to_fbgn_df is not None and len(fbsf_to_fbgn_df) > 0:
+                mapping_df = fbsf_to_fbgn_df.copy()
+                for col in ("FBsf", "FBgn"):
+                    if col not in mapping_df.columns:
+                        mapping_df[col] = ""
+                    mapping_df[col] = mapping_df[col].apply(clean_id)
+                mapping_df = mapping_df[
+                    mapping_df["FBsf"].astype(bool)
+                    & mapping_df["FBgn"].isin(input_gene_set)
+                ].drop_duplicates(subset=["FBsf", "FBgn"])
+                for _, mapping_row in mapping_df.iterrows():
+                    fbsf_id = clean_id(mapping_row.get("FBsf", ""))
+                    fbgn_id = clean_id(mapping_row.get("FBgn", ""))
+                    if not fbsf_id or not fbgn_id:
+                        continue
+                    fbsf_to_gene_ids.setdefault(fbsf_id, set()).add(fbgn_id)
+
+            for _, row in construct_source.iterrows():
+                allele_id = clean_id(row.get("Component Allele (id)", ""))
+                if not allele_id:
+                    continue
+                allele_symbol = str(row.get("Component Allele (symbol)", "") or "").strip()
+                if not allele_symbol:
+                    allele_symbol = str(fallback_allele_symbol_lookup.get(allele_id, "") or "").strip()
+
+                regulatory_ids = set(_split_pipe_values(row.get("Regulatory region (id)", "")))
+                encoded_ids = set(_split_pipe_values(row.get("Encoded product/tool (id)", "")))
+
+                matched_genes_by_provenance: Dict[str, Set[str]] = {}
+                for gene_id in regulatory_ids & input_gene_set:
+                    matched_genes_by_provenance.setdefault(gene_id, set()).add(
+                        "construct_regulatory_region"
+                    )
+                for encoded_id in encoded_ids & input_gene_set:
+                    matched_genes_by_provenance.setdefault(encoded_id, set()).add(
+                        "construct_encoded_product"
+                    )
+                for regulatory_id in regulatory_ids:
+                    for gene_id in fbsf_to_gene_ids.get(regulatory_id, set()):
+                        matched_genes_by_provenance.setdefault(gene_id, set()).add(
+                            "construct_regulatory_region"
+                        )
+
+                for gene_id, provenances in matched_genes_by_provenance.items():
+                    gene_symbol = gene_symbol_lookup.get(gene_id, "")
+                    for provenance in provenances:
+                        construct_seed_rows.append(
+                            {
+                                "FBgnID": gene_id,
+                                "GeneSymbol": gene_symbol,
+                                "AlleleID": allele_id,
+                                "AlleleSymbol": allele_symbol,
+                                "match_provenance": provenance,
+                            }
+                        )
+
+        if construct_seed_rows:
+            allele_rows = pd.concat(
+                [allele_rows, pd.DataFrame(construct_seed_rows)],
+                ignore_index=True,
+                sort=False,
+            )
+
+        if len(allele_rows) == 0:
+            return {
+                "gene_alleles": pd.DataFrame(
+                    columns=["GeneID", "GeneSymbol", "AlleleID", "AlleleSymbol"]
+                ),
+                "alleles": empty_alleles,
+                "constructs": empty_constructs,
+                "insertions": empty_insertions,
+                "constructs_by_allele": {},
+                "insertions_by_allele": {},
+            }
+
+        allele_rows = allele_rows.drop_duplicates(
+            subset=["FBgnID", "GeneSymbol", "AlleleID", "AlleleSymbol", "match_provenance"]
+        ).copy()
         allele_ids = set(allele_rows["AlleleID"].astype(str).str.strip())
 
         insertion_source = pd.DataFrame()
@@ -460,16 +599,14 @@ class StockFindingPipeline:
             allele_rows["AlleleClassTerm"] = ""
             allele_rows["AlleleSupportingFBrf"] = ""
 
-        for col in ("AlleleClassTerm", "AlleleSupportingFBrf"):
+        for col in ("AlleleClassTerm", "AlleleSupportingFBrf", "match_provenance"):
             if col not in allele_rows.columns:
                 allele_rows[col] = ""
             allele_rows[col] = allele_rows[col].fillna("").astype(str).str.strip()
 
-        allele_meta_by_id = (
-            allele_rows.drop_duplicates(subset=["AlleleID"])
-            .set_index("AlleleID")
-            .to_dict("index")
-        )
+        allele_rows_by_id: Dict[str, List[Dict[str, str]]] = {}
+        for allele_id, group in allele_rows.groupby("AlleleID", sort=False):
+            allele_rows_by_id[str(allele_id).strip()] = group.to_dict("records")
 
         construct_rows: List[Dict[str, str]] = []
         if transgenic_constructs_df is not None and len(transgenic_constructs_df) > 0:
@@ -483,15 +620,17 @@ class StockFindingPipeline:
             ):
                 if col not in construct_source.columns:
                     construct_source[col] = ""
-            construct_source["Component Allele (id)"] = construct_source["Component Allele (id)"].apply(clean_id)
+            construct_source["Component Allele (id)"] = construct_source[
+                "Component Allele (id)"
+            ].apply(clean_id)
             construct_source = construct_source[
                 construct_source["Component Allele (id)"].isin(allele_ids)
             ].copy()
 
             for _, row in construct_source.iterrows():
                 allele_id = clean_id(row.get("Component Allele (id)", ""))
-                allele_meta = allele_meta_by_id.get(allele_id)
-                if not allele_meta:
+                allele_meta_rows = allele_rows_by_id.get(allele_id, [])
+                if not allele_meta_rows:
                     continue
                 construct_ids = [
                     clean_id(value)
@@ -500,10 +639,28 @@ class StockFindingPipeline:
                 ]
                 if not construct_ids:
                     continue
-                construct_symbols = _split_pipe_values(row.get("Transgenic Construct (symbol)", ""))
-                class_term = unique_join(_split_pipe_values(row.get("Transgenic Product class (term)", "")))
+                construct_symbols = [
+                    item.strip()
+                    for item in str(row.get("Transgenic Construct (symbol)", "") or "").split("|")
+                    if item.strip()
+                ]
+                class_term = unique_join(
+                    [
+                        item.strip()
+                        for item in str(
+                            row.get("Transgenic Product class (term)", "") or ""
+                        ).split("|")
+                        if item.strip()
+                    ]
+                )
                 supporting_fbrf = unique_join(
-                    _split_pipe_values(row.get("Description (supporting reference)", ""))
+                    [
+                        item.strip()
+                        for item in str(
+                            row.get("Description (supporting reference)", "") or ""
+                        ).split("|")
+                        if item.strip()
+                    ]
                 )
                 for idx, construct_id in enumerate(construct_ids):
                     construct_symbol = ""
@@ -511,18 +668,28 @@ class StockFindingPipeline:
                         construct_symbol = construct_symbols[idx]
                     elif len(construct_symbols) == 1:
                         construct_symbol = construct_symbols[0]
-                    construct_rows.append({
-                        "FBgnID": str(allele_meta.get("FBgnID", "")),
-                        "GeneSymbol": str(allele_meta.get("GeneSymbol", "")),
-                        "AlleleID": allele_id,
-                        "AlleleSymbol": str(allele_meta.get("AlleleSymbol", "")),
-                        "AlleleClassTerm": str(allele_meta.get("AlleleClassTerm", "")),
-                        "AlleleSupportingFBrf": str(allele_meta.get("AlleleSupportingFBrf", "")),
-                        "FBtpID": construct_id,
-                        "FBtpSymbol": construct_symbol,
-                        "TransgenicProductClassTerm": class_term,
-                        "ConstructSupportingFBrf": supporting_fbrf,
-                    })
+                    for allele_meta in allele_meta_rows:
+                        construct_rows.append(
+                            {
+                                "FBgnID": str(allele_meta.get("FBgnID", "")),
+                                "GeneSymbol": str(allele_meta.get("GeneSymbol", "")),
+                                "AlleleID": allele_id,
+                                "AlleleSymbol": str(allele_meta.get("AlleleSymbol", "")),
+                                "AlleleClassTerm": str(
+                                    allele_meta.get("AlleleClassTerm", "")
+                                ),
+                                "AlleleSupportingFBrf": str(
+                                    allele_meta.get("AlleleSupportingFBrf", "")
+                                ),
+                                "FBtpID": construct_id,
+                                "FBtpSymbol": construct_symbol,
+                                "TransgenicProductClassTerm": class_term,
+                                "ConstructSupportingFBrf": supporting_fbrf,
+                                "match_provenance": str(
+                                    allele_meta.get("match_provenance", "")
+                                ),
+                            }
+                        )
 
         construct_df = pd.DataFrame(construct_rows, columns=empty_constructs.columns)
 
@@ -530,8 +697,8 @@ class StockFindingPipeline:
         if len(insertion_source) > 0:
             for _, row in insertion_source.iterrows():
                 allele_id = clean_id(row.get("Allele (id)", ""))
-                allele_meta = allele_meta_by_id.get(allele_id)
-                if not allele_meta:
+                allele_meta_rows = allele_rows_by_id.get(allele_id, [])
+                if not allele_meta_rows:
                     continue
                 insertion_ids = [
                     clean_id(value)
@@ -540,9 +707,19 @@ class StockFindingPipeline:
                 ]
                 if not insertion_ids:
                     continue
-                insertion_symbols = _split_pipe_values(row.get("Insertion (symbol)", ""))
+                insertion_symbols = [
+                    item.strip()
+                    for item in str(row.get("Insertion (symbol)", "") or "").split("|")
+                    if item.strip()
+                ]
                 supporting_fbrf = unique_join(
-                    _split_pipe_values(row.get("Description (supporting reference)", ""))
+                    [
+                        item.strip()
+                        for item in str(
+                            row.get("Description (supporting reference)", "") or ""
+                        ).split("|")
+                        if item.strip()
+                    ]
                 )
                 for idx, insertion_id in enumerate(insertion_ids):
                     insertion_symbol = ""
@@ -550,17 +727,27 @@ class StockFindingPipeline:
                         insertion_symbol = insertion_symbols[idx]
                     elif len(insertion_symbols) == 1:
                         insertion_symbol = insertion_symbols[0]
-                    insertion_rows.append({
-                        "FBgnID": str(allele_meta.get("FBgnID", "")),
-                        "GeneSymbol": str(allele_meta.get("GeneSymbol", "")),
-                        "AlleleID": allele_id,
-                        "AlleleSymbol": str(allele_meta.get("AlleleSymbol", "")),
-                        "AlleleClassTerm": str(allele_meta.get("AlleleClassTerm", "")),
-                        "AlleleSupportingFBrf": str(allele_meta.get("AlleleSupportingFBrf", "")),
-                        "FBtiID": insertion_id,
-                        "FBtiSymbol": insertion_symbol,
-                        "InsertionSupportingFBrf": supporting_fbrf,
-                    })
+                    for allele_meta in allele_meta_rows:
+                        insertion_rows.append(
+                            {
+                                "FBgnID": str(allele_meta.get("FBgnID", "")),
+                                "GeneSymbol": str(allele_meta.get("GeneSymbol", "")),
+                                "AlleleID": allele_id,
+                                "AlleleSymbol": str(allele_meta.get("AlleleSymbol", "")),
+                                "AlleleClassTerm": str(
+                                    allele_meta.get("AlleleClassTerm", "")
+                                ),
+                                "AlleleSupportingFBrf": str(
+                                    allele_meta.get("AlleleSupportingFBrf", "")
+                                ),
+                                "FBtiID": insertion_id,
+                                "FBtiSymbol": insertion_symbol,
+                                "InsertionSupportingFBrf": supporting_fbrf,
+                                "match_provenance": str(
+                                    allele_meta.get("match_provenance", "")
+                                ),
+                            }
+                        )
 
         if (
             fbtp_to_fbti_df is not None
@@ -579,14 +766,16 @@ class StockFindingPipeline:
             if len(mapping_df) > 0:
                 mapped_insertions = 0
                 construct_df_for_mapping = construct_df.drop_duplicates(
-                    subset=["AlleleID", "FBtpID"]
+                    subset=["AlleleID", "FBgnID", "FBtpID", "match_provenance"]
                 ).copy()
                 fbtp_to_fbti_ids: Dict[str, List[str]] = (
                     mapping_df.groupby("FBtp", sort=False)["FBti"].agg(list).to_dict()
                 )
 
                 for _, construct_row in construct_df_for_mapping.iterrows():
-                    fbti_ids = fbtp_to_fbti_ids.get(clean_id(construct_row.get("FBtpID", "")), [])
+                    fbti_ids = fbtp_to_fbti_ids.get(
+                        clean_id(construct_row.get("FBtpID", "")), []
+                    )
                     if not fbti_ids:
                         continue
                     for fbti_id in fbti_ids:
@@ -596,7 +785,9 @@ class StockFindingPipeline:
                                 "GeneSymbol": str(construct_row.get("GeneSymbol", "")),
                                 "AlleleID": str(construct_row.get("AlleleID", "")),
                                 "AlleleSymbol": str(construct_row.get("AlleleSymbol", "")),
-                                "AlleleClassTerm": str(construct_row.get("AlleleClassTerm", "")),
+                                "AlleleClassTerm": str(
+                                    construct_row.get("AlleleClassTerm", "")
+                                ),
                                 "AlleleSupportingFBrf": str(
                                     construct_row.get("AlleleSupportingFBrf", "")
                                 ),
@@ -604,6 +795,9 @@ class StockFindingPipeline:
                                 "FBtiSymbol": "",
                                 "InsertionSupportingFBrf": str(
                                     construct_row.get("ConstructSupportingFBrf", "")
+                                ),
+                                "match_provenance": str(
+                                    construct_row.get("match_provenance", "")
                                 ),
                             }
                         )
@@ -616,7 +810,13 @@ class StockFindingPipeline:
 
         insertion_df = pd.DataFrame(insertion_rows, columns=empty_insertions.columns)
 
-        def _group_component_rows(df: pd.DataFrame, id_col: str, symbol_col: str, class_col: str, ref_col: str) -> Dict[str, Dict[str, str]]:
+        def _group_component_rows(
+            df: pd.DataFrame,
+            id_col: str,
+            symbol_col: str,
+            class_col: str,
+            ref_col: str,
+        ) -> Dict[str, Dict[str, str]]:
             grouped: Dict[str, Dict[str, str]] = {}
             if df is None or len(df) == 0:
                 return grouped
@@ -624,16 +824,45 @@ class StockFindingPipeline:
                 grouped[str(allele_id).strip()] = {
                     "IDs": unique_join(group[id_col].tolist()),
                     "Symbols": unique_join(group[symbol_col].tolist()),
-                    "ClassTerm": unique_join(group[class_col].tolist()) if class_col in group.columns else "",
-                    "SupportingFBrf": unique_join(group[ref_col].tolist()) if ref_col in group.columns else "",
+                    "ClassTerm": unique_join(group[class_col].tolist())
+                    if class_col in group.columns
+                    else "",
+                    "SupportingFBrf": unique_join(group[ref_col].tolist())
+                    if ref_col in group.columns
+                    else "",
                 }
             return grouped
 
+        gene_alleles = allele_rows[
+            ["FBgnID", "GeneSymbol", "AlleleID", "AlleleSymbol"]
+        ].rename(columns={"FBgnID": "GeneID"})
+
+        allele_rows = allele_rows[
+            [
+                "FBgnID",
+                "GeneSymbol",
+                "AlleleID",
+                "AlleleSymbol",
+                "AlleleClassTerm",
+                "AlleleSupportingFBrf",
+                "match_provenance",
+            ]
+        ].copy()
+
+        if len(construct_df) > 0:
+            construct_df = construct_df.drop_duplicates(
+                subset=["FBgnID", "AlleleID", "FBtpID", "match_provenance"]
+            ).copy()
+        if len(insertion_df) > 0:
+            insertion_df = insertion_df.drop_duplicates(
+                subset=["FBgnID", "AlleleID", "FBtiID", "match_provenance"]
+            ).copy()
+
         return {
-            "gene_alleles": gene_alleles,
-            "alleles": allele_rows,
-            "constructs": construct_df.drop_duplicates(),
-            "insertions": insertion_df.drop_duplicates(),
+            "gene_alleles": gene_alleles.drop_duplicates(),
+            "alleles": allele_rows.drop_duplicates(),
+            "constructs": construct_df,
+            "insertions": insertion_df,
             "constructs_by_allele": _group_component_rows(
                 construct_df,
                 "FBtpID",
@@ -655,6 +884,7 @@ class StockFindingPipeline:
         input_genes: List[str],
         derived_components_df: pd.DataFrame,
         fbal_to_fbgn_df: pd.DataFrame,
+        fbsf_to_fbgn_df: Optional[pd.DataFrame] = None,
         transgenic_constructs_df: Optional[pd.DataFrame] = None,
         insertion_alleles_df: Optional[pd.DataFrame] = None,
         fbtp_to_fbti_df: Optional[pd.DataFrame] = None,
@@ -674,6 +904,7 @@ class StockFindingPipeline:
         component_tables = self._build_gene_component_tables(
             input_genes,
             fbal_to_fbgn_df,
+            fbsf_to_fbgn_df,
             transgenic_constructs_df,
             insertion_alleles_df,
             fbtp_to_fbti_df,
@@ -686,18 +917,44 @@ class StockFindingPipeline:
         insertions_by_allele = component_tables["insertions_by_allele"]
 
         if len(gene_alleles) == 0 or len(allele_rows) == 0:
-            print(f"    Warning: No alleles found for {len(set(input_genes))} input genes in fbal_to_fbgn")
+            print(
+                "    Warning: No direct or construct-linked alleles found for "
+                f"{len(set(input_genes))} input genes"
+            )
             return pd.DataFrame()
 
         derived_df = derived_components_df.copy()
         derived_df["derived_stock_component"] = derived_df["derived_stock_component"].astype(str).str.strip()
 
-        allele_rows_unique = allele_rows.drop_duplicates(subset=["AlleleID"]).copy()
-        allele_meta_by_id = allele_rows_unique.set_index("AlleleID").to_dict("index")
+        allele_rows_for_matching = allele_rows.drop_duplicates(
+            subset=["AlleleID", "FBgnID", "match_provenance"]
+        ).copy()
+        allele_meta_by_id = (
+            allele_rows.groupby("AlleleID", sort=False)
+            .agg(
+                FBgnID=("FBgnID", lambda values: unique_join(values.tolist())),
+                GeneSymbol=("GeneSymbol", lambda values: unique_join(values.tolist())),
+                AlleleSymbol=("AlleleSymbol", lambda values: unique_join(values.tolist())),
+                AlleleClassTerm=("AlleleClassTerm", lambda values: unique_join(values.tolist())),
+                AlleleSupportingFBrf=(
+                    "AlleleSupportingFBrf",
+                    lambda values: unique_join(values.tolist()),
+                ),
+                match_provenance=(
+                    "match_provenance",
+                    lambda values: unique_join(values.tolist()),
+                ),
+            )
+            .to_dict("index")
+        )
 
-        allele_ids = set(allele_rows_unique["AlleleID"].astype(str).str.strip())
-        construct_rows = construct_rows.drop_duplicates(subset=["AlleleID", "FBtpID"]).copy()
-        insertion_rows = insertion_rows.drop_duplicates(subset=["AlleleID", "FBtiID"]).copy()
+        allele_ids = set(allele_rows_for_matching["AlleleID"].astype(str).str.strip())
+        construct_rows = construct_rows.drop_duplicates(
+            subset=["AlleleID", "FBgnID", "FBtpID", "match_provenance"]
+        ).copy()
+        insertion_rows = insertion_rows.drop_duplicates(
+            subset=["AlleleID", "FBgnID", "FBtiID", "match_provenance"]
+        ).copy()
         construct_ids = set(construct_rows["FBtpID"].astype(str).str.strip()) if len(construct_rows) > 0 else set()
         insertion_ids = set(insertion_rows["FBtiID"].astype(str).str.strip()) if len(insertion_rows) > 0 else set()
 
@@ -710,13 +967,14 @@ class StockFindingPipeline:
         if allele_ids:
             allele_matches = derived_df[derived_df["derived_stock_component"].isin(allele_ids)].copy()
             if len(allele_matches) > 0:
-                allele_lookup = allele_rows_unique[[
+                allele_lookup = allele_rows_for_matching[[
                     "AlleleID",
                     "FBgnID",
                     "GeneSymbol",
                     "AlleleSymbol",
                     "AlleleClassTerm",
                     "AlleleSupportingFBrf",
+                    "match_provenance",
                 ]].rename(
                     columns={
                         "AlleleID": "SourceAlleleID",
@@ -796,7 +1054,14 @@ class StockFindingPipeline:
         matches = pd.concat(match_frames, ignore_index=True, sort=False).fillna("")
         matches = matches[matches["FBst"].astype(str).str.strip() != ""].copy()
         matches = matches.drop_duplicates(
-            subset=["FBst", "derived_stock_component", "SourceAlleleID", "MatchComponentType"]
+            subset=[
+                "FBst",
+                "derived_stock_component",
+                "SourceAlleleID",
+                "MatchComponentType",
+                "RelevantFBgnID",
+                "match_provenance",
+            ]
         )
 
         matched_genes = matches["FBgnID"].astype(str).str.strip().replace("", pd.NA).dropna().nunique()
@@ -823,6 +1088,11 @@ class StockFindingPipeline:
                     continue
                 values.extend(parse_semicolon_list(raw_value))
             return unique_join(values)
+
+        def _gather_from_match_group(group: pd.DataFrame, field: str) -> str:
+            if field not in group.columns:
+                return ""
+            return unique_join(group[field].tolist())
 
         stock_rows: List[Dict[str, object]] = []
         for fbst, group in all_rows.groupby("FBst", sort=False):
@@ -851,18 +1121,25 @@ class StockFindingPipeline:
                 + parse_semicolon_list(relevant_fbtp_symbols)
                 + parse_semicolon_list(relevant_fbti_symbols)
             )
-            relevant_gene_symbols = _gather_from_allele_meta(source_allele_ids, "GeneSymbol")
-            relevant_flybase_gene_ids = _gather_from_allele_meta(source_allele_ids, "FBgnID")
+            relevant_gene_symbols = _gather_from_match_group(
+                match_group, "RelevantGeneSymbol"
+            )
+            relevant_flybase_gene_ids = _gather_from_match_group(
+                match_group, "RelevantFBgnID"
+            )
             transgenic_product_class_terms = _gather_from_alleles(
                 source_allele_ids, constructs_by_allele, "ClassTerm"
             )
-            allele_class_terms = _gather_from_allele_meta(source_allele_ids, "AlleleClassTerm")
+            allele_class_terms = _gather_from_match_group(
+                match_group, "SourceAlleleClassTerm"
+            )
             construct_supporting_fbrfs = _gather_from_alleles(
                 source_allele_ids, constructs_by_allele, "SupportingFBrf"
             )
             insertion_supporting_fbrfs = _gather_from_alleles(
                 source_allele_ids, insertions_by_allele, "SupportingFBrf"
             )
+            match_provenance = _gather_from_match_group(match_group, "match_provenance")
 
             all_component_symbols = unique_join(group["object_symbol"].tolist())
             all_component_ids = unique_join(group["derived_stock_component"].tolist())
@@ -909,6 +1186,7 @@ class StockFindingPipeline:
                     "allele_class_terms": allele_class_terms,
                     "construct_supporting_fbrfs": construct_supporting_fbrfs,
                     "insertion_supporting_fbrfs": insertion_supporting_fbrfs,
+                    "match_provenance": match_provenance,
                 }
             )
 
@@ -961,6 +1239,7 @@ class StockFindingPipeline:
         fbal_to_fbgn_df: pd.DataFrame,
         stock_mapping: pd.DataFrame,
         phenotype_df: pd.DataFrame,
+        fbsf_to_fbgn_df: Optional[pd.DataFrame] = None,
         transgenic_constructs_df: Optional[pd.DataFrame] = None,
         insertion_alleles_df: Optional[pd.DataFrame] = None,
         fbtp_to_fbti_df: Optional[pd.DataFrame] = None,
@@ -974,6 +1253,7 @@ class StockFindingPipeline:
         component_tables = self._build_gene_component_tables(
             input_genes,
             fbal_to_fbgn_df,
+            fbsf_to_fbgn_df,
             transgenic_constructs_df,
             insertion_alleles_df,
             fbtp_to_fbti_df,
@@ -993,8 +1273,21 @@ class StockFindingPipeline:
                 )
 
         allele_meta_by_id = (
-            allele_rows.drop_duplicates(subset=["AlleleID"])
-            .set_index("AlleleID")
+            allele_rows.groupby("AlleleID", sort=False)
+            .agg(
+                FBgnID=("FBgnID", lambda values: unique_join(values.tolist())),
+                GeneSymbol=("GeneSymbol", lambda values: unique_join(values.tolist())),
+                AlleleSymbol=("AlleleSymbol", lambda values: unique_join(values.tolist())),
+                AlleleClassTerm=("AlleleClassTerm", lambda values: unique_join(values.tolist())),
+                AlleleSupportingFBrf=(
+                    "AlleleSupportingFBrf",
+                    lambda values: unique_join(values.tolist()),
+                ),
+                match_provenance=(
+                    "match_provenance",
+                    lambda values: unique_join(values.tolist()),
+                ),
+            )
             .to_dict("index")
         )
         non_stock_allele_ids = set(allele_meta_by_id.keys()) - stock_backed_allele_ids
@@ -1030,6 +1323,7 @@ class StockFindingPipeline:
             gene_id = str(meta.get("FBgnID", "") or "").strip()
             gene_symbol = str(meta.get("GeneSymbol", "") or "").strip()
             allele_class = str(meta.get("AlleleClassTerm", "") or "").strip()
+            match_provenance = str(meta.get("match_provenance", "") or "").strip()
             if not allele_symbol:
                 continue
 
@@ -1090,6 +1384,7 @@ class StockFindingPipeline:
                     "insertion_supporting_fbrfs": insertion_info.get(
                         "SupportingFBrf", ""
                     ),
+                    "match_provenance": match_provenance,
                     "custom_stock": True,
                 }
             )
@@ -1578,6 +1873,7 @@ class StockFindingPipeline:
             unique_genes,
             tables["derived_stock_components"],
             tables["fbal_to_fbgn"],
+            tables.get("fbsf_to_fbgn"),
             tables.get("transgenic_construct_descriptions"),
             tables.get("insertion_allele_descriptions"),
             tables.get("fbtp_to_fbti"),
@@ -1594,6 +1890,7 @@ class StockFindingPipeline:
                 tables["fbal_to_fbgn"],
                 stock_mapping,
                 phenotype_df,
+                tables.get("fbsf_to_fbgn"),
                 tables.get("transgenic_construct_descriptions"),
                 tables.get("insertion_allele_descriptions"),
                 tables.get("fbtp_to_fbti"),

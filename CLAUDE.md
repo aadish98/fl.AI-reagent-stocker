@@ -83,6 +83,7 @@ python -m fl_ai_reagent_stocker run-full-pipeline ./gene_lists --config ./my_con
 The JSON files in `data/config/` remain canonical and must keep the same behavior through refactors:
 
 - `settings.relevantSearchTerms` defines keyword relevance and `Ref++`
+- `settings.phenotypeSimilarityTargets` is required for phenotype-sheet cosine similarity targets
 - `filters` defines reusable column predicates
 - `combinations` defines sheet partitions
 - `filterDescriptions` defines user-facing sheet descriptions
