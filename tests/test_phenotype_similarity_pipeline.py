@@ -20,7 +20,11 @@ from fl_ai_reagent_stocker.integrations.phenotype_similarity import (  # noqa: E
     EmbeddingSimilarityScorer,
 )
 from fl_ai_reagent_stocker.pipelines.stock_splitting import (  # noqa: E402
+    CO_REAGENT_FBIDS_COLUMN,
+    CO_REAGENT_SYMBOLS_COLUMN,
     PHENOTYPE_SIMILARITY_EMBEDDING_MODEL,
+    PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN,
+    PARTNER_DRIVER_SYMBOLS_COLUMN,
     SIMILARITY_TIER_SHEET_COUNT,
     StockSplittingPipeline,
     _build_simple_bucket_workbook_entries,
@@ -28,6 +32,7 @@ from fl_ai_reagent_stocker.pipelines.stock_splitting import (  # noqa: E402
     _compute_max_cosine_similarity,
     load_split_config,
 )
+from fl_ai_reagent_stocker.utils import REAGENT_BUCKET_COLUMNS  # noqa: E402
 
 
 TEST_FIXTURE_DIR = REPO_ROOT / "data" / "gene_sets" / "TEST"
@@ -125,6 +130,18 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
 
             phenotype_df = pd.read_excel(workbook_path, sheet_name="Stock Phenotype Sheet")
             expected_columns = [
+                "Balancers",
+                "matched_component_types",
+                *REAGENT_BUCKET_COLUMNS,
+                "allele_class_terms",
+                "transgenic_product_class_terms",
+                "Source",
+                "Stock #",
+                "Genotype",
+                CO_REAGENT_FBIDS_COLUMN,
+                CO_REAGENT_SYMBOLS_COLUMN,
+                PARTNER_DRIVER_SYMBOLS_COLUMN,
+                PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN,
                 "Phenotype",
                 "Qualifier",
                 "PMID",
@@ -134,7 +151,35 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             ]
             for column in expected_columns:
                 self.assertIn(column, phenotype_df.columns)
+            self.assertNotIn("Source/ Stock #", phenotype_df.columns)
+            source_idx = phenotype_df.columns.get_loc("Source")
+            self.assertEqual(
+                phenotype_df.columns[source_idx:source_idx + 2].tolist(),
+                ["Source", "Stock #"],
+            )
             self.assertNotIn("_reference_url", phenotype_df.columns)
+            self.assertTrue(
+                phenotype_df[REAGENT_BUCKET_COLUMNS].fillna(False).astype(bool).sum(axis=1).eq(1).all()
+            )
+
+            aggregated_contents_df = pd.read_excel(
+                workbook_path,
+                sheet_name="Contents",
+                header=None,
+            )
+            aggregated_contents_text = "\n".join(
+                aggregated_contents_df.fillna("").astype(str).agg(" ".join, axis=1).tolist()
+            )
+            self.assertIn("Stock Phenotype Sheet columns", aggregated_contents_text)
+            self.assertIn("Source", aggregated_contents_text)
+            self.assertIn("Stock #", aggregated_contents_text)
+            self.assertIn("mutually exclusive one-hot set", aggregated_contents_text)
+            self.assertIn("matched_component_types", aggregated_contents_text)
+            self.assertIn(CO_REAGENT_FBIDS_COLUMN, aggregated_contents_text)
+            self.assertIn(PARTNER_DRIVER_SYMBOLS_COLUMN, aggregated_contents_text)
+            self.assertIn(PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN, aggregated_contents_text)
+            self.assertIn("GAL4 / mutant", aggregated_contents_text)
+            self.assertIn("Vienna-style knockdown-family signals", aggregated_contents_text)
 
             tier_workbook = pd.ExcelFile(tier_workbook_path)
             try:
@@ -184,6 +229,10 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
                 self.assertIn("empty buckets are skipped", contents_text)
                 self.assertIn("Gene Set", contents_text)
                 self.assertIn("Stock Phenotype Sheet", contents_text)
+                self.assertIn("Stock Phenotype Sheet columns", contents_text)
+                self.assertIn("mutually exclusive one-hot set", contents_text)
+                self.assertIn("mutant/UAS", contents_text)
+                self.assertIn("rnai_reagent", contents_text)
 
                 scored_rows = int(_compute_max_cosine_similarity(phenotype_df).notna().sum())
                 tier_row_total = 0
@@ -397,6 +446,9 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
                 self.assertIn("Sheet name", contents_text)
                 self.assertIn("has balancer", contents_text)
                 self.assertNotIn("Max Cosine Similarity", contents_text)
+                self.assertIn("Stock Phenotype Sheet columns", contents_text)
+                self.assertIn("mutually exclusive one-hot set", contents_text)
+                self.assertIn("GAL4 / mutant", contents_text)
 
                 header_row_idx = next(
                     idx
@@ -485,7 +537,15 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
         phenotype_df = pd.DataFrame(
             {
                 "Gene": ["gene-b", "gene-a", "gene-b", "gene-a", "gene-a", "gene-c"],
-                "Source/ Stock #": [
+                "Source": [
+                    "VDRC",
+                    "BDSC",
+                    "VDRC",
+                    "BDSC",
+                    "BDSC",
+                    "NIG",
+                ],
+                "Stock #": [
                     "stock-b1",
                     "stock-a1",
                     "stock-b2",
@@ -509,7 +569,7 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             ["gene-a", "gene-a", "gene-a", "gene-b", "gene-b"],
         )
         self.assertEqual(
-            tiers[1][1]["Source/ Stock #"].tolist(),
+            tiers[1][1]["Stock #"].tolist(),
             ["stock-a2", "stock-a1", "stock-a3", "stock-b1", "stock-b2"],
         )
 

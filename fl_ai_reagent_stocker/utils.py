@@ -17,6 +17,16 @@ from typing import Dict, List, Optional, Union
 import pandas as pd
 
 
+REAGENT_BUCKET_COLUMNS = [
+    "UAS",
+    "GAL4",
+    "mutant/UAS",
+    "mutant",
+    "GAL4 / mutant",
+    "Other",
+]
+
+
 
 ###############################################################################
 # ID Cleaning and Parsing Utilities

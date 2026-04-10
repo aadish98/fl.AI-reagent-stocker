@@ -18,6 +18,7 @@ Usage:
 """
 
 import gc
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -37,6 +38,7 @@ from ..utils import (
     get_gpt_derived_columns,
     apply_experimental_prefix,
     EXPERIMENTAL_PREFIX,
+    REAGENT_BUCKET_COLUMNS,
 )
 from ..integrations.pubmed import PubMedClient, PubMedCache
 from ..integrations.fulltext import FullTextFetcher, FunctionalValidator
@@ -60,6 +62,107 @@ def _apply_grey_fill_openpyxl(ws, df: pd.DataFrame) -> None:
     for col_idx, col_name in enumerate(df.columns, 1):
         if str(col_name).startswith(EXPERIMENTAL_PREFIX):
             ws.cell(row=1, column=col_idx).fill = grey_fill
+
+
+def _normalize_semicolon_tokens(value: Any) -> List[str]:
+    """Return lowercase semicolon-delimited tokens with whitespace removed."""
+    return [
+        token.strip().lower()
+        for token in parse_semicolon_list(str(value or ""))
+        if token.strip()
+    ]
+
+
+def _normalize_text(value: Any) -> str:
+    """Lowercase free text helper that tolerates null-like values."""
+    return str(value or "").strip().lower()
+
+
+def _is_transgenic_style_allele_symbol(symbol: str) -> bool:
+    """Heuristic guardrail to keep transgenic alleles out of the mutant bucket."""
+    lowered = str(symbol or "").strip().lower()
+    if not lowered:
+        return False
+
+    transgenic_tokens = (
+        "gal4",
+        "uas",
+        "rnai",
+        "lexa",
+        "qf",
+        "qp",
+        "flp",
+        "cas9",
+        "sgrna",
+        "gfp",
+        "lacz",
+        "dsred",
+        "driver",
+    )
+    if any(token in lowered for token in transgenic_tokens):
+        return True
+
+    if "\\" in lowered:
+        return True
+
+    return bool(re.search(r"\[(gd|kk|vsh|hms|jf)\d+", lowered))
+
+
+def _derive_one_hot_reagent_buckets(row: pd.Series) -> Dict[str, bool]:
+    """Return the mutually exclusive reagent-bucket booleans for one stock row."""
+    genotype_text = _normalize_text(row.get("genotype", ""))
+    allele_symbols = _normalize_semicolon_tokens(
+        row.get("relevant_fbal_symbols", row.get("AlleleSymbol", ""))
+    )
+    transgenic_terms = _normalize_semicolon_tokens(
+        row.get("transgenic_product_class_terms", "")
+    )
+    raw_uas_signal = row.get("RNAi", False)
+    broad_uas_signal = raw_uas_signal is True or str(raw_uas_signal).strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
+    has_gal4_signal = (
+        "gal4" in genotype_text
+        or any("gal4" in symbol for symbol in allele_symbols)
+        or any(
+            term in ("driver", "gal4") or "driver" in term or "gal4" in term
+            for term in transgenic_terms
+        )
+    )
+    has_uas_signal = (
+        broad_uas_signal
+        or "uas" in genotype_text
+        or "rnai" in genotype_text
+        or any("uas" in symbol or "rnai" in symbol for symbol in allele_symbols)
+        or any("rnai_reagent" in term for term in transgenic_terms)
+    )
+    has_mutant_signal = any(
+        not _is_transgenic_style_allele_symbol(symbol)
+        for symbol in allele_symbols
+    )
+
+    if has_gal4_signal and has_mutant_signal:
+        selected_bucket = "GAL4 / mutant"
+    elif has_mutant_signal and has_uas_signal:
+        selected_bucket = "mutant/UAS"
+    elif has_mutant_signal:
+        selected_bucket = "mutant"
+    elif has_gal4_signal and has_uas_signal:
+        selected_bucket = "Other"
+    elif has_gal4_signal:
+        selected_bucket = "GAL4"
+    elif has_uas_signal:
+        selected_bucket = "UAS"
+    else:
+        selected_bucket = "Other"
+
+    return {
+        bucket: bucket == selected_bucket
+        for bucket in REAGENT_BUCKET_COLUMNS
+    }
 
 
 class StockFindingPipeline:
@@ -1923,10 +2026,6 @@ class StockFindingPipeline:
         genotype_series = stock_mapping['genotype'].fillna('').astype(str)
         collection_series = stock_mapping['collection'].fillna('').astype(str)
 
-        stock_mapping['UAS'] = genotype_series.str.contains('uas', case=False, na=False)
-        uas_count = stock_mapping['UAS'].sum()
-        print(f"    UAS flag: {uas_count} stocks marked as UAS")
-
         stock_mapping['sgRNA'] = genotype_series.str.contains('sgrna', case=False, na=False)
         sgrna_count = stock_mapping['sgRNA'].sum()
         print(f"    sgRNA flag: {sgrna_count} stocks marked as sgRNA")
@@ -1951,6 +2050,24 @@ class StockFindingPipeline:
         )
         rnai_count = int(stock_mapping['RNAi'].sum())
         print(f"    RNAi proxy: {rnai_count} stocks marked as RNAi")
+
+        reagent_bucket_df = stock_mapping.apply(
+            lambda row: pd.Series(_derive_one_hot_reagent_buckets(row)),
+            axis=1,
+        )
+        stock_mapping[REAGENT_BUCKET_COLUMNS] = reagent_bucket_df[REAGENT_BUCKET_COLUMNS]
+        one_hot_counts = stock_mapping[REAGENT_BUCKET_COLUMNS].sum(axis=1)
+        if not one_hot_counts.eq(1).all():
+            raise ValueError(
+                "Each stock row must resolve to exactly one reagent bucket."
+            )
+        print(
+            "    Reagent buckets: "
+            + ", ".join(
+                f"{bucket}={int(stock_mapping[bucket].sum())}"
+                for bucket in REAGENT_BUCKET_COLUMNS
+            )
+        )
         
         # Rename keyword_ref_count and keyword_ref_pmids to include the actual keywords
         if keywords:
@@ -2045,6 +2162,11 @@ class StockFindingPipeline:
             'all_stock_constructs',
             'custom_stock',
             'UAS',
+            'GAL4',
+            'mutant/UAS',
+            'mutant',
+            'GAL4 / mutant',
+            'Other',
             'sgRNA',
             'RNAi',
         ]
