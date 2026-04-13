@@ -859,20 +859,26 @@ def _normalize_symbol_token(value: Any) -> str:
 
 
 def _split_genotype_symbol_tokens(value: Any) -> List[str]:
-    """Split genotype text into readable component-like tokens."""
+    """Split genotype text into readable component-like tokens.
+
+    FlyBase genotype_symbols are space-delimited allele components
+    (e.g. ``"A23[A23] Scer\\GAL4[Act5C.PI]"``).  Chromosomal arms are
+    separated by ``";"``, homologous alleles by ``"/"``.
+    """
     tokens: List[str] = []
     seen: Set[str] = set()
     raw_parts = re.split(r"[;|,\n]+", str(value or ""))
     for raw_part in raw_parts:
-        for candidate in str(raw_part).split("/"):
-            token = re.sub(r"\s+", " ", str(candidate or "").strip())
-            if not token or token in {"+", "-"}:
-                continue
-            normalized = _normalize_symbol_token(token)
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            tokens.append(token)
+        for slash_part in str(raw_part).split("/"):
+            for candidate in re.split(r"\s+", str(slash_part).strip()):
+                token = candidate.strip()
+                if not token or token in {"+", "-"}:
+                    continue
+                normalized = _normalize_symbol_token(token)
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                tokens.append(token)
     return tokens
 
 
@@ -932,17 +938,39 @@ def _looks_like_gal4_symbol(symbol: Any, gene_symbol: Any = "") -> bool:
     return False
 
 
+def _extract_unmatched_gal4_tokens(
+    genotype_label: Any,
+    matched_symbol_norms: Set[str],
+) -> List[str]:
+    """Return GAL4-containing genotype tokens that are not part of the focal stock."""
+    gal4_tokens: List[str] = []
+    seen: Set[str] = set()
+    for token in _split_genotype_symbol_tokens(genotype_label):
+        normalized_token = _normalize_symbol_token(token)
+        if normalized_token in matched_symbol_norms or "gal4" not in normalized_token:
+            continue
+        if normalized_token in seen:
+            continue
+        seen.add(normalized_token)
+        gal4_tokens.append(token)
+    return gal4_tokens
+
+
 def _format_stock_candidate_label(
     fbst: Any,
     collection: Any,
     stock_number: Any,
 ) -> str:
     """Format a stock candidate label for best-effort partner resolution."""
-    fbst_str = clean_id(fbst)
-    source_stock = _format_source_stock_label(collection, stock_number)
-    if source_stock and fbst_str:
-        return f"{source_stock} [{fbst_str}]"
-    return source_stock or fbst_str
+    stock_number_str = clean_id(stock_number)
+    collection_str = str(collection or "").strip()
+    if stock_number_str and collection_str:
+        return f"({stock_number_str}, {collection_str})"
+    if stock_number_str:
+        return f"({stock_number_str})"
+    if collection_str:
+        return f"({collection_str})"
+    return clean_id(fbst)
 
 
 def _build_stock_phenotype_sheet(
@@ -1469,6 +1497,55 @@ def _build_stock_phenotype_sheet(
                     if cid and gene_values and cid not in component_id_to_gene_symbol:
                         component_id_to_gene_symbol[cid] = unique_join(gene_values)
 
+    # ----------------------------------------------------------------
+    # FBal → FBtp → FBti chain for resolving partner GAL4 alleles to
+    # stock candidates.  Phenotype genotype data references alleles
+    # (FBal), but the derived stock CSV indexes GAL4 stocks via their
+    # FBti insertion IDs.  We bridge the gap by loading construct
+    # descriptions (FBal → FBtp) and the insertion map (FBtp → FBti),
+    # then forwarding stock candidates from any matching FBti entries.
+    # ----------------------------------------------------------------
+    constructs_dir = flybase_data_path / 'transgenic_constructs'
+    insertions_dir = flybase_data_path / 'transgenic_insertions'
+    fbal_to_fbtps: Dict[str, Set[str]] = {}
+    fbtp_to_fbtis: Dict[str, Set[str]] = {}
+    try:
+        construct_path = find_latest_tsv(constructs_dir, 'transgenic_construct_descriptions')
+        construct_df = load_flybase_tsv(construct_path)
+        fbal_col = 'Component Allele (id)' if 'Component Allele (id)' in construct_df.columns else None
+        fbtp_col = 'Transgenic Construct (id)' if 'Transgenic Construct (id)' in construct_df.columns else None
+        if fbal_col is None or fbtp_col is None:
+            raw_cols = list(construct_df.columns)
+            if len(raw_cols) >= 4:
+                fbal_col, fbtp_col = raw_cols[1], raw_cols[3]
+        if fbal_col and fbtp_col:
+            for _, c_row in construct_df[[fbal_col, fbtp_col]].iterrows():
+                fbal_id = clean_id(str(c_row[fbal_col] or ''))
+                if not fbal_id:
+                    continue
+                for fbtp_raw in str(c_row[fbtp_col] or '').split('|'):
+                    fbtp_id = clean_id(fbtp_raw)
+                    if fbtp_id:
+                        fbal_to_fbtps.setdefault(fbal_id, set()).add(fbtp_id)
+    except FileNotFoundError:
+        pass
+    fbtp_to_fbti_path = insertions_dir / 'fbtp_to_fbti.csv'
+    if fbtp_to_fbti_path.exists():
+        fbtp_fbti_df = pd.read_csv(fbtp_to_fbti_path, dtype=str).fillna('')
+        for _, m_row in fbtp_fbti_df.iterrows():
+            fbtp_id = clean_id(str(m_row.get('FBtp', '') or ''))
+            fbti_id = clean_id(str(m_row.get('FBti', '') or ''))
+            if fbtp_id and fbti_id:
+                fbtp_to_fbtis.setdefault(fbtp_id, set()).add(fbti_id)
+
+    def _resolve_fbal_stock_candidates(fbal_id: str) -> Set[str]:
+        """Chain FBal → FBtp → FBti → stock candidates."""
+        candidates: Set[str] = set()
+        for fbtp_id in fbal_to_fbtps.get(fbal_id, set()):
+            for fbti_id in fbtp_to_fbtis.get(fbtp_id, set()):
+                candidates.update(component_id_to_stock_candidates.get(fbti_id, set()))
+        return candidates
+
     phenotype_rows: List[Dict[str, str]] = []
     for _, pheno_row in phenotype_df.iterrows():
         component_ids = _extract_flybase_ids(pheno_row.get('genotype_FBids', ''))
@@ -1522,6 +1599,10 @@ def _build_stock_phenotype_sheet(
                 if str(symbol).strip()
             }
             co_reagent_ids = [cid for cid in component_ids if cid not in matched_cids]
+            unmatched_gal4_tokens = _extract_unmatched_gal4_tokens(
+                genotype_label,
+                matched_symbol_norms,
+            ) if co_reagent_ids else []
             partner_gal4_ids: List[str] = []
             partner_gal4_symbol_values: List[str] = []
             for cid in co_reagent_ids:
@@ -1536,20 +1617,31 @@ def _build_stock_phenotype_sheet(
                         partner_gal4_symbol_values.append(gene_symbol)
                     else:
                         partner_gal4_symbol_values.append(cid)
+            if unmatched_gal4_tokens and not partner_gal4_ids and len(co_reagent_ids) == 1:
+                cid = co_reagent_ids[0]
+                partner_gal4_ids.append(cid)
+                partner_gal4_symbol_values.extend(unmatched_gal4_tokens)
             co_reagent_fbids = unique_join(partner_gal4_ids)
             co_reagent_symbols = unique_join(partner_gal4_symbol_values)
-            partner_driver_symbols = list(partner_gal4_symbol_values)
-            if co_reagent_ids:
-                for token in _split_genotype_symbol_tokens(genotype_label):
-                    normalized_token = _normalize_symbol_token(token)
-                    if normalized_token in matched_symbol_norms:
-                        continue
-                    if "gal4" in normalized_token:
-                        partner_driver_symbols.append(token)
+            partner_symbol_norms = {
+                _normalize_symbol_token(s) for s in partner_gal4_symbol_values if s
+            }
+            extra_gal4_tokens = [
+                t for t in unmatched_gal4_tokens
+                if _normalize_symbol_token(t) not in partner_symbol_norms
+            ]
+            partner_driver_symbols = list(partner_gal4_symbol_values) + extra_gal4_tokens
+            partner_stock_candidate_set: Set[str] = set()
+            for cid in partner_gal4_ids:
+                direct = component_id_to_stock_candidates.get(cid, set())
+                if direct:
+                    partner_stock_candidate_set.update(direct)
+                else:
+                    partner_stock_candidate_set.update(
+                        _resolve_fbal_stock_candidates(cid)
+                    )
             partner_driver_stock_candidates = unique_join(
-                candidate
-                for cid in partner_gal4_ids
-                for candidate in component_id_to_stock_candidates.get(cid, set())
+                sorted(partner_stock_candidate_set)
             )
             component_gene_symbols = ''
             if len(derived_df) > 0:
@@ -2336,7 +2428,7 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
             "Best-effort partner GAL4 driver symbols inferred from non-focal genotype components and GAL4-containing genotype text."
         ),
         PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN: (
-            "Best-effort FlyBase stock candidates for partner GAL4 driver components, formatted as source/stock labels with FBst IDs and preserving ambiguity when multiple stocks match."
+            "Best-effort FlyBase stock candidates for partner GAL4 driver components, formatted as '(<stock #>, <collection>)' and preserving ambiguity when multiple stocks match."
         ),
         'Phenotype': (
             "Normalized phenotype term derived from FlyBase genotype_phenotype_data."
