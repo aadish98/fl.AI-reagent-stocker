@@ -22,9 +22,11 @@ from fl_ai_reagent_stocker.pipelines.stock_finding import (  # noqa: E402
 from fl_ai_reagent_stocker.pipelines.stock_splitting import (  # noqa: E402
     CO_REAGENT_FBIDS_COLUMN,
     CO_REAGENT_SYMBOLS_COLUMN,
+    MASTERLIST_TEMPLATE_COLUMNS,
     PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN,
     PARTNER_DRIVER_SYMBOLS_COLUMN,
     _build_stock_phenotype_sheet,
+    _reorder_to_masterlist_columns,
 )
 from fl_ai_reagent_stocker.utils import REAGENT_BUCKET_COLUMNS  # noqa: E402
 
@@ -450,6 +452,7 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
                 similarity_targets=None,
                 embedding_scorer=None,
                 verbose=False,
+                gene_to_datasets={"Ddc": {"dataset_alpha"}},
             )
 
         self.assertEqual(len(result), 1)
@@ -472,6 +475,7 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
         self.assertEqual(result["Balancers"].iloc[0], "-")
         self.assertEqual(result["matched_component_types"].iloc[0], "FBal")
         self.assertTrue(result["GAL4"].iloc[0])
+        self.assertEqual(result["Data Set"].iloc[0], "dataset_alpha")
         self.assertEqual(
             int(result.loc[0, REAGENT_BUCKET_COLUMNS].astype(bool).sum()),
             1,
@@ -522,6 +526,26 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
                         "embedded_type": "FBal",
                         "object_symbol": "tim-GAL4",
                         "GeneSymbol": "Scer\\GAL4",
+                    },
+                    {
+                        "FBst": "FBst9000004",
+                        "stock_number": "7128",
+                        "collection": "BDSC",
+                        "FB_genotype": "tim-GAL4 / UAS-GFP",
+                        "derived_stock_component": "FBal0888888",
+                        "embedded_type": "FBal",
+                        "object_symbol": "tim-GAL4",
+                        "GeneSymbol": "Scer\\GAL4",
+                    },
+                    {
+                        "FBst": "FBst9000004",
+                        "stock_number": "7128",
+                        "collection": "BDSC",
+                        "FB_genotype": "tim-GAL4 / UAS-GFP",
+                        "derived_stock_component": "FBal0777777",
+                        "embedded_type": "FBal",
+                        "object_symbol": "UAS-GFP",
+                        "GeneSymbol": "GFP",
                     },
                 ]
             ).to_csv(alleles_dir / "fbst_to_derived_stock_component.csv", index=False)
@@ -588,13 +612,119 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
         self.assertEqual(result[CO_REAGENT_SYMBOLS_COLUMN].iloc[0], "tim-GAL4")
         self.assertEqual(result[PARTNER_DRIVER_SYMBOLS_COLUMN].iloc[0], "tim-GAL4")
         self.assertIn(
-            "BDSC (7126) [FBst9000002]",
+            "(7126, BDSC)",
             result[PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN].iloc[0],
         )
         self.assertIn(
-            "BDSC (7127) [FBst9000003]",
+            "(7127, BDSC)",
             result[PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN].iloc[0],
         )
+        self.assertNotIn(
+            "(7128, BDSC)",
+            result[PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN].iloc[0],
+        )
+
+    def test_stock_phenotype_sheet_filters_partner_driver_symbols_when_only_mixed_stock_exists(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            flybase_root = Path(tmp_dir) / "flybase"
+            alleles_dir = flybase_root / "alleles_and_stocks"
+            refs_dir = flybase_root / "references"
+            alleles_dir.mkdir(parents=True)
+            refs_dir.mkdir(parents=True)
+
+            pd.DataFrame(
+                [
+                    {
+                        "FBst": "FBst9000100",
+                        "stock_number": "v9241",
+                        "collection": "Vienna",
+                        "FB_genotype": "P{TRiP.HMS00001}",
+                        "derived_stock_component": "FBal4999999",
+                        "embedded_type": "FBal",
+                        "object_symbol": "P{TRiP.HMS00001}",
+                        "GeneSymbol": "CG31400",
+                    },
+                    {
+                        "FBst": "FBst9000101",
+                        "stock_number": "8123",
+                        "collection": "BDSC",
+                        "FB_genotype": "tim-GAL4 / UAS-GFP",
+                        "derived_stock_component": "FBal4888888",
+                        "embedded_type": "FBal",
+                        "object_symbol": "tim-GAL4",
+                        "GeneSymbol": "Scer\\GAL4",
+                    },
+                    {
+                        "FBst": "FBst9000101",
+                        "stock_number": "8123",
+                        "collection": "BDSC",
+                        "FB_genotype": "tim-GAL4 / UAS-GFP",
+                        "derived_stock_component": "FBal4777777",
+                        "embedded_type": "FBal",
+                        "object_symbol": "UAS-GFP",
+                        "GeneSymbol": "GFP",
+                    },
+                ]
+            ).to_csv(alleles_dir / "fbst_to_derived_stock_component.csv", index=False)
+
+            phenotype_tsv = (
+                "reference\tphenotype_name\tphenotype_id\tqualifier_names\t"
+                "genotype_FBids\tgenotype_symbols\n"
+                "FBrf0000012\tabnormal circadian rhythm\tFBcv0000002\tabnormal\t"
+                "FBal4999999/FBal4888888\tP{TRiP.HMS00001}/tim-GAL4\n"
+            )
+            (alleles_dir / "genotype_phenotype_data_fb_test.tsv").write_text(
+                phenotype_tsv,
+                encoding="utf-8",
+            )
+            refs_tsv = (
+                "FBrf\tPMID\tPMCID\tDOI\tminiref\n"
+                "FBrf0000012\t\t\t\tFiltered et al., 2025, Journal\n"
+            )
+            (refs_dir / "fbrf_pmid_pmcid_doi_fb_test.tsv").write_text(
+                refs_tsv,
+                encoding="utf-8",
+            )
+
+            all_stocks_df = pd.DataFrame(
+                [
+                    {
+                        "FBst": "FBst9000100",
+                        "stock_number": "v9241",
+                        "collection": "Vienna",
+                        "relevant_gene_symbols": "tim",
+                        "relevant_component_ids": "FBal4999999",
+                        "relevant_fbal_ids": "FBal4999999",
+                        "relevant_fbal_symbols": "P{TRiP.HMS00001}",
+                        "Balancers": "-",
+                        "matched_component_types": "FBal",
+                        "UAS": True,
+                        "GAL4": False,
+                        "mutant/UAS": False,
+                        "mutant": False,
+                        "GAL4 / mutant": False,
+                        "Other": False,
+                        "allele_class_terms": "RNAi_reagent",
+                        "transgenic_product_class_terms": "rnai_reagent",
+                        "custom_stock": False,
+                    }
+                ]
+            )
+
+            result = _build_stock_phenotype_sheet(
+                all_stocks_df=all_stocks_df,
+                flybase_data_path=flybase_root,
+                references_df=None,
+                unfiltered_references_df=None,
+                pubmed_cache_path=None,
+                pubmed_client=None,
+                similarity_targets=None,
+                embedding_scorer=None,
+                verbose=False,
+            )
+
+        self.assertEqual(result[PARTNER_DRIVER_SYMBOLS_COLUMN].iloc[0], "")
+        self.assertEqual(result[PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN].iloc[0], "")
 
     def test_stock_phenotype_sheet_prefers_exact_genotype_driver_symbol(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -689,7 +819,102 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
         self.assertEqual(result[PARTNER_DRIVER_SYMBOLS_COLUMN].iloc[0], "tim-GAL4")
         self.assertEqual(
             result[PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN].iloc[0],
-            "BDSC (8001) [FBst9000011]",
+            "(8001, BDSC)",
+        )
+
+    def test_stock_phenotype_sheet_recovers_gal4_partner_when_symbol_pairing_is_imperfect(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            flybase_root = Path(tmp_dir) / "flybase"
+            alleles_dir = flybase_root / "alleles_and_stocks"
+            refs_dir = flybase_root / "references"
+            alleles_dir.mkdir(parents=True)
+            refs_dir.mkdir(parents=True)
+
+            pd.DataFrame(
+                [
+                    {
+                        "FBst": "FBst9000030",
+                        "stock_number": "v9241",
+                        "collection": "Vienna",
+                        "FB_genotype": "P{TRiP.HMS00001}",
+                        "derived_stock_component": "FBal3999999",
+                        "embedded_type": "FBal",
+                        "object_symbol": "P{TRiP.HMS00001}",
+                        "GeneSymbol": "CG31400",
+                    },
+                    {
+                        "FBst": "FBst9000031",
+                        "stock_number": "8765",
+                        "collection": "BDSC",
+                        "FB_genotype": "tim-GAL4",
+                        "derived_stock_component": "FBal3888888",
+                        "embedded_type": "FBal",
+                        "object_symbol": "",
+                        "GeneSymbol": "",
+                    },
+                ]
+            ).to_csv(alleles_dir / "fbst_to_derived_stock_component.csv", index=False)
+
+            phenotype_tsv = (
+                "reference\tphenotype_name\tphenotype_id\tqualifier_names\t"
+                "genotype_FBids\tgenotype_symbols\n"
+                "FBrf0000011\tabnormal circadian rhythm\tFBcv0000002\tabnormal\t"
+                "FBal3999999/FBal3888888\tP{TRiP.HMS00001}; tim-GAL4; extra_marker\n"
+            )
+            (alleles_dir / "genotype_phenotype_data_fb_test.tsv").write_text(
+                phenotype_tsv,
+                encoding="utf-8",
+            )
+            refs_tsv = (
+                "FBrf\tPMID\tPMCID\tDOI\tminiref\n"
+                "FBrf0000011\t\t\t\tImperfect et al., 2025, Journal\n"
+            )
+            (refs_dir / "fbrf_pmid_pmcid_doi_fb_test.tsv").write_text(
+                refs_tsv,
+                encoding="utf-8",
+            )
+
+            all_stocks_df = pd.DataFrame(
+                [
+                    {
+                        "FBst": "FBst9000030",
+                        "stock_number": "v9241",
+                        "collection": "Vienna",
+                        "relevant_gene_symbols": "tim",
+                        "relevant_component_ids": "FBal3999999",
+                        "relevant_fbal_ids": "FBal3999999",
+                        "relevant_fbal_symbols": "P{TRiP.HMS00001}",
+                        "Balancers": "-",
+                        "matched_component_types": "FBal",
+                        "UAS": True,
+                        "GAL4": False,
+                        "mutant/UAS": False,
+                        "mutant": False,
+                        "GAL4 / mutant": False,
+                        "Other": False,
+                        "allele_class_terms": "RNAi_reagent",
+                        "transgenic_product_class_terms": "rnai_reagent",
+                        "custom_stock": False,
+                    }
+                ]
+            )
+
+            result = _build_stock_phenotype_sheet(
+                all_stocks_df=all_stocks_df,
+                flybase_data_path=flybase_root,
+                references_df=None,
+                unfiltered_references_df=None,
+                pubmed_cache_path=None,
+                pubmed_client=None,
+                similarity_targets=None,
+                embedding_scorer=None,
+                verbose=False,
+            )
+
+        self.assertEqual(result[PARTNER_DRIVER_SYMBOLS_COLUMN].iloc[0], "tim-GAL4")
+        self.assertEqual(
+            result[PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN].iloc[0],
+            "(8765, BDSC)",
         )
 
     def test_stock_phenotype_sheet_excludes_non_gal4_partner_reagents(self):
@@ -785,6 +1010,70 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
         self.assertEqual(result[CO_REAGENT_SYMBOLS_COLUMN].iloc[0], "")
         self.assertEqual(result[PARTNER_DRIVER_SYMBOLS_COLUMN].iloc[0], "")
         self.assertEqual(result[PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN].iloc[0], "")
+
+    def test_reorder_to_masterlist_columns_matches_template_order(self):
+        sheet_df = pd.DataFrame(
+            [
+                {
+                    "Gene": "tim",
+                    "Reagent Type or Allele Symbol": "HMS00001",
+                    "Balancers": "-",
+                    "matched_component_types": "FBal",
+                    "UAS": True,
+                    "GAL4": False,
+                    "mutant/UAS": False,
+                    "mutant": False,
+                    "GAL4 / mutant": False,
+                    "Other": False,
+                    "allele_class_terms": "RNAi_reagent",
+                    "transgenic_product_class_terms": "rnai_reagent",
+                    "Source/ Stock #": "BDSC (12345)",
+                    "Genotype": "P{TRiP.HMS00001}",
+                    CO_REAGENT_FBIDS_COLUMN: "FBal0001",
+                    CO_REAGENT_SYMBOLS_COLUMN: "tim-GAL4",
+                    PARTNER_DRIVER_SYMBOLS_COLUMN: "tim-GAL4",
+                    PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN: "(7126, BDSC)",
+                    "Data Set": "dataset_alpha",
+                    "Phenotype": "abnormal circadian rhythm",
+                    "Qualifier": "abnormal",
+                    "PMID": "12345678",
+                    "PMCID": "PMC123456",
+                    "Reference": "Title of paper",
+                    "Authors": "Author A; Author B",
+                    "Journal": "Cell Reports",
+                    "Year of Publication": "2025",
+                    "Cosine Similarity (sleep)": 0.42,
+                    "Cosine Similarity (circadian)": 0.87,
+                    "Similarity Range": "0.85-0.90",
+                }
+            ]
+        )
+
+        result = _reorder_to_masterlist_columns(sheet_df)
+
+        self.assertEqual(
+            result.columns[: len(MASTERLIST_TEMPLATE_COLUMNS)].tolist(),
+            MASTERLIST_TEMPLATE_COLUMNS,
+        )
+        self.assertEqual(result["Stock Source"].iloc[0], "BDSC")
+        self.assertEqual(result["ID #"].iloc[0], "12345")
+        self.assertEqual(result["allele shorthand"].iloc[0], "HMS00001")
+        self.assertEqual(
+            result["Published Gal4/ Positive control"].iloc[0],
+            "tim-GAL4",
+        )
+        self.assertEqual(result["Reference"].iloc[0], "12345678")
+        self.assertEqual(result["Column 31"].iloc[0], "PMC123456")
+        self.assertEqual(result["Column 30"].iloc[0], "Title of paper")
+        self.assertEqual(
+            result["Circadian/Sleep Relevance (embedding max score)"].iloc[0],
+            0.87,
+        )
+        self.assertEqual(result["Data Set"].iloc[0], "dataset_alpha")
+        self.assertIn("Similarity Range", result.columns)
+        self.assertIn("matched_component_types", result.columns)
+        self.assertIn("Cosine Similarity (sleep)", result.columns)
+        self.assertIn("Cosine Similarity (circadian)", result.columns)
 
 
 if __name__ == "__main__":

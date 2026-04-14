@@ -1,0 +1,17 @@
+category,text,nearest_neighbor,nearest_neighbor_cosine,tsne_x,tsne_y
+Behavior,courtship song,doublesex regulation,0.2000533090929669,-78.608086,-15.181822
+Behavior,negative geotaxis,axon guidance,0.2941656452233253,-32.442707,-87.501236
+Behavior,olfactory learning,mushroom body neuron,0.36612159347025697,-42.560043,49.924217
+Behavior,sleep bout,circadian pacemaker,0.2747547518210324,74.35975,113.607315
+Development,Notch pathway,doublesex regulation,0.35912839575603145,-22.264181,-18.325554
+Development,axon guidance,Notch pathway,0.3249088996794425,-31.118984,-56.63681
+Development,photoreceptor differentiation,circadian pacemaker,0.34119890445978884,44.79776,61.102383
+Development,wing imaginal disc,mushroom body neuron,0.38256623482528457,9.745813,15.0862665
+Genetics,GAL4/UAS driver,doublesex regulation,0.3987964637747628,35.01676,-15.636524
+Genetics,RNAi knockdown,GAL4/UAS driver,0.36317289388688073,69.93913,-10.792778
+Genetics,doublesex regulation,GAL4/UAS driver,0.3987964637747628,7.30968,-28.493563
+Genetics,fruitless mutant,GAL4/UAS driver,0.3726905992369706,47.433723,-46.9537
+Neural,circadian pacemaker,photoreceptor differentiation,0.34119890445978884,52.937424,88.6491
+Neural,dopamine signaling,synaptic vesicle release,0.400638334270079,-26.23022,79.67827
+Neural,mushroom body neuron,GAL4/UAS driver,0.38739313106997686,1.507426,45.938595
+Neural,synaptic vesicle release,dopamine signaling,0.400638334270079,-6.988642,96.463356
