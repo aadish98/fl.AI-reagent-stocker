@@ -308,6 +308,7 @@ class Settings:
     soft_run: bool = False  # If True, use the phenotype-sheet soft-run path
     enable_oai_embedding: bool = False
     simple_buckets: bool = False
+    keyword_bucketing: bool = False
     skip_fbgnid_conversion: bool = False
     phenotype_similarity_targets: Optional[List[Dict[str, str]]] = None
     
@@ -421,6 +422,10 @@ class Settings:
             issues.append("OPENAI_API_KEY not set - functional validation will be disabled")
         elif self.enable_oai_embedding and not self.soft_run:
             issues.append("--OAI-embedding is enabled without --soft-run; phenotype similarity embeddings only run in soft-run mode")
+        elif self.keyword_bucketing and not self.enable_oai_embedding:
+            issues.append("--keyword-bucketing is enabled without --OAI-embedding; keyword bucket workbooks only run in the phenotype similarity embedding path")
+        elif self.keyword_bucketing and not self.soft_run:
+            issues.append("--keyword-bucketing is enabled without --soft-run; keyword bucket workbooks only run in soft-run mode")
         elif self.simple_buckets and not self.enable_oai_embedding:
             issues.append("--simple-buckets is enabled without --OAI-embedding; simple bucket workbooks only run in the phenotype similarity embedding path")
         elif self.simple_buckets and not self.soft_run:

@@ -18,13 +18,42 @@ import csv
 import gzip
 import sys
 from pathlib import Path
-from typing import Iterator, Set, Tuple
+from typing import Iterator, Optional, Set, Tuple
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRANSGENIC_INSERTIONS_DIR = REPO_ROOT / "data" / "flybase" / "transgenic_insertions"
-DEFAULT_INPUT_PATH = TRANSGENIC_INSERTIONS_DIR / "chado_FBti.xml.gz"
+CHADO_FBTI_PREFIX = "chado_FBti"
 DEFAULT_OUTPUT_PATH = TRANSGENIC_INSERTIONS_DIR / "fbtp_to_fbti.csv"
+
+
+def find_latest_xml(directory: Path, prefix: str) -> Path:
+    """Return the latest XML or XML.GZ matching a prefix.
+
+    Pattern matching is intentionally loose so the script keeps working if
+    FlyBase ever decides to embed a release suffix in chado XML filenames.
+    """
+    gz_matches = sorted(directory.glob(f"{prefix}*.xml.gz"), reverse=True)
+    if gz_matches:
+        return gz_matches[0]
+    xml_matches = sorted(directory.glob(f"{prefix}*.xml"), reverse=True)
+    if xml_matches:
+        return xml_matches[0]
+    raise FileNotFoundError(f"No XML file matching '{prefix}' found in {directory}")
+
+
+def _safe_find_latest_xml(directory: Path, prefix: str) -> Optional[Path]:
+    try:
+        return find_latest_xml(directory, prefix)
+    except FileNotFoundError:
+        return None
+
+
+# Resolved lazily so `--help` works even before the chado XML has been
+# downloaded.
+DEFAULT_INPUT_PATH: Optional[Path] = _safe_find_latest_xml(
+    TRANSGENIC_INSERTIONS_DIR, CHADO_FBTI_PREFIX
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,7 +62,10 @@ def parse_args() -> argparse.Namespace:
         "--input",
         type=Path,
         default=DEFAULT_INPUT_PATH,
-        help=f"Path to chado_FBti XML(.gz). Default: {DEFAULT_INPUT_PATH}",
+        help=(
+            "Path to a chado FBti XML(.gz) file. If omitted, the latest "
+            f"'{CHADO_FBTI_PREFIX}*.xml(.gz)' file in {TRANSGENIC_INSERTIONS_DIR} is used."
+        ),
     )
     parser.add_argument(
         "--output",
@@ -117,6 +149,13 @@ def write_pairs(output_path: Path, pairs: Set[Tuple[str, str]]) -> None:
 
 def main() -> int:
     args = parse_args()
+    if args.input is None:
+        raise FileNotFoundError(
+            f"No '{CHADO_FBTI_PREFIX}*.xml(.gz)' file found in "
+            f"{TRANSGENIC_INSERTIONS_DIR}. Pass --input explicitly or run "
+            "'python scripts/refresh_flybase_data.py --with-xml' to download it."
+        )
+
     input_path = Path(args.input)
     output_path = Path(args.output)
 

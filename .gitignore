@@ -43,8 +43,7 @@ htmlcov/
 .ipynb_checkpoints/
 
 # Local environment / secrets
-.env
-.env.*
+.env*
 !.env.example
 
 # Large local datasets (keep out of git history)
@@ -63,6 +62,9 @@ data/test/
 
 # Local analysis / generated report artifacts
 audit_outputs/
+
+# Generated docs (rendered from Markdown sources in docs/)
+docs/stock_split_config_example.pdf
 
 # Presentation build artifacts and temp files
 .tmp_pptx_build/

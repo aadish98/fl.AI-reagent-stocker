@@ -12,7 +12,7 @@ import gzip
 import re
 from glob import glob
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 import pandas as pd
 
@@ -25,6 +25,10 @@ REAGENT_BUCKET_COLUMNS = [
     "GAL4 / mutant",
     "Other",
 ]
+RNAI_TYPE_COLUMN = "RNAi Type"
+RNAI_TYPE_DSRNA = "dsRNA"
+RNAI_TYPE_SHRNA = "shRNA"
+RNAI_TYPE_UNSPECIFIED = "RNAi (unspecified)"
 
 
 
@@ -86,6 +90,78 @@ def unique_join(values) -> str:
         if pd.notna(value) and str(value).strip()
     }
     return '; '.join(sorted(unique_values))
+
+
+def _normalize_rnai_type_token(value: Any) -> str:
+    """Map RNAi subtype spellings onto the canonical workbook labels."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if text in {"dsrna", "double stranded rna", "double-stranded rna"}:
+        return RNAI_TYPE_DSRNA
+    if text in {"shrna", "short hairpin rna"}:
+        return RNAI_TYPE_SHRNA
+    if text in {"rnai (unspecified)", "unspecified rnai"}:
+        return RNAI_TYPE_UNSPECIFIED
+    return ""
+
+
+def combine_rnai_type_values(values: Iterable[Any], is_rnai: bool = False) -> str:
+    """Combine one or more RNAi subtype labels into a stable semicolon list."""
+    order = {
+        RNAI_TYPE_DSRNA: 0,
+        RNAI_TYPE_SHRNA: 1,
+        RNAI_TYPE_UNSPECIFIED: 2,
+    }
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        for token in parse_semicolon_list(str(raw_value or "")):
+            normalized = _normalize_rnai_type_token(token)
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                deduped.append(normalized)
+    deduped.sort(key=lambda value: order.get(value, 999))
+    if deduped:
+        return "; ".join(deduped)
+    return RNAI_TYPE_UNSPECIFIED if is_rnai else ""
+
+
+def infer_rnai_type_from_text(*values: Any) -> str:
+    """Infer a confident RNAi subtype from construct text/symbol metadata."""
+    combined = " ".join(
+        str(value or "").strip()
+        for value in values
+        if str(value or "").strip()
+    ).lower()
+    if not combined:
+        return ""
+
+    inferred: List[str] = []
+    shRNA_patterns = (
+        r"\bshrna\b",
+        r"\bshort hairpin rna\b",
+        r"\bartificial micro ?rna\b",
+        r"\bartificial mirna\b",
+        r"\btrip\.hms\d*\b",
+        r"\btrip\.jf\d*\b",
+    )
+    dsRNA_patterns = (
+        r"\bdsrna\b",
+        r"\bdouble[\s-]+stranded rna\b",
+        r"\bdouble stranded hairpin rna\b",
+        r"\bhairpin-type dsrna\b",
+        r"\binverted repeat\b",
+        r"\bhead-to-head repeat\b",
+        r"\bsense-antisense transcription\b",
+        r"\bantisense-sense\b",
+    )
+
+    if any(re.search(pattern, combined) for pattern in shRNA_patterns):
+        inferred.append(RNAI_TYPE_SHRNA)
+    if any(re.search(pattern, combined) for pattern in dsRNA_patterns):
+        inferred.append(RNAI_TYPE_DSRNA)
+    return combine_rnai_type_values(inferred)
 
 
 def filter_semicolon_values(
@@ -404,6 +480,26 @@ def find_latest_tsv(directory: Path, pattern: str) -> Path:
         return Path(tsv_files[0])
     
     raise FileNotFoundError(f"No TSV file matching '{pattern}' found in {directory}")
+
+
+def find_latest_xml(directory: Path, prefix: str) -> Path:
+    """
+    Find the latest XML file matching a prefix in a directory.
+
+    Prefers .xml.gz files, falls back to .xml if no .gz exists. Pattern
+    matching is purposely loose (``{prefix}*.xml(.gz)``) so callers do not
+    need to know the exact FlyBase release suffix that may show up in
+    chado XML filenames over time.
+    """
+    gz_files = sorted(glob(str(directory / f"{prefix}*.xml.gz")), reverse=True)
+    if gz_files:
+        return Path(gz_files[0])
+
+    xml_files = sorted(glob(str(directory / f"{prefix}*.xml")), reverse=True)
+    if xml_files:
+        return Path(xml_files[0])
+
+    raise FileNotFoundError(f"No XML file matching '{prefix}' found in {directory}")
 
 
 def load_flybase_tsv(filepath: Union[str, Path], **kwargs) -> pd.DataFrame:

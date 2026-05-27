@@ -17,6 +17,7 @@ Usage:
     pipeline.run(input_dir, config_path="path/to/config.json")
 """
 
+import gzip
 import json
 import re
 import shutil
@@ -48,6 +49,7 @@ from ..utils import (
     clean_id,
     parse_semicolon_list,
     unique_join,
+    combine_rnai_type_values,
     find_keyword_column,
     find_keyword_title_abstract_column,
     extract_keywords_from_column,
@@ -60,6 +62,8 @@ from ..utils import (
     find_latest_tsv,
     load_flybase_tsv,
     REAGENT_BUCKET_COLUMNS,
+    RNAI_TYPE_COLUMN,
+    infer_rnai_type_from_text,
 )
 from ..validation_runner import run_functional_validation
 
@@ -591,6 +595,145 @@ def _find_allele_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def _split_gene_values(value: Any) -> List[str]:
+    """Split a semicolon-delimited gene cell into usable non-placeholder values."""
+    if pd.isna(value) or not str(value).strip():
+        return []
+    values = []
+    for raw in str(value).split(";"):
+        value_str = raw.strip()
+        if value_str and value_str != "-" and value_str.lower() != "nan":
+            values.append(value_str)
+    return values
+
+
+def _canonicalize_fbgn(
+    fbgn: str,
+    secondary_to_primary: Optional[Dict[str, str]] = None,
+) -> str:
+    """
+    Return the canonical (primary) FBgn for ``fbgn`` when an alias map is
+    available, otherwise return ``fbgn`` unchanged.
+    """
+    if not fbgn:
+        return fbgn
+    if not secondary_to_primary:
+        return fbgn
+    return secondary_to_primary.get(fbgn, fbgn)
+
+
+def _input_fbgns_from_row(
+    row: pd.Series,
+    input_fbgns: Optional[Set[str]] = None,
+    secondary_to_primary: Optional[Dict[str, str]] = None,
+) -> Set[str]:
+    """
+    Return the set of FBgn IDs from a stock row that belong to ``input_fbgns``.
+
+    FBgns are canonicalized through ``secondary_to_primary`` before
+    intersecting with ``input_fbgns`` so that secondary (merged) FBgns in the
+    stock data still match a canonical input FBgn.
+
+    When ``input_fbgns`` is ``None``, return every canonicalized FBgn-looking
+    value from the row (used as a backwards-compatible fallback when the
+    input FBgn set is unavailable). Otherwise the returned set is always a
+    subset of ``input_fbgns``.
+    """
+    raw_fbgns = {
+        f for f in _split_gene_values(row.get("relevant_flybase_gene_ids", ""))
+        if f.startswith("FBgn")
+    }
+    canonical = {
+        _canonicalize_fbgn(f, secondary_to_primary) for f in raw_fbgns
+    }
+    if input_fbgns is not None:
+        return canonical & input_fbgns
+    return canonical
+
+
+def _input_fbgns_from_df(
+    df: pd.DataFrame,
+    input_fbgns: Optional[Set[str]] = None,
+    secondary_to_primary: Optional[Dict[str, str]] = None,
+) -> Set[str]:
+    """Return the set of input FBgn IDs represented by a stock dataframe."""
+    if df is None or len(df) == 0:
+        return set()
+    if "relevant_flybase_gene_ids" not in df.columns:
+        return set()
+    result: Set[str] = set()
+    for _, row in df.iterrows():
+        result |= _input_fbgns_from_row(row, input_fbgns, secondary_to_primary)
+    return result
+
+
+def _format_input_gene_label(
+    fbgn: str,
+    current_to_input_map: Optional[Dict[str, str]] = None,
+    fallback: Optional[str] = None,
+) -> str:
+    """
+    Render the user-facing label for an input FBgn.
+
+    Prefers the mapped input symbol (``current_to_input_map[fbgn]``), falls
+    back to the explicit ``fallback`` argument, then to the FBgn itself.
+    """
+    if current_to_input_map and fbgn in current_to_input_map:
+        return current_to_input_map[fbgn]
+    if fallback:
+        return fallback
+    return fbgn
+
+
+def _gene_display_values_from_row(
+    row: pd.Series,
+    current_to_input_map: Optional[Dict[str, str]] = None,
+) -> Set[str]:
+    """
+    Return display gene labels for a stock row.
+
+    Prefer ``relevant_gene_symbols`` when present, but fall back to
+    ``relevant_flybase_gene_ids`` for stock rows where FlyBase has an FBgn link
+    but no stock gene symbol. ``current_to_input_map`` also carries FBgn ->
+    input-symbol display fallbacks for those rows.
+
+    This helper is now used only when an FBgn-keyed identity is unavailable
+    (e.g. legacy stock workbooks lacking ``relevant_flybase_gene_ids``).
+    Production accounting in ``write_aggregated_excel`` uses FBgn-keyed
+    helpers above to avoid display-symbol collisions between distinct input
+    genes.
+    """
+    display_map = current_to_input_map or {}
+    symbols = _split_gene_values(row.get("relevant_gene_symbols", ""))
+    if symbols:
+        return {display_map.get(symbol, symbol) for symbol in symbols}
+
+    fbgns = _split_gene_values(row.get("relevant_flybase_gene_ids", ""))
+    if fbgns:
+        return {display_map.get(fbgn, fbgn) for fbgn in fbgns}
+
+    fallback_col = _find_gene_id_column(pd.DataFrame([row]))
+    if fallback_col:
+        return {
+            display_map.get(value, value)
+            for value in _split_gene_values(row.get(fallback_col, ""))
+        }
+    return set()
+
+
+def _gene_display_values_from_df(
+    df: pd.DataFrame,
+    current_to_input_map: Optional[Dict[str, str]] = None,
+) -> Set[str]:
+    """Return unique display gene labels represented by a stock dataframe."""
+    genes: Set[str] = set()
+    if df is None or len(df) == 0:
+        return genes
+    for _, row in df.iterrows():
+        genes.update(_gene_display_values_from_row(row, current_to_input_map))
+    return genes
+
+
 ###############################################################################
 # Excel Output Functions
 ###############################################################################
@@ -721,6 +864,70 @@ def _derive_stock_keyword_refs_header(keyword_pmids_col: Optional[str]) -> str:
     return f"{base} (all for stock)"
 
 
+def _load_secondary_fbgn_to_primary(
+    flybase_data_path: Optional[Path],
+    verbose: bool = False,
+) -> Dict[str, str]:
+    """
+    Build a ``secondary_FBgn -> primary_FBgn`` alias map from FlyBase's
+    ``fbgn_annotation_ID`` precomputed table.
+
+    Returns an empty dict if the file is missing. The loader parses the
+    FlyBase header line manually (``load_flybase_tsv`` confuses comment
+    lines with data rows in this file format).
+    """
+    if flybase_data_path is None:
+        return {}
+    base = Path(flybase_data_path)
+    candidates = sorted(base.rglob("fbgn_annotation_ID*.tsv*"))
+    if not candidates:
+        if verbose:
+            print(
+                "    Note: Could not find fbgn_annotation_ID TSV under "
+                f"{flybase_data_path}; FBgn alias canonicalization disabled."
+            )
+        return {}
+    src = max(candidates, key=lambda p: p.stat().st_mtime)
+    try:
+        open_fn = gzip.open if str(src).endswith(".gz") else open
+        secondary_to_primary: Dict[str, str] = {}
+        cols: Optional[List[str]] = None
+        with open_fn(src, "rt") as f:
+            for line in f:
+                if line.startswith("##"):
+                    if "primary_FBgn" in line and cols is None:
+                        cols = line.lstrip("#").strip().split("\t")
+                    continue
+                if line.startswith("#") or not line.strip():
+                    continue
+                if cols is None:
+                    continue
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) != len(cols):
+                    continue
+                row = dict(zip(cols, parts))
+                if row.get("organism_abbreviation", "").strip() != "Dmel":
+                    continue
+                prim = row.get("primary_FBgn#", "").strip()
+                secs = row.get("secondary_FBgn#(s)", "").strip()
+                if not prim.startswith("FBgn") or not secs:
+                    continue
+                for s in secs.split(","):
+                    s = s.strip()
+                    if s.startswith("FBgn") and s != prim:
+                        secondary_to_primary[s] = prim
+        if verbose:
+            print(
+                f"    Loaded FBgn alias map: {len(secondary_to_primary)} "
+                "secondary -> primary entries"
+            )
+        return secondary_to_primary
+    except Exception as e:
+        if verbose:
+            print(f"    Warning: Could not load FBgn alias map: {e}")
+        return {}
+
+
 def _load_gene_synonyms_map(
     flybase_data_path: Optional[Path],
     verbose: bool = False
@@ -838,6 +1045,160 @@ def _lookup_gene_synonyms(
         return direct
     # Fallback to case-insensitive key.
     return str(gene_synonyms_map.get(label.casefold(), "") or "").strip()
+
+
+def _row_has_rnai_signal(row: pd.Series) -> bool:
+    """Return True when a stock row carries broad RNAi evidence."""
+    raw_signal = row.get("RNAi", False)
+    if raw_signal is True or str(raw_signal).strip().lower() in {"true", "1", "yes"}:
+        return True
+
+    genotype_text = str(row.get("genotype", row.get("Genotype", "")) or "").strip().lower()
+    allele_symbols = [
+        token.strip().lower()
+        for token in parse_semicolon_list(
+            str(row.get("relevant_fbal_symbols", row.get("AlleleSymbol", "")) or "")
+        )
+        if token.strip()
+    ]
+    construct_symbols = [
+        token.strip().lower()
+        for token in parse_semicolon_list(str(row.get("relevant_fbtp_symbols", "") or ""))
+        if token.strip()
+    ]
+    transgenic_terms = [
+        token.strip().lower()
+        for token in parse_semicolon_list(
+            str(row.get("transgenic_product_class_terms", "") or "")
+        )
+        if token.strip()
+    ]
+    return bool(
+        "rnai" in genotype_text
+        or any("rnai" in symbol for symbol in allele_symbols + construct_symbols)
+        or any("rnai_reagent" in term or "rnai" in term for term in transgenic_terms)
+    )
+
+
+def _load_rnai_type_lookup(
+    flybase_data_path: Optional[Path],
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Build allele- and construct-level RNAi subtype lookups from FlyBase."""
+    if flybase_data_path is None:
+        return {}, {}
+
+    constructs_dir = Path(flybase_data_path) / "transgenic_constructs"
+    try:
+        construct_path = find_latest_tsv(constructs_dir, "transgenic_construct_descriptions")
+        construct_df = load_flybase_tsv(construct_path)
+    except FileNotFoundError:
+        return {}, {}
+
+    raw_cols = list(construct_df.columns)
+
+    def _resolve_column(preferred: str, fallback_idx: int) -> Optional[str]:
+        if preferred in construct_df.columns:
+            return preferred
+        if len(raw_cols) > fallback_idx:
+            return raw_cols[fallback_idx]
+        return None
+
+    fbal_col = _resolve_column("Component Allele (id)", 1)
+    fbtp_col = _resolve_column("Transgenic Construct (id)", 3)
+    symbol_col = _resolve_column("Transgenic Construct (symbol)", 2)
+    desc_col = _resolve_column("Description (text)", 14)
+    if fbal_col is None or fbtp_col is None:
+        return {}, {}
+
+    allele_lookup: Dict[str, Set[str]] = defaultdict(set)
+    construct_lookup: Dict[str, Set[str]] = defaultdict(set)
+
+    def _split_pipe_values(value: Any) -> List[str]:
+        return [clean_id(item) for item in str(value or "").split("|") if clean_id(item)]
+
+    for _, row in construct_df.iterrows():
+        allele_ids = _split_pipe_values(row.get(fbal_col, ""))
+        construct_ids = _split_pipe_values(row.get(fbtp_col, ""))
+        construct_symbols = [
+            item.strip()
+            for item in str(row.get(symbol_col, "") or "").split("|")
+            if item.strip()
+        ]
+        description_text = str(row.get(desc_col, "") or "").strip()
+        inferred = infer_rnai_type_from_text(
+            description_text,
+            " ; ".join(construct_symbols),
+        )
+        subtype_tokens = [
+            token.strip()
+            for token in inferred.split(";")
+            if token.strip()
+        ]
+        if not subtype_tokens:
+            continue
+        for allele_id in allele_ids:
+            allele_lookup[allele_id].update(subtype_tokens)
+        for idx, construct_id in enumerate(construct_ids):
+            construct_symbol = ""
+            if idx < len(construct_symbols):
+                construct_symbol = construct_symbols[idx]
+            elif len(construct_symbols) == 1:
+                construct_symbol = construct_symbols[0]
+            construct_inferred = infer_rnai_type_from_text(
+                description_text,
+                construct_symbol,
+            )
+            construct_tokens = [
+                token.strip()
+                for token in construct_inferred.split(";")
+                if token.strip()
+            ] or subtype_tokens
+            construct_lookup[construct_id].update(construct_tokens)
+
+    return (
+        {
+            allele_id: combine_rnai_type_values(sorted(values))
+            for allele_id, values in allele_lookup.items()
+        },
+        {
+            construct_id: combine_rnai_type_values(sorted(values))
+            for construct_id, values in construct_lookup.items()
+        },
+    )
+
+
+def _ensure_rnai_type_column(
+    stocks_df: pd.DataFrame,
+    flybase_data_path: Optional[Path],
+) -> pd.DataFrame:
+    """Backfill the RNAi subtype column from FlyBase construct metadata."""
+    if stocks_df is None or len(stocks_df) == 0:
+        return stocks_df
+
+    out = stocks_df.copy()
+    allele_lookup, construct_lookup = _load_rnai_type_lookup(flybase_data_path)
+
+    def _resolve_row(row: pd.Series) -> str:
+        subtype_values: List[str] = [row.get(RNAI_TYPE_COLUMN, "")]
+        for fbtp_id in parse_semicolon_list(str(row.get("relevant_fbtp_ids", "") or "")):
+            subtype_values.append(construct_lookup.get(clean_id(fbtp_id), ""))
+        for fbal_id in parse_semicolon_list(str(row.get("relevant_fbal_ids", "") or "")):
+            subtype_values.append(allele_lookup.get(clean_id(fbal_id), ""))
+        subtype_values.append(
+            infer_rnai_type_from_text(
+                row.get("genotype", row.get("Genotype", "")),
+                row.get("relevant_fbal_symbols", row.get("AlleleSymbol", "")),
+                row.get("relevant_fbtp_symbols", ""),
+                row.get("transgenic_product_class_terms", ""),
+            )
+        )
+        return combine_rnai_type_values(
+            subtype_values,
+            is_rnai=_row_has_rnai_signal(row),
+        )
+
+    out[RNAI_TYPE_COLUMN] = out.apply(_resolve_row, axis=1)
+    return out
 
 
 def _normalize_stock_sheet_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -1037,13 +1398,43 @@ def _build_stock_phenotype_sheet(
     embedding_scorer: Optional[EmbeddingSimilarityScorer] = None,
     verbose: bool = False,
     gene_to_datasets: Optional[Dict[str, Set[str]]] = None,
+    reagent_index_df: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    """Build a soft-run replacement sheet from genotype_phenotype_data."""
-    if all_stocks_df is None or len(all_stocks_df) == 0 or flybase_data_path is None:
+    """Build the soft-run Stock Phenotype Sheet.
+
+    When ``reagent_index_df`` is provided, the function uses it as the
+    primary input-gene reagent universe (true full-scope behavior). Phenotype
+    rows are admitted whenever ``genotype_FBids`` overlaps any component_id
+    in the reagent index, and stocks are attached via the global
+    ``fbst_to_derived_stock_component.csv`` lookup. ``all_stocks_df`` is
+    retained for enrichment metadata where present (Balancers, allele class
+    terms, transgenic product class terms, RNAi type, reagent buckets) but
+    is not the reagent universe.
+
+    When ``reagent_index_df`` is absent (older Stage 1 workbooks), the
+    legacy behavior is used: phenotype rows are admitted only when their
+    ``genotype_FBids`` overlap reagents already present in ``all_stocks_df``.
+    """
+    if flybase_data_path is None:
         return pd.DataFrame()
 
-    included_df = all_stocks_df.copy()
-    if 'FBst' not in included_df.columns:
+    has_reagent_index = (
+        reagent_index_df is not None
+        and len(reagent_index_df) > 0
+        and 'component_id' in reagent_index_df.columns
+    )
+
+    if not has_reagent_index and (
+        all_stocks_df is None or len(all_stocks_df) == 0
+    ):
+        return pd.DataFrame()
+
+    if all_stocks_df is None or len(all_stocks_df) == 0:
+        included_df = pd.DataFrame()
+    else:
+        included_df = _ensure_rnai_type_column(all_stocks_df, flybase_data_path)
+
+    if len(included_df) > 0 and 'FBst' not in included_df.columns:
         return pd.DataFrame()
 
     def _normalize_authors(value: Any) -> str:
@@ -1123,20 +1514,21 @@ def _build_stock_phenotype_sheet(
             for key in ('title', 'authors', 'journal', 'publication_date')
         )
 
-    if 'FBst' in included_df.columns:
-        included_df['FBst'] = included_df['FBst'].apply(clean_id)
-    else:
-        included_df['FBst'] = ''
-    included_df['stock_number'] = included_df.get('stock_number', '').apply(clean_id)
-    included_df['collection'] = included_df.get('collection', '').fillna('').astype(str).str.strip()
-    included_df['relevant_gene_symbols'] = included_df.get('relevant_gene_symbols', '').fillna('').astype(str)
+    if len(included_df) > 0:
+        if 'FBst' in included_df.columns:
+            included_df['FBst'] = included_df['FBst'].apply(clean_id)
+        else:
+            included_df['FBst'] = ''
+        included_df['stock_number'] = included_df.get('stock_number', '').apply(clean_id)
+        included_df['collection'] = included_df.get('collection', '').fillna('').astype(str).str.strip()
+        included_df['relevant_gene_symbols'] = included_df.get('relevant_gene_symbols', '').fillna('').astype(str)
 
     def _is_custom_row(row):
         v = row.get('custom_stock', False)
         return v is True or str(v).strip().lower() in ('true', '1', 'yes')
 
     custom_included_df = pd.DataFrame()
-    if 'custom_stock' in included_df.columns:
+    if len(included_df) > 0 and 'custom_stock' in included_df.columns:
         custom_mask = included_df.apply(_is_custom_row, axis=1)
         custom_included_df = included_df[custom_mask].copy()
 
@@ -1148,6 +1540,8 @@ def _build_stock_phenotype_sheet(
         'transgenic_product_class_terms',
     )
     for df in (included_df, custom_included_df):
+        if len(df) == 0:
+            continue
         for column in metadata_text_columns:
             if column not in df.columns:
                 df[column] = ''
@@ -1157,9 +1551,49 @@ def _build_stock_phenotype_sheet(
     _assert_one_hot_reagent_buckets(included_df, "Included stock rows")
     _assert_one_hot_reagent_buckets(custom_included_df, "Custom phenotype rows")
 
-    included_df = included_df[included_df['FBst'].astype(bool)].copy()
-    if len(included_df) == 0 and len(custom_included_df) == 0:
+    if len(included_df) > 0:
+        included_df = included_df[included_df['FBst'].astype(bool)].copy()
+    if (
+        len(included_df) == 0
+        and len(custom_included_df) == 0
+        and not has_reagent_index
+    ):
         return pd.DataFrame()
+
+    # Normalize the gene reagent index (the primary reagent universe for the
+    # true full-scope phenotype-sheet flow). Older Stage 1 workbooks lack
+    # this sheet; in that case the function falls back to the legacy
+    # ``all_stocks_df``-derived union further below.
+    if has_reagent_index:
+        reagent_index_df = reagent_index_df.copy()
+        for column in (
+            'input_flybase_gene_id',
+            'input_gene_symbol',
+            'component_id',
+            'component_type',
+            'component_symbol',
+            'source_allele_id',
+            'source_allele_symbol',
+            'allele_class_terms',
+            'transgenic_product_class_terms',
+            'rnai_type',
+            'match_provenance',
+        ):
+            if column not in reagent_index_df.columns:
+                reagent_index_df[column] = ''
+            reagent_index_df[column] = (
+                reagent_index_df[column].fillna('').astype(str)
+            )
+        reagent_index_df['component_id'] = reagent_index_df['component_id'].apply(clean_id)
+        reagent_index_df['source_allele_id'] = reagent_index_df['source_allele_id'].apply(clean_id)
+        reagent_index_df['input_flybase_gene_id'] = (
+            reagent_index_df['input_flybase_gene_id'].apply(clean_id)
+        )
+        reagent_index_df = reagent_index_df[
+            reagent_index_df['component_id'].astype(bool)
+        ].copy()
+        if len(reagent_index_df) == 0:
+            has_reagent_index = False
 
     flybase_data_path = Path(flybase_data_path)
     alleles_dir = flybase_data_path / 'alleles_and_stocks'
@@ -1221,7 +1655,11 @@ def _build_stock_phenotype_sheet(
             )
             derived_df = derived_df[derived_pairs.isin(relevant_component_pairs)].copy()
 
-    if len(derived_df) == 0 and len(custom_included_df) == 0:
+    if (
+        len(derived_df) == 0
+        and len(custom_included_df) == 0
+        and not has_reagent_index
+    ):
         return pd.DataFrame()
 
     phenotype_df['reference'] = phenotype_df.get('reference', '').fillna('').astype(str)
@@ -1231,15 +1669,24 @@ def _build_stock_phenotype_sheet(
     phenotype_df['genotype_FBids'] = phenotype_df.get('genotype_FBids', '').fillna('').astype(str)
     phenotype_df['genotype_symbols'] = phenotype_df.get('genotype_symbols', '').fillna('').astype(str)
 
-    all_relevant_ids = set()
-    if len(derived_df) > 0:
-        all_relevant_ids.update(derived_df['derived_stock_component'].astype(str).str.strip())
-    if 'relevant_component_ids' in included_df.columns:
-        for ids_str in included_df['relevant_component_ids'].fillna('').astype(str):
-            all_relevant_ids.update(cid for cid in parse_semicolon_list(ids_str) if cid)
-    if len(custom_included_df) > 0 and 'relevant_component_ids' in custom_included_df.columns:
-        for ids_str in custom_included_df['relevant_component_ids'].fillna('').astype(str):
-            all_relevant_ids.update(cid for cid in parse_semicolon_list(ids_str) if cid)
+    # Primary flow: the reagent index is the true full-scope reagent
+    # universe. Legacy flow: fall back to the union pulled from
+    # ``derived_df``/``included_df``/``custom_included_df``.
+    all_relevant_ids: Set[str] = set()
+    if has_reagent_index:
+        all_relevant_ids.update(
+            cid for cid in reagent_index_df['component_id'].astype(str)
+            if cid
+        )
+    else:
+        if len(derived_df) > 0:
+            all_relevant_ids.update(derived_df['derived_stock_component'].astype(str).str.strip())
+        if 'relevant_component_ids' in included_df.columns:
+            for ids_str in included_df['relevant_component_ids'].fillna('').astype(str):
+                all_relevant_ids.update(cid for cid in parse_semicolon_list(ids_str) if cid)
+        if len(custom_included_df) > 0 and 'relevant_component_ids' in custom_included_df.columns:
+            for ids_str in custom_included_df['relevant_component_ids'].fillna('').astype(str):
+                all_relevant_ids.update(cid for cid in parse_semicolon_list(ids_str) if cid)
     all_relevant_ids.discard('')
 
     def _row_has_relevant_component(fbids_str):
@@ -1451,6 +1898,12 @@ def _build_stock_phenotype_sheet(
                     lambda s: unique_join(s.tolist()),
                 ),
                 **{
+                    RNAI_TYPE_COLUMN: (
+                        RNAI_TYPE_COLUMN,
+                        lambda s: combine_rnai_type_values(s.tolist()),
+                    )
+                },
+                **{
                     column: (column, lambda s: any(_is_truthy(v) for v in s.tolist()))
                     for column in REAGENT_BUCKET_COLUMNS
                 },
@@ -1458,6 +1911,193 @@ def _build_stock_phenotype_sheet(
             .reset_index()
         )
         stock_meta_by_fbst = stock_meta.set_index('FBst').to_dict('index')
+
+    # Index reagent index rows by component_id for metadata enrichment of
+    # newly surfaced FBsts in the gene-first flow.
+    reagent_index_by_component: Dict[str, List[Dict[str, str]]] = defaultdict(list)
+    linked_lookup_components_by_component: Dict[str, Set[str]] = defaultdict(set)
+    if has_reagent_index:
+        source_allele_to_components: Dict[str, Set[str]] = defaultdict(set)
+        for _, ri_row in reagent_index_df.iterrows():
+            cid = clean_id(ri_row.get('component_id', ''))
+            if not cid:
+                continue
+            source_allele_id = clean_id(ri_row.get('source_allele_id', ''))
+            if source_allele_id:
+                source_allele_to_components[source_allele_id].add(cid)
+            linked_lookup_components_by_component[cid].add(cid)
+            reagent_index_by_component[cid].append(
+                {
+                    'gene_symbol': str(ri_row.get('input_gene_symbol', '') or '').strip(),
+                    'component_symbol': str(ri_row.get('component_symbol', '') or '').strip(),
+                    'component_type': str(ri_row.get('component_type', '') or '').strip(),
+                    'allele_class_terms': str(ri_row.get('allele_class_terms', '') or '').strip(),
+                    'transgenic_product_class_terms': str(
+                        ri_row.get('transgenic_product_class_terms', '') or ''
+                    ).strip(),
+                    RNAI_TYPE_COLUMN: str(ri_row.get('rnai_type', '') or '').strip(),
+                }
+            )
+        for component_ids_for_allele in source_allele_to_components.values():
+            for cid in component_ids_for_allele:
+                linked_lookup_components_by_component[cid].update(
+                    component_ids_for_allele
+                )
+
+    def _summarize_reagent_index_for_components(component_ids: Set[str]) -> Dict[str, str]:
+        """Aggregate reagent-index metadata for a set of matched components."""
+        if not component_ids or not reagent_index_by_component:
+            return {}
+        gene_values: List[str] = []
+        symbol_values: List[str] = []
+        type_values: List[str] = []
+        allele_class_values: List[str] = []
+        transgenic_class_values: List[str] = []
+        rnai_type_values: List[str] = []
+        for cid in component_ids:
+            for entry in reagent_index_by_component.get(cid, []):
+                gene_values.extend(parse_semicolon_list(entry.get('gene_symbol', '')))
+                symbol_values.extend(parse_semicolon_list(entry.get('component_symbol', '')))
+                if entry.get('component_type'):
+                    type_values.append(entry['component_type'])
+                allele_class_values.extend(
+                    parse_semicolon_list(entry.get('allele_class_terms', ''))
+                )
+                transgenic_class_values.extend(
+                    parse_semicolon_list(
+                        entry.get('transgenic_product_class_terms', '')
+                    )
+                )
+                if entry.get(RNAI_TYPE_COLUMN):
+                    rnai_type_values.append(entry[RNAI_TYPE_COLUMN])
+        return {
+            'gene_symbol': unique_join(gene_values),
+            'component_symbol': unique_join(symbol_values),
+            'matched_component_types': unique_join(type_values),
+            'allele_class_terms': unique_join(allele_class_values),
+            'transgenic_product_class_terms': unique_join(transgenic_class_values),
+            RNAI_TYPE_COLUMN: combine_rnai_type_values(rnai_type_values),
+        }
+
+    def _build_synthetic_stock_meta(
+        fbst: str,
+        matched_cids: Set[str],
+    ) -> Dict[str, Any]:
+        """Construct metadata for an FBst that is not in ``included_df``.
+
+        Aggregates ``lookup_derived_df`` rows for the FBst, prefers
+        reagent-index metadata for the matched components, and derives the
+        one-hot reagent bucket from a synthetic row using existing helpers.
+        """
+        fbst_rows = (
+            lookup_derived_df[lookup_derived_df['FBst'] == fbst]
+            if len(lookup_derived_df) > 0
+            else pd.DataFrame()
+        )
+        if len(fbst_rows) == 0:
+            return {}
+
+        stock_number = ''
+        collection = ''
+        for value in fbst_rows.get('stock_number', pd.Series(dtype=str)).astype(str):
+            value = value.strip()
+            if value:
+                stock_number = value
+                break
+        for value in fbst_rows.get('collection', pd.Series(dtype=str)).astype(str):
+            value = value.strip()
+            if value:
+                collection = value
+                break
+
+        genotype_values = [
+            str(v or '').strip()
+            for v in fbst_rows.get('FB_genotype', pd.Series(dtype=str)).tolist()
+            if str(v or '').strip()
+        ]
+        genotype_label = genotype_values[0] if genotype_values else ''
+
+        embedded_type_series = fbst_rows.get('embedded_type', pd.Series(dtype=str)).astype(str)
+        object_symbol_series = fbst_rows.get('object_symbol', pd.Series(dtype=str)).astype(str)
+        gene_symbol_series = fbst_rows.get('GeneSymbol', pd.Series(dtype=str)).astype(str)
+
+        fbal_symbols: List[str] = []
+        fbtp_symbols: List[str] = []
+        balancer_symbols: List[str] = []
+        for embedded_type, sym in zip(embedded_type_series, object_symbol_series):
+            sym = str(sym or '').strip()
+            etype = str(embedded_type or '').strip()
+            if not sym:
+                continue
+            if etype == 'FBal':
+                fbal_symbols.append(sym)
+            elif etype == 'FBtp':
+                fbtp_symbols.append(sym)
+            elif etype == 'FBba':
+                balancer_symbols.append(sym)
+        global_gene_symbols = [
+            str(g or '').strip()
+            for g in gene_symbol_series.tolist()
+            if str(g or '').strip()
+        ]
+
+        index_summary = _summarize_reagent_index_for_components(matched_cids)
+
+        gene_symbol = (
+            index_summary.get('gene_symbol', '')
+            or unique_join(global_gene_symbols)
+        )
+        matched_component_types = index_summary.get('matched_component_types', '')
+        allele_class_terms = index_summary.get('allele_class_terms', '')
+        transgenic_product_class_terms = index_summary.get(
+            'transgenic_product_class_terms', ''
+        )
+        rnai_type_value = index_summary.get(RNAI_TYPE_COLUMN, '')
+        balancers_label = unique_join(balancer_symbols) or '-'
+
+        # Synthetic row for the existing bucket / RNAi-type helpers.
+        synthetic_row = pd.Series(
+            {
+                'genotype': genotype_label,
+                'relevant_fbal_symbols': unique_join(fbal_symbols),
+                'relevant_fbtp_symbols': unique_join(fbtp_symbols),
+                'transgenic_product_class_terms': transgenic_product_class_terms,
+                'RNAi': bool(
+                    'rnai' in genotype_label.lower()
+                    or 'uas' in genotype_label.lower()
+                    or 'rnai_reagent' in transgenic_product_class_terms.lower()
+                ),
+            }
+        )
+
+        bucket_flags = _derive_one_hot_reagent_buckets(synthetic_row)
+
+        if not rnai_type_value:
+            inferred_rnai_type = infer_rnai_type_from_text(
+                genotype_label,
+                synthetic_row['relevant_fbal_symbols'],
+                synthetic_row['relevant_fbtp_symbols'],
+                transgenic_product_class_terms,
+            )
+            if inferred_rnai_type:
+                rnai_type_value = combine_rnai_type_values(
+                    [inferred_rnai_type],
+                    is_rnai=bool(synthetic_row['RNAi']),
+                )
+
+        meta: Dict[str, Any] = {
+            'stock_number': stock_number,
+            'collection': collection,
+            'gene_symbol': gene_symbol,
+            'Balancers': balancers_label,
+            'matched_component_types': matched_component_types,
+            'allele_class_terms': allele_class_terms,
+            'transgenic_product_class_terms': transgenic_product_class_terms,
+            RNAI_TYPE_COLUMN: rnai_type_value,
+        }
+        for column in REAGENT_BUCKET_COLUMNS:
+            meta[column] = bool(bucket_flags.get(column, False))
+        return meta
 
     # Build metadata for custom_stock rows keyed by stock_number (allele symbol)
     custom_meta_by_stock_num: Dict[str, Dict] = {}
@@ -1478,6 +2118,7 @@ def _build_stock_phenotype_sheet(
                 'transgenic_product_class_terms': str(
                     crow.get('transgenic_product_class_terms', '') or ''
                 ).strip(),
+                RNAI_TYPE_COLUMN: str(crow.get(RNAI_TYPE_COLUMN, '') or '').strip(),
                 **{
                     column: _is_truthy(crow.get(column, False))
                     for column in REAGENT_BUCKET_COLUMNS
@@ -1485,26 +2126,42 @@ def _build_stock_phenotype_sheet(
             }
 
     # Build reverse index: component_id -> set of stock keys (FBst for
-    # stock-backed rows, stock_number for custom rows), using both
-    # derived_stock_component (Chado-level) and relevant_component_ids
-    # (Stage 1 allele-level) so phenotype rows referencing FBal IDs can
-    # still resolve to stocks whose Chado entries only have FBti/FBtp.
+    # stock-backed rows, stock_number for custom rows).
+    #
+    # Primary flow: source FBst contributions from the FULL
+    # ``lookup_derived_df`` (the unfiltered ``fbst_to_derived_stock_component.csv``)
+    # filtered to the input-gene reagent components. This surfaces every
+    # stock candidate FlyBase associates with each input-gene reagent,
+    # rather than only stocks that survived Stage 1 ranking/limits.
+    #
+    # Legacy flow (no reagent index): keep today's narrowing behavior so
+    # older Stage 1 workbooks still produce comparable output.
     component_to_stock_keys: Dict[str, Set[str]] = {}
-    if len(derived_df) > 0:
-        for _, row in derived_df.iterrows():
+    if has_reagent_index and len(lookup_derived_df) > 0:
+        global_lookup_subset = lookup_derived_df[
+            lookup_derived_df['derived_stock_component'].isin(all_relevant_ids)
+        ]
+        for _, row in global_lookup_subset.iterrows():
             cid = clean_id(row.get('derived_stock_component', ''))
             fbst = clean_id(row.get('FBst', ''))
             if cid and fbst:
                 component_to_stock_keys.setdefault(cid, set()).add(fbst)
-    if 'relevant_component_ids' in included_df.columns:
-        for _, row in included_df.iterrows():
-            fbst = clean_id(row.get('FBst', ''))
-            if not fbst:
-                continue
-            for cid in parse_semicolon_list(str(row.get('relevant_component_ids', ''))):
-                cid = clean_id(cid)
-                if cid:
+    else:
+        if len(derived_df) > 0:
+            for _, row in derived_df.iterrows():
+                cid = clean_id(row.get('derived_stock_component', ''))
+                fbst = clean_id(row.get('FBst', ''))
+                if cid and fbst:
                     component_to_stock_keys.setdefault(cid, set()).add(fbst)
+        if 'relevant_component_ids' in included_df.columns:
+            for _, row in included_df.iterrows():
+                fbst = clean_id(row.get('FBst', ''))
+                if not fbst:
+                    continue
+                for cid in parse_semicolon_list(str(row.get('relevant_component_ids', ''))):
+                    cid = clean_id(cid)
+                    if cid:
+                        component_to_stock_keys.setdefault(cid, set()).add(fbst)
     if len(custom_included_df) > 0 and 'relevant_component_ids' in custom_included_df.columns:
         for _, crow in custom_included_df.iterrows():
             sn = str(crow.get('stock_number', '') or '').strip()
@@ -1566,6 +2223,16 @@ def _build_stock_phenotype_sheet(
                     gene_values = parse_semicolon_list(str(row.get('relevant_gene_symbols', '') or ''))
                     if cid and gene_values and cid not in component_id_to_gene_symbol:
                         component_id_to_gene_symbol[cid] = unique_join(gene_values)
+    if has_reagent_index:
+        for cid, entries in reagent_index_by_component.items():
+            if cid not in component_id_to_symbol:
+                component_id_to_symbol[cid] = unique_join(
+                    entry.get('component_symbol', '') for entry in entries
+                )
+            if cid not in component_id_to_gene_symbol:
+                component_id_to_gene_symbol[cid] = unique_join(
+                    entry.get('gene_symbol', '') for entry in entries
+                )
 
     def _filter_gal4_only_candidate_labels(
         candidate_details: Set[Tuple[str, str]],
@@ -1635,17 +2302,115 @@ def _build_stock_phenotype_sheet(
                     candidates.update(component_id_to_stock_candidates.get(fbti_id, set()))
         return candidates
 
+    def _no_stock_meta_for_components(
+        matched_cids: Set[str],
+    ) -> Dict[str, Any]:
+        """Build minimal metadata for a no-stock phenotype row.
+
+        Used when a phenotype-matched component has no FBst candidate in the
+        global lookup and no custom_stock=True row exists for it. The row is
+        emitted with a placeholder ``Source/ Stock #`` and the reagent-index
+        metadata for the matched component.
+        """
+        index_summary = _summarize_reagent_index_for_components(matched_cids)
+        component_symbol = index_summary.get('component_symbol', '')
+        gene_symbol = index_summary.get('gene_symbol', '')
+        matched_types = index_summary.get('matched_component_types', '')
+        allele_class_terms = index_summary.get('allele_class_terms', '')
+        transgenic_product_class_terms = index_summary.get(
+            'transgenic_product_class_terms', ''
+        )
+        rnai_type_value = index_summary.get(RNAI_TYPE_COLUMN, '')
+
+        stock_number_placeholder = component_symbol or unique_join(sorted(matched_cids))
+
+        synthetic_row = pd.Series(
+            {
+                'genotype': component_symbol,
+                'relevant_fbal_symbols': component_symbol,
+                'relevant_fbtp_symbols': '',
+                'transgenic_product_class_terms': transgenic_product_class_terms,
+                'RNAi': bool(
+                    'rnai' in component_symbol.lower()
+                    or 'uas' in component_symbol.lower()
+                    or 'rnai_reagent' in transgenic_product_class_terms.lower()
+                ),
+            }
+        )
+        bucket_flags = _derive_one_hot_reagent_buckets(synthetic_row)
+        if not rnai_type_value:
+            inferred_rnai_type = infer_rnai_type_from_text(
+                component_symbol,
+                component_symbol,
+                '',
+                transgenic_product_class_terms,
+            )
+            if inferred_rnai_type:
+                rnai_type_value = combine_rnai_type_values(
+                    [inferred_rnai_type],
+                    is_rnai=bool(synthetic_row['RNAi']),
+                )
+
+        meta: Dict[str, Any] = {
+            'stock_number': stock_number_placeholder,
+            'collection': 'No-stock phenotype reagent',
+            'gene_symbol': gene_symbol,
+            'Balancers': '-',
+            'matched_component_types': matched_types,
+            'allele_class_terms': allele_class_terms,
+            'transgenic_product_class_terms': transgenic_product_class_terms,
+            RNAI_TYPE_COLUMN: rnai_type_value,
+        }
+        for column in REAGENT_BUCKET_COLUMNS:
+            meta[column] = bool(bucket_flags.get(column, False))
+        return meta
+
     phenotype_rows: List[Dict[str, str]] = []
     for _, pheno_row in phenotype_df.iterrows():
         component_ids = _extract_flybase_ids(pheno_row.get('genotype_FBids', ''))
         if not component_ids:
             continue
 
+        # Restrict the focal-reagent set to components present in the input-gene
+        # reagent index when available. Co-reagents and partner drivers stay
+        # available for informational fields below, but only input-gene
+        # reagents drive row emission.
+        if has_reagent_index:
+            focal_component_ids = [cid for cid in component_ids if cid in all_relevant_ids]
+            if not focal_component_ids:
+                continue
+        else:
+            focal_component_ids = list(component_ids)
+
         matched_keys: Dict[str, Set[str]] = {}
-        for cid in component_ids:
-            for key in component_to_stock_keys.get(cid, set()):
-                matched_keys.setdefault(key, set()).add(cid)
-        if not matched_keys:
+        for cid in focal_component_ids:
+            lookup_component_ids = (
+                linked_lookup_components_by_component.get(cid, {cid})
+                if has_reagent_index
+                else {cid}
+            )
+            for lookup_cid in lookup_component_ids:
+                for key in component_to_stock_keys.get(lookup_cid, set()):
+                    # Preserve the phenotype-row component as the focal reagent,
+                    # while using linked FBtp/FBti components only to find stocks.
+                    matched_keys.setdefault(key, set()).add(cid)
+
+        # Components without any stock_key destination should still produce a
+        # phenotype row when the reagent index gives them a known input-gene
+        # source. This implements step 6 of the plan (no-stock phenotype
+        # reagents from the reagent index).
+        no_stock_focal_cids: Set[str] = set()
+        if has_reagent_index:
+            already_matched: Set[str] = set()
+            for matched in matched_keys.values():
+                already_matched.update(matched)
+            for cid in focal_component_ids:
+                if cid in already_matched:
+                    continue
+                if cid in reagent_index_by_component:
+                    no_stock_focal_cids.add(cid)
+
+        if not matched_keys and not no_stock_focal_cids:
             continue
 
         phenotype_name = str(
@@ -1671,10 +2436,22 @@ def _build_stock_phenotype_sheet(
 
         cosine_scores = embedding_similarity_by_text.get(phenotype_name, {})
 
-        for stock_key, matched_cids in matched_keys.items():
-            stock_info = stock_meta_by_fbst.get(stock_key) or custom_meta_by_stock_num.get(stock_key)
-            if not stock_info:
-                continue
+        emission_plan: List[Tuple[Optional[str], Set[str]]] = list(matched_keys.items())
+        if no_stock_focal_cids:
+            emission_plan.append((None, no_stock_focal_cids))
+
+        for stock_key, matched_cids in emission_plan:
+            is_no_stock_row = stock_key is None
+            if is_no_stock_row:
+                stock_info = _no_stock_meta_for_components(matched_cids)
+            else:
+                stock_info = stock_meta_by_fbst.get(stock_key) or custom_meta_by_stock_num.get(stock_key)
+                if not stock_info and stock_key and stock_key.startswith('FBst'):
+                    synthetic = _build_synthetic_stock_meta(stock_key, matched_cids)
+                    if synthetic:
+                        stock_info = synthetic
+                if not stock_info:
+                    continue
             matched_component_symbols = [
                 unique_join(
                     genotype_symbols_by_id.get(cid, []) or [component_id_to_symbol.get(cid, cid)]
@@ -1754,7 +2531,7 @@ def _build_stock_phenotype_sheet(
                 sorted(partner_stock_candidate_set)
             )
             component_gene_symbols = ''
-            if len(derived_df) > 0:
+            if not is_no_stock_row and len(derived_df) > 0:
                 matched_derived = derived_df[
                     (derived_df['FBst'] == stock_key)
                     & derived_df['derived_stock_component'].isin(matched_cids)
@@ -1762,6 +2539,17 @@ def _build_stock_phenotype_sheet(
                 if len(matched_derived) > 0:
                     component_gene_symbols = unique_join(
                         matched_derived.get('GeneSymbol', pd.Series(dtype=str)).tolist()
+                    )
+            if not component_gene_symbols and not is_no_stock_row and len(lookup_derived_df) > 0:
+                # Fall back to the global lookup for FBsts that were not in
+                # ``included_df`` but now surface via the gene-first path.
+                matched_lookup = lookup_derived_df[
+                    (lookup_derived_df['FBst'] == stock_key)
+                    & lookup_derived_df['derived_stock_component'].isin(matched_cids)
+                ]
+                if len(matched_lookup) > 0:
+                    component_gene_symbols = unique_join(
+                        matched_lookup.get('GeneSymbol', pd.Series(dtype=str)).tolist()
                     )
             if not component_gene_symbols:
                 component_gene_symbols = str(stock_info.get('gene_symbol', '') or '').strip()
@@ -1787,8 +2575,11 @@ def _build_stock_phenotype_sheet(
                 stock_num = str(stock_info.get('stock_number', '') or '').strip()
                 collection = str(stock_info.get('collection', '') or '').strip()
                 source_stock = _format_source_stock_label(collection, stock_num)
+                fbst_value = ''
+                if not is_no_stock_row and stock_key and stock_key.startswith('FBst'):
+                    fbst_value = stock_key
                 phenotype_row = {
-                    'FBst': stock_key if stock_key.startswith('FBst') else '',
+                    'FBst': fbst_value,
                     'Gene': component_gene_symbols,
                     'Reagent Type or Allele Symbol': component_symbols,
                     'Balancers': str(stock_info.get('Balancers', '') or '').strip(),
@@ -1803,6 +2594,7 @@ def _build_stock_phenotype_sheet(
                     'transgenic_product_class_terms': str(
                         stock_info.get('transgenic_product_class_terms', '') or ''
                     ).strip(),
+                    RNAI_TYPE_COLUMN: str(stock_info.get(RNAI_TYPE_COLUMN, '') or '').strip(),
                     'Source/ Stock #': source_stock,
                     'Genotype': genotype_label,
                     CO_REAGENT_FBIDS_COLUMN: co_reagent_fbids,
@@ -1859,6 +2651,7 @@ def _build_stock_phenotype_sheet(
             },
             'allele_class_terms': lambda s: unique_join(s.tolist()),
             'transgenic_product_class_terms': lambda s: unique_join(s.tolist()),
+            RNAI_TYPE_COLUMN: lambda s: combine_rnai_type_values(s.tolist()),
             CO_REAGENT_FBIDS_COLUMN: lambda s: unique_join(s.tolist()),
             CO_REAGENT_SYMBOLS_COLUMN: lambda s: unique_join(s.tolist()),
             PARTNER_DRIVER_SYMBOLS_COLUMN: lambda s: unique_join(s.tolist()),
@@ -2332,6 +3125,93 @@ def _build_similarity_tier_sheets(
     return tiers
 
 
+def _normalize_keyword_bucket_keywords(keywords: Optional[List[str]]) -> List[str]:
+    """Return normalized, deduplicated keyword-bucketing terms."""
+    normalized_keywords: List[str] = []
+    seen_keywords: Set[str] = set()
+    for keyword in keywords or []:
+        normalized = str(keyword or "").strip().lower()
+        if not normalized or normalized in seen_keywords:
+            continue
+        seen_keywords.add(normalized)
+        normalized_keywords.append(normalized)
+    return normalized_keywords
+
+
+def _build_keyword_bucketing_sheets(
+    phenotype_sheet_df: pd.DataFrame,
+    keywords: Optional[List[str]],
+) -> List[Tuple[str, pd.DataFrame, Dict[str, Any]]]:
+    """Partition phenotype rows into keyword-hit and no-keyword-hit sheets."""
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return []
+
+    normalized_keywords = _normalize_keyword_bucket_keywords(keywords)
+    bucketed_df = phenotype_sheet_df.copy()
+    max_cosine_similarity = _compute_max_cosine_similarity(bucketed_df).reindex(
+        bucketed_df.index
+    ).round(6)
+    if "Max Cosine Similarity" in bucketed_df.columns:
+        bucketed_df["Max Cosine Similarity"] = max_cosine_similarity
+    else:
+        bucketed_df.insert(
+            min(len(bucketed_df.columns), 8),
+            "Max Cosine Similarity",
+            max_cosine_similarity,
+        )
+
+    source_stock_series = _get_source_stock_series(bucketed_df)
+    phenotype_lower = bucketed_df.get(
+        "Phenotype",
+        pd.Series("", index=bucketed_df.index, dtype=str),
+    ).fillna("").astype(str).str.lower()
+    keyword_hit_mask = phenotype_lower.apply(
+        lambda phenotype: any(keyword in phenotype for keyword in normalized_keywords)
+    )
+    keyword_hit_stock_count = (
+        source_stock_series.loc[keyword_hit_mask]
+        .dropna()
+        .loc[lambda s: s.astype(str).str.strip().ne("")]
+        .nunique()
+    )
+    no_keyword_stock_count = (
+        source_stock_series.loc[~keyword_hit_mask]
+        .dropna()
+        .loc[lambda s: s.astype(str).str.strip().ne("")]
+        .nunique()
+    )
+
+    keyword_hits_df = bucketed_df.loc[keyword_hit_mask].copy()
+    no_keyword_hits_df = bucketed_df.loc[~keyword_hit_mask].copy()
+    if not keyword_hits_df.empty:
+        keyword_hits_df = _sort_similarity_tier_rows(keyword_hits_df)
+    if not no_keyword_hits_df.empty:
+        no_keyword_hits_df = _sort_similarity_tier_rows(no_keyword_hits_df)
+
+    return [
+        (
+            "Keyword Hits",
+            keyword_hits_df.reset_index(drop=True),
+            {
+                "bucket_label": "keyword_hits",
+                "row_count": int(len(keyword_hits_df)),
+                "stock_count": int(keyword_hit_stock_count),
+                "keywords": normalized_keywords,
+            },
+        ),
+        (
+            "No Keyword Hits",
+            no_keyword_hits_df.reset_index(drop=True),
+            {
+                "bucket_label": "no_keyword_hits",
+                "row_count": int(len(no_keyword_hits_df)),
+                "stock_count": int(no_keyword_stock_count),
+                "keywords": normalized_keywords,
+            },
+        ),
+    ]
+
+
 def _write_reference_hyperlinks(
     worksheet,
     workbook,
@@ -2553,6 +3433,7 @@ def _get_stock_phenotype_sheet_output_columns(
         *REAGENT_BUCKET_COLUMNS,
         'allele_class_terms',
         'transgenic_product_class_terms',
+        RNAI_TYPE_COLUMN,
         SOURCE_STOCK_COLUMN,
         'Genotype',
         CO_REAGENT_FBIDS_COLUMN,
@@ -2742,6 +3623,10 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
         ),
         'transgenic_product_class_terms': (
             "FlyBase transgenic product class terms aggregated from the gene-relevant construct-linked reagent(s)."
+        ),
+        RNAI_TYPE_COLUMN: (
+            "Best-effort RNAi subtype inferred from FlyBase construct descriptions and symbols. "
+            "Values are `dsRNA`, `shRNA`, or `RNAi (unspecified)` when the reagent is RNAi but no confident subtype cue was found."
         ),
         SOURCE_COLUMN: (
             "Collection or source label for the reagent when FlyBase or stock-center metadata provides one."
@@ -3168,6 +4053,102 @@ def _write_similarity_tier_contents_sheet(
             row += 1
 
 
+def _write_keyword_bucket_contents_sheet(
+    workbook,
+    keyword_bucket_entries: List[Tuple[str, pd.DataFrame, Dict[str, Any]]],
+    keywords: Optional[List[str]] = None,
+    phenotype_sheet_df: Optional[pd.DataFrame] = None,
+    format_as_masterlist: bool = False,
+) -> None:
+    """Write a contents sheet for reagent-level keyword bucketing."""
+    worksheet = workbook.add_worksheet("Contents")
+    title_fmt = workbook.add_format({"bold": True, "font_size": 14})
+    body_fmt = workbook.add_format({"font_size": 11, "text_wrap": True, "valign": "top"})
+    header_fmt = workbook.add_format({"bold": True, "bottom": 1, "font_size": 11})
+
+    worksheet.set_column(0, 0, 26)
+    worksheet.set_column(1, 1, 78)
+    worksheet.set_column(2, 2, 16)
+
+    normalized_keywords = _normalize_keyword_bucket_keywords(keywords)
+    keyword_text = ", ".join(normalized_keywords) if normalized_keywords else "None configured"
+
+    row = 0
+    worksheet.write(row, 0, "Keyword Bucket Workbook Contents", title_fmt)
+    row += 2
+    worksheet.write(row, 0, "Bucket assignment", header_fmt)
+    worksheet.write(
+        row,
+        1,
+        "Rows are assigned to `Keyword Hits` when that row's `Phenotype` contains any configured keyword. "
+        "Rows without a keyword hit are assigned to `No Keyword Hits`.",
+        body_fmt,
+    )
+    row += 1
+    worksheet.write(row, 0, "Keywords", header_fmt)
+    worksheet.write(
+        row,
+        1,
+        f"Configured `relevantSearchTerms`: {keyword_text}. Matching uses case-insensitive substring checks against the `Phenotype` column.",
+        body_fmt,
+    )
+    row += 1
+    worksheet.write(row, 0, "Ordering", header_fmt)
+    worksheet.write(
+        row,
+        1,
+        "Both sheets keep gene groups together and sort reagents within each gene by max cosine similarity computed within that sheet.",
+        body_fmt,
+    )
+    row += 2
+
+    worksheet.write_row(row, 0, ["Sheet", "Meaning", "Rows"], header_fmt)
+    row += 1
+    worksheet.write_row(row, 0, ["Gene Set", "Copied from the input gene-list CSV data when available.", ""])
+    row += 1
+    worksheet.write_row(
+        row,
+        0,
+        ["Stock Phenotype Sheet", "Full phenotype table used to build the keyword buckets.", ""],
+    )
+    row += 1
+    for sheet_name, bucket_df, metadata in keyword_bucket_entries:
+        if metadata.get("bucket_label") == "keyword_hits":
+            meaning = (
+                "Phenotype rows whose `Phenotype` value contains at least one configured keyword."
+            )
+        else:
+            meaning = (
+                "Phenotype rows with no keyword hit; reagent blocks are ordered by max cosine similarity within each gene."
+            )
+        worksheet.write_row(
+            row,
+            0,
+            [
+                sheet_name,
+                meaning,
+                int(len(bucket_df)),
+            ],
+        )
+        row += 1
+
+    column_definitions = _get_stock_phenotype_sheet_column_definitions(
+        phenotype_sheet_df if phenotype_sheet_df is not None else pd.DataFrame(),
+        format_as_masterlist=format_as_masterlist,
+    )
+    if column_definitions:
+        row += 2
+        worksheet.write(row, 0, "Stock Phenotype Sheet columns", header_fmt)
+        worksheet.write(row, 1, _get_reagent_bucket_one_hot_note(), body_fmt)
+        row += 1
+        worksheet.write_row(row, 0, ["Column", "Definition"], header_fmt)
+        row += 1
+        for column, definition in column_definitions:
+            worksheet.write(row, 0, column, body_fmt)
+            worksheet.write(row, 1, definition, body_fmt)
+            row += 1
+
+
 def _format_bucket_combo_header(uas: bool, sleep_circ: bool, has_balancer: bool) -> str:
     """Short human-readable column header for one boolean permutation."""
     parts: List[str] = []
@@ -3390,6 +4371,8 @@ def _write_similarity_tier_workbook(
     combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict[str, Any]]],
     csv_input_genes: Optional[Set[str]] = None,
     simple_buckets: bool = False,
+    keyword_bucketing: bool = False,
+    keywords: Optional[List[str]] = None,
     verbose: bool = False,
     format_as_masterlist: bool = False,
 ) -> Optional[Path]:
@@ -3397,17 +4380,37 @@ def _write_similarity_tier_workbook(
     if stock_phenotype_sheet_df is None or len(stock_phenotype_sheet_df) == 0:
         return None
 
-    similarity_tiers = _build_similarity_tier_sheets(stock_phenotype_sheet_df)
+    similarity_tiers = (
+        _build_similarity_tier_sheets(stock_phenotype_sheet_df)
+        if not keyword_bucketing and not simple_buckets
+        else []
+    )
+    keyword_bucket_entries = (
+        _build_keyword_bucketing_sheets(
+            stock_phenotype_sheet_df,
+            keywords=keywords,
+        )
+        if keyword_bucketing
+        else []
+    )
     simple_bucket_entries = _build_simple_bucket_workbook_entries(
         phenotype_sheet_df=stock_phenotype_sheet_df,
         combination_outputs=combination_outputs,
         csv_input_genes=csv_input_genes,
-    ) if simple_buckets else []
+    ) if simple_buckets and not keyword_bucketing else []
     gene_set_df = _read_gene_set_sheet_for_similarity_workbook(source_workbook_path)
     tier_workbook_path = output_path.parent / f"{output_path.stem}_similarity_tiers.xlsx"
     with pd.ExcelWriter(tier_workbook_path, engine='xlsxwriter') as writer:
         workbook = writer.book
-        if simple_buckets:
+        if keyword_bucketing:
+            _write_keyword_bucket_contents_sheet(
+                workbook,
+                keyword_bucket_entries,
+                keywords=keywords,
+                phenotype_sheet_df=stock_phenotype_sheet_df,
+                format_as_masterlist=format_as_masterlist,
+            )
+        elif simple_buckets:
             _write_simple_bucket_contents_sheet(
                 workbook,
                 simple_bucket_entries,
@@ -3431,7 +4434,16 @@ def _write_similarity_tier_workbook(
             stock_phenotype_sheet_df,
             format_as_masterlist=format_as_masterlist,
         )
-        if simple_buckets:
+        if keyword_bucketing:
+            for sheet_name, bucket_df, _metadata in keyword_bucket_entries:
+                _write_phenotype_similarity_sheet(
+                    writer,
+                    workbook,
+                    sheet_name,
+                    bucket_df,
+                    format_as_masterlist=format_as_masterlist,
+                )
+        elif simple_buckets:
             for sheet_name, bucket_df, _metadata in simple_bucket_entries:
                 _write_phenotype_similarity_sheet(
                     writer,
@@ -3451,8 +4463,15 @@ def _write_similarity_tier_workbook(
                 )
 
     if verbose:
-        sheet_count = len(simple_bucket_entries) if simple_buckets else len(similarity_tiers)
-        sheet_kind = "simple bucket" if simple_buckets else "similarity tier"
+        if keyword_bucketing:
+            sheet_count = len(keyword_bucket_entries)
+            sheet_kind = "keyword bucket"
+        elif simple_buckets:
+            sheet_count = len(simple_bucket_entries)
+            sheet_kind = "simple bucket"
+        else:
+            sheet_count = len(similarity_tiers)
+            sheet_kind = "similarity tier"
         print(f"    Saved: {tier_workbook_path.name} ({sheet_count} {sheet_kind} sheet(s))")
     return tier_workbook_path
 
@@ -3613,6 +4632,7 @@ def _build_stock_sheet_by_gene(
                 'matched_component_types': str(
                     row.get('matched_component_types', '') or ''
                 ).strip(),
+                RNAI_TYPE_COLUMN: str(row.get(RNAI_TYPE_COLUMN, '') or '').strip(),
                 'pmid': pmid,
                 'title': meta.get('title', ''),
                 'journal': meta.get('journal', ''),
@@ -3669,6 +4689,7 @@ def _build_stock_sheet_by_gene(
 
     ordered_cols = [
         'gene', 'gene synonyms', 'stock #', 'Balancers', 'matched_component_types',
+        RNAI_TYPE_COLUMN,
         *REAGENT_BUCKET_COLUMNS,
         'pmid', 'title', 'journal',
         'publication date', 'authors',
@@ -3705,6 +4726,8 @@ def write_aggregated_excel(
     all_input_genes: Optional[Set[str]] = None,
     genes_no_stocks: Optional[Set[str]] = None,
     csv_input_genes: Optional[Set[str]] = None,
+    csv_input_fbgns: Optional[Set[str]] = None,
+    secondary_to_primary: Optional[Dict[str, str]] = None,
     n_input_genes: Optional[int] = None,
     gene_synonyms_map: Optional[Dict[str, str]] = None,
     soft_run: bool = False,
@@ -3714,6 +4737,7 @@ def write_aggregated_excel(
     current_to_input_map: Optional[Dict[str, str]] = None,
     gene_to_datasets: Optional[Dict[str, Set[str]]] = None,
     pipeline_settings: Optional[Settings] = None,
+    reagent_index_df: Optional[pd.DataFrame] = None,
 ) -> None:
     """
     Write aggregated Excel file with Contents, Sheet1..N, References.
@@ -3742,6 +4766,9 @@ def write_aggregated_excel(
     filters_config = config.get('filters', {})
     filter_descriptions = config.get('filterDescriptions', {})
     settings = config.get('settings', {})
+    keywords_for_pheno = _normalize_keyword_bucket_keywords(
+        settings.get('relevantSearchTerms', [])
+    )
     max_per_gene = settings.get('maxStocksPerGene')
     max_per_allele = settings.get('maxStocksPerAllele')
     
@@ -3757,6 +4784,8 @@ def write_aggregated_excel(
             summary_dict["Sheet Name"] = "-"
         summary_rows.append(summary_dict)
     summary_df = pd.DataFrame(summary_rows)
+    if "Category" in summary_df.columns:
+        summary_df = summary_df.rename(columns={"Category": "Sheet criteria"})
     # Reorder columns to place Sheet Name last
     cols = summary_df.columns.tolist()
     if "Sheet Name" in cols:
@@ -3776,8 +4805,7 @@ def write_aggregated_excel(
             continue
         spec = filters_config[name]
         meaning = filter_descriptions.get(name, "Filter applied (see config for technical details).")
-        exact_str = filter_spec_to_string(spec)
-        filter_def_rows.append((name, f"{meaning} [{exact_str}]"))
+        filter_def_rows.append((name, meaning))
     
     # Determine which combinations have stocks
     combo_has_stocks = [
@@ -3811,16 +4839,12 @@ def write_aggregated_excel(
             embedding_scorer=embedding_scorer,
             verbose=verbose,
             gene_to_datasets=gene_to_datasets,
+            reagent_index_df=reagent_index_df,
         )
         stock_phenotype_sheet_counts = _summarize_stock_phenotype_sheet(
             stock_phenotype_sheet_df
         )
 
-        keywords_for_pheno = [
-            kw.lower()
-            for kw in settings.get('relevantSearchTerms', [])
-            if kw
-        ]
         if (
             keywords_for_pheno
             and len(stock_phenotype_sheet_df) > 0
@@ -3865,24 +4889,23 @@ def write_aggregated_excel(
             current_to_input_map=current_to_input_map,
         )
     
-    # Pre-compute gene symbols that appear in at least one sheet
+    # Pre-compute the identity of input genes that appear in at least one
+    # sheet. We prefer FBgn IDs (when the input CSV contained them) because
+    # they are immune to display-symbol collisions between distinct input
+    # genes that share a FlyBase symbol; otherwise we fall back to display
+    # labels.
+    use_fbgn_identity = csv_input_fbgns is not None
     genes_in_sheets: Set[str] = set()
     for _combo, _ldf, _has in combo_has_stocks:
         if _ldf is not None and len(_ldf) > 0:
-            if 'relevant_gene_symbols' in _ldf.columns:
-                for syms in _ldf['relevant_gene_symbols'].dropna():
-                    for s in str(syms).split(';'):
-                        s = s.strip()
-                        if s and s != '-':
-                            genes_in_sheets.add(s)
+            if use_fbgn_identity:
+                genes_in_sheets |= _input_fbgns_from_df(
+                    _ldf, csv_input_fbgns, secondary_to_primary
+                )
             else:
-                _g_col = _find_gene_id_column(_ldf)
-                if _g_col:
-                    for val in _ldf[_g_col].dropna().astype(str):
-                        for v in val.split(';'):
-                            v = v.strip()
-                            if v and v != '-':
-                                genes_in_sheets.add(v)
+                genes_in_sheets |= _gene_display_values_from_df(
+                    _ldf, current_to_input_map
+                )
     
     # Write Excel
     with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
@@ -3926,42 +4949,101 @@ def write_aggregated_excel(
         
         row = 0
         
-        # Section 1: Counts table
-        write_cell(row, 0, "Stock / Allele / Gene counts per combination")
-        row += 1
-        
         # Format limits (treat very large numbers as unlimited)
         gene_limit_str = 'unlimited' if (max_per_gene is None or max_per_gene >= 1000000) else str(max_per_gene)
         allele_limit_str = 'unlimited' if (max_per_allele is None or max_per_allele >= 1000000) else str(max_per_allele)
         limits_str = f"Limits: up to {gene_limit_str} stocks per gene, up to {allele_limit_str} stocks per allele"
-        write_cell(row, 0, limits_str)
-        row += 1
         
-        # Show gene counts (intersect with input genes to avoid counting hitchhiker genes)
-        n_in_sheets = len(genes_in_sheets & csv_input_genes) if csv_input_genes else len(genes_in_sheets)
+        # Show gene counts. When we have FBgn-keyed identity for the input
+        # set, intersect on FBgns; otherwise fall back to display-symbol
+        # intersection (legacy behavior).
+        if use_fbgn_identity:
+            n_in_sheets = len(genes_in_sheets)
+        else:
+            n_in_sheets = (
+                len(genes_in_sheets & csv_input_genes)
+                if csv_input_genes
+                else len(genes_in_sheets)
+            )
         n_no_stocks = len(genes_no_stocks) if genes_no_stocks else 0
-        if csv_input_genes is not None:
-            display_input_count = n_input_genes if n_input_genes else len(csv_input_genes)
+        if csv_input_fbgns is not None or csv_input_genes is not None:
+            if csv_input_fbgns is not None:
+                display_input_count = n_input_genes if n_input_genes else len(csv_input_fbgns)
+            else:
+                display_input_count = n_input_genes if n_input_genes else len(csv_input_genes)
             counts_str = (
                 f"Total Input Genes (across all sets): {display_input_count}\n"
-                f"Total Genes Included in below Categories: {n_in_sheets}\n"
+                f"Total Genes Included in output sheets: {n_in_sheets}\n"
                 f"Input Genes with 0 matched stocks: {n_no_stocks}"
             )
         else:
             counts_str = (
                 f"Total Input Genes (across all sets): unknown (no CSV gene lists found)\n"
-                f"Total Genes Included in below Categories: {n_in_sheets}"
+                f"Total Genes Included in output sheets: {n_in_sheets}"
             )
-        write_cell(row, 0, counts_str)
+        keywords_list = settings.get('relevantSearchTerms', [])
+        keywords_text = ', '.join(keywords_list) if keywords_list else "(none configured)"
+        summary_by_combo_label = {}
+        if len(summary_df) > 0 and "Sheet criteria" in summary_df.columns:
+            summary_by_combo_label = {
+                str(r["Sheet criteria"]): r for _, r in summary_df.iterrows()
+            }
+        
+        # Section A: Orientation
+        write_cell(row, 0, "What this workbook is", fmt_13_bold)
+        row += 1
+        write_cell(
+            row,
+            0,
+            "This workbook organizes FlyBase stocks into a prioritized series of output sheets "
+            "(Sheet1, Sheet2, etc.). Each sheet contains stocks that match a specific combination "
+            "of filters, and the order of those sheets is important.",
+            fmt_13_wrap,
+            skip_width=True,
+        )
+        row += 2
+        
+        # Section B: Selection logic
+        write_cell(row, 0, "How sheets were selected", fmt_13_bold)
+        row += 1
+        selection_logic_rows = [
+            "1. Each sheet keeps only stocks that match all of its listed filters.",
+            "2. A stock appears in only one sheet: the first sheet, from top to bottom, that it qualifies for. Earlier sheets have priority over later sheets.",
+            "3. Per-gene and per-allele limits are applied in that same order after each sheet's filters. Once a gene or allele reaches its limit, later matching stocks are skipped.",
+            f"4. Search terms used for Ref++ / Ref+ / Ref- tiering: {keywords_text}. Matching is case-insensitive against publication titles and abstracts.",
+            f"5. {limits_str}.",
+        ]
+        for text in selection_logic_rows:
+            write_cell(row, 0, text, fmt_13_wrap, skip_width=True)
+            row += 1
         row += 1
         
-        # Show search terms used for Ref++ determination
-        keywords_list = settings.get('relevantSearchTerms', [])
+        # Section C: Filter definitions
+        write_cell(row, 0, "What each filter means", fmt_13_bold)
+        row += 1
+        
+        if len(filter_def_rows) > 0:
+            write_row(row, 0, ["Filter / Meaning"], bold_bottom)
+            row += 1
+            for name, meaning in filter_def_rows:
+                combined_text = f"{name}: {meaning}"
+                contents_ws.write_rich_string(
+                    row, 0,
+                    fmt_13_bold, name,
+                    fmt_13, f": {meaning}",
+                )
+                col_widths[0] = max(col_widths[0], len(combined_text))
+                row += 1
+        row += 2
+        
+        # Section D: Counts table
+        write_cell(row, 0, "Prioritized sheet breakdown", fmt_13_bold)
+        row += 1
+        write_cell(row, 0, counts_str, fmt_13_wrap, skip_width=True)
+        row += 1
+        
         if keywords_list:
             write_cell(row, 0, f"Search terms (for Ref++ status, case-insensitive): {', '.join(keywords_list)}")
-            row += 1
-            kw_ref_col_name = f"{' OR '.join(keywords_list)} references count"
-            write_cell(row, 0, f"Keyword reference count column: \"{kw_ref_col_name}\"")
             row += 1
         
         if len(summary_df) > 0:
@@ -3979,31 +5061,34 @@ def write_aggregated_excel(
             for combo, limited_df, _ in combination_outputs:
                 if limited_df is not None and len(limited_df) > 0:
                     s_col = _find_stock_id_column(limited_df)
-                    # Prefer relevant_gene_symbols for gene counting (consistent
-                    # with csv_input_genes which contains symbols, not FBgn IDs)
-                    g_col = 'relevant_gene_symbols' if 'relevant_gene_symbols' in limited_df.columns else _find_gene_id_column(limited_df)
                     a_col = _find_allele_column(limited_df)
                     if s_col:
                         all_stock_ids.update(
                             v for v in limited_df[s_col].dropna().astype(str).unique()
                             if v and v != '-'
                         )
-                    if g_col:
-                        for cell in limited_df[g_col].dropna().astype(str).unique():
-                            for v in cell.split(';'):
-                                v = v.strip()
-                                if v and v != '-':
-                                    all_gene_ids.add(v)
+                    if use_fbgn_identity:
+                        all_gene_ids |= _input_fbgns_from_df(
+                            limited_df, csv_input_fbgns, secondary_to_primary
+                        )
+                    else:
+                        all_gene_ids |= _gene_display_values_from_df(
+                            limited_df, current_to_input_map
+                        )
                     if a_col:
                         # Only count alleles from rows whose gene(s) are in the input set
                         for _, _row in limited_df.iterrows():
-                            if csv_input_genes is not None and g_col:
-                                row_genes = set()
-                                raw_g = str(_row.get(g_col, ''))
-                                for g in raw_g.split(';'):
-                                    g = g.strip()
-                                    if g and g != '-' and g.lower() != 'nan':
-                                        row_genes.add(g)
+                            if use_fbgn_identity:
+                                row_fbgns = _input_fbgns_from_row(
+                                    _row, csv_input_fbgns, secondary_to_primary
+                                )
+                                if not row_fbgns:
+                                    continue
+                            elif csv_input_genes is not None:
+                                row_genes = _gene_display_values_from_row(
+                                    _row,
+                                    current_to_input_map,
+                                )
                                 if not (row_genes & csv_input_genes):
                                     continue
                             raw_a = str(_row.get(a_col, ''))
@@ -4011,14 +5096,13 @@ def write_aggregated_excel(
                                 v = v.strip()
                                 if v and v != '-' and v.lower() != 'nan':
                                     all_allele_ids.add(v)
-            # Filter gene IDs to only input genes (exclude hitchhiker genes)
-            if csv_input_genes is not None:
+            if not use_fbgn_identity and csv_input_genes is not None:
                 all_gene_ids &= csv_input_genes
             fmt_total = workbook.add_format({'bold': True, 'font_size': 13, 'top': 2, 'align': 'left'})
             total_row = []
             for col in summary_df.columns.tolist():
-                if col == "Category":
-                    total_row.append("Total (unique across sheets)")
+                if col == "Sheet criteria":
+                    total_row.append("Total (unique stocks / alleles / genes across sheets)")
                 elif col == "# Stocks":
                     total_row.append(len(all_stock_ids))
                 elif col == "# Alleles":
@@ -4031,26 +5115,77 @@ def write_aggregated_excel(
             row += 1
         row += 2
         
-        # Section 2: Filter definitions
-        write_cell(row, 0, "What each filter means")
+        # Section E: Follow-up gene lists
+        write_cell(row, 0, "Genes that need follow-up", fmt_13_bold)
         row += 1
         
-        if len(filter_def_rows) > 0:
-            write_row(row, 0, ["Filter / Meaning"], bold_bottom)
-            row += 1
-            for name, meaning in filter_def_rows:
-                combined_text = f"{name}: {meaning}"
-                contents_ws.write_rich_string(
-                    row, 0,
-                    fmt_13_bold, name,
-                    fmt_13, f": {meaning}",
+        if all_input_genes is not None:
+            if use_fbgn_identity:
+                no_stock_fbgns = {
+                    fb
+                    for fb in (csv_input_fbgns - all_input_genes)
+                }
+                not_in_sheets_ids = sorted(
+                    set(all_input_genes) - genes_in_sheets - no_stock_fbgns
                 )
-                col_widths[0] = max(col_widths[0], len(combined_text))
+                not_in_sheets_labels = sorted(
+                    _format_input_gene_label(fb, current_to_input_map)
+                    for fb in not_in_sheets_ids
+                )
+            else:
+                not_in_sheets_labels = sorted(
+                    set(all_input_genes) - genes_in_sheets - set(genes_no_stocks or set())
+                )
+            
+            write_cell(
+                row, 0,
+                f"Genes with matched stocks but not included in any split sheet "
+                f"({len(not_in_sheets_labels)} of {len(all_input_genes)} genes with stocks)",
+                fmt_13_bold,
+            )
+            row += 1
+            
+            if not_in_sheets_labels:
+                _c2i = current_to_input_map or {}
+                for sym in not_in_sheets_labels:
+                    write_cell(row, 0, _c2i.get(sym, sym))
+                    row += 1
+            else:
+                write_cell(row, 0, "(all genes with stocks appear in at least one sheet)")
                 row += 1
-        row += 2
+            row += 1
         
-        # Section 3: Sheet / combination and gene lists
-        write_cell(row, 0, "Unique gene symbols per defined sheet")
+        if csv_input_fbgns is not None or csv_input_genes is not None:
+            if use_fbgn_identity:
+                no_stock_fbgns = csv_input_fbgns - (all_input_genes or set())
+                no_stocks_labels = sorted(
+                    _format_input_gene_label(fb, current_to_input_map)
+                    for fb in no_stock_fbgns
+                )
+                total_input_count = n_input_genes or len(csv_input_fbgns)
+            else:
+                no_stocks_labels = sorted(genes_no_stocks) if genes_no_stocks else []
+                total_input_count = n_input_genes or len(csv_input_genes or set())
+            write_cell(
+                row, 0,
+                f"Input Genes with 0 matched stocks "
+                f"({len(no_stocks_labels)} of {total_input_count} input genes)",
+                fmt_13_bold,
+            )
+            row += 1
+            
+            if no_stocks_labels:
+                for sym in no_stocks_labels:
+                    write_cell(row, 0, sym)
+                    row += 1
+            else:
+                write_cell(row, 0, "(none)")
+                row += 1
+            row += 1
+        row += 1
+        
+        # Section F: Sheet / combination and gene lists
+        write_cell(row, 0, "Per-sheet gene rosters", fmt_13_bold)
         row += 1
         
         sheet_index = 0
@@ -4061,41 +5196,55 @@ def write_aggregated_excel(
             
             combo_label = " >> ".join(combo)
             sheet_index += 1
-            label = f"Sheet{sheet_index}: {combo_label}"
+            summary_row = summary_by_combo_label.get(combo_label)
+            stock_count = int(summary_row["# Stocks"]) if summary_row is not None and "# Stocks" in summary_row else len(limited_df)
+            gene_count = int(summary_row["# Genes"]) if summary_row is not None and "# Genes" in summary_row else 0
+            label = f"Sheet{sheet_index} ({stock_count} stocks, {gene_count} unique genes): {combo_label}"
             
             write_cell(row, 0, label, fmt_13_bold)
             row += 1
             wrote_any_sheet = True
             
             gene_col = _find_gene_id_column(limited_df)
-            if gene_col:
-                gene_ids = limited_df[gene_col].dropna().astype(str).unique()
-                # Try to get gene symbols from relevant_gene_symbols column
-                symbols = set()
-                if 'relevant_gene_symbols' in limited_df.columns:
-                    for syms in limited_df['relevant_gene_symbols'].dropna():
-                        for s in str(syms).split(';'):
-                            s = s.strip()
-                            if s and s != '-':
-                                symbols.add(s)
-                if not symbols:
-                    symbols = set(gene_ids)
+            if gene_col or "relevant_flybase_gene_ids" in limited_df.columns:
+                if use_fbgn_identity:
+                    sheet_fbgns = _input_fbgns_from_df(
+                        limited_df, csv_input_fbgns, secondary_to_primary
+                    )
+                    symbols = {
+                        _format_input_gene_label(fb, current_to_input_map)
+                        for fb in sheet_fbgns
+                    }
+                else:
+                    symbols = _gene_display_values_from_df(
+                        limited_df,
+                        current_to_input_map,
+                    )
+                    if not symbols and gene_col:
+                        symbols = set(
+                            limited_df[gene_col].dropna().astype(str).unique()
+                        )
                 
-                for sym in sorted(symbols):
-                    write_cell(row, 0, sym)
+                if symbols:
+                    for sym in sorted(symbols):
+                        write_cell(row, 0, sym)
+                        row += 1
+                else:
+                    write_cell(row, 0, "(no input genes matched in sheet)")
                     row += 1
             else:
                 write_cell(row, 0, "(no gene column found)")
                 row += 1
+            contents_ws.set_row(row - 1, None, fmt_faint_bottom)
             row += 1
         
         if not wrote_any_sheet:
             write_cell(row, 0, "(no sheets with stocks)")
             row += 2
 
-        # Section 4: What the references-focused sheets include.
+        # Section G: What the references-focused sheets include.
         sheet_label = "Stock Phenotype Sheet" if soft_run else "Stock Sheet by Gene"
-        write_cell(row, 0, f"References and {sheet_label} inclusion criteria", fmt_13_bold)
+        write_cell(row, 0, f"References and {sheet_label} definitions", fmt_13_bold)
         row += 1
         write_cell(
             row,
@@ -4153,48 +5302,6 @@ def write_aggregated_excel(
                 skip_width=True,
             )
         row += 2
-        
-        # Section 5a: Genes with stocks but not included in any split sheet
-        if all_input_genes is not None:
-            genes_not_in_sheets = sorted(all_input_genes - genes_in_sheets)
-            
-            write_cell(
-                row, 0,
-                f"Genes with matched stocks but not included in any split sheet "
-                f"({len(genes_not_in_sheets)} of {len(all_input_genes)} genes with stocks)",
-                fmt_13_bold,
-            )
-            row += 1
-            
-            if genes_not_in_sheets:
-                _c2i = current_to_input_map or {}
-                for sym in genes_not_in_sheets:
-                    write_cell(row, 0, _c2i.get(sym, sym))
-                    row += 1
-            else:
-                write_cell(row, 0, "(all genes with stocks appear in at least one sheet)")
-                row += 1
-            row += 1
-        
-        # Section 5b: Input genes with 0 matched stocks
-        if csv_input_genes is not None:
-            genes_no_stocks_sorted = sorted(genes_no_stocks) if genes_no_stocks else []
-            write_cell(
-                row, 0,
-                f"Input Genes with 0 matched stocks "
-                f"({len(genes_no_stocks_sorted)} of {n_input_genes or len(csv_input_genes)} input genes)",
-                fmt_13_bold,
-            )
-            row += 1
-            
-            if genes_no_stocks_sorted:
-                for sym in genes_no_stocks_sorted:
-                    write_cell(row, 0, sym)
-                    row += 1
-            else:
-                write_cell(row, 0, "(none)")
-                row += 1
-            row += 1
         
         # Auto-resize Contents columns
         for c, w in col_widths.items():
@@ -4272,6 +5379,10 @@ def write_aggregated_excel(
                 combination_outputs=combination_outputs,
                 csv_input_genes=csv_input_genes,
                 simple_buckets=bool(pipeline_settings and pipeline_settings.simple_buckets),
+                keyword_bucketing=bool(
+                    pipeline_settings and pipeline_settings.keyword_bucketing
+                ),
+                keywords=keywords_for_pheno,
                 verbose=verbose,
                 format_as_masterlist=True,
             )
@@ -4352,14 +5463,23 @@ class StockSplittingPipeline:
             FlyBase current symbols for input genes, or ``None`` if no
             suitable CSVs were found.
         current_to_input_map : dict[str, str]
-            Mapping of FlyBase current gene symbols to the user's original
-            input symbols (via FBgn bridge).  Empty when unavailable.
+            Mapping of FlyBase current gene symbols and FBgn IDs (both raw
+            secondary FBgns from stock rows and their canonical primary
+            FBgns) to the user's original input symbols. Empty when
+            unavailable.
         n_input_genes : int
-            The true count of unique input genes (FBgn IDs) from the CSVs,
-            before augmentation with remapped symbols.
+            The true count of unique canonical fly genes (after collapsing
+            secondary FBgns into their primary FBgns).
         gene_to_datasets : dict[str, set[str]]
             Mapping of gene symbols to the input CSV filename stem(s) where
             they appeared.
+        csv_input_fbgns : set[str] | None
+            The canonical (primary) set of input FBgn IDs from the CSVs, or
+            ``None`` if no suitable CSVs were found. Used by downstream
+            accounting to avoid symbol-collision artifacts.
+        secondary_to_primary : dict[str, str]
+            FlyBase ``secondary_FBgn -> primary_FBgn`` alias map used to
+            canonicalize FBgns. Empty when unavailable.
         """
         # ── 1. Collect FBgn IDs + gene symbols from input CSVs ──────
         csv_dirs = [input_dir]
@@ -4380,7 +5500,8 @@ class StockSplittingPipeline:
 
                     sym_col = next(
                         (c for c in ('ext_gene', 'gene', 'gene_symbol',
-                                     'Gene', 'Gene_Symbol')
+                                     'Gene', 'Gene_Symbol', 'Fly Symbol',
+                                     'fly_symbol', 'Fly_Symbol')
                          if c in df.columns),
                         None,
                     )
@@ -4405,21 +5526,53 @@ class StockSplittingPipeline:
             if verbose:
                 print("    Note: No CSV gene lists with flybase_gene_id "
                       "found; cannot identify genes with 0 stocks")
-            return set(), None, {}, 0, {}
+            return set(), None, {}, 0, {}, None, {}
 
-        input_fbgns = set(fbgn_to_symbol.keys())
-        csv_input_genes = set(fbgn_to_symbol.values())
+        # Canonicalize each input FBgn through FlyBase's secondary -> primary
+        # alias table so that two input rows pointing at the same biological
+        # gene via different FBgn IDs are counted as one gene.
+        secondary_to_primary = _load_secondary_fbgn_to_primary(
+            self.settings.flybase_data_path,
+            verbose=verbose,
+        )
+        if secondary_to_primary:
+            canonical_fbgn_to_symbol: Dict[str, str] = {}
+            canonical_fbgn_to_datasets: Dict[str, Set[str]] = defaultdict(set)
+            for raw_fbgn, sym in fbgn_to_symbol.items():
+                canon = secondary_to_primary.get(raw_fbgn, raw_fbgn)
+                canonical_fbgn_to_symbol.setdefault(canon, sym)
+                canonical_fbgn_to_datasets[canon].update(
+                    fbgn_to_datasets.get(raw_fbgn, set())
+                )
+            input_fbgns = set(canonical_fbgn_to_symbol.keys())
+            fbgn_to_symbol_canon = canonical_fbgn_to_symbol
+            fbgn_to_datasets_canon = canonical_fbgn_to_datasets
+        else:
+            input_fbgns = set(fbgn_to_symbol.keys())
+            fbgn_to_symbol_canon = dict(fbgn_to_symbol)
+            fbgn_to_datasets_canon = dict(fbgn_to_datasets)
+        csv_input_genes = set(fbgn_to_symbol_canon.values())
         gene_to_datasets: Dict[str, Set[str]] = defaultdict(set)
-        for fbgn, symbol in fbgn_to_symbol.items():
+        for fbgn, symbol in fbgn_to_symbol_canon.items():
             if symbol:
-                gene_to_datasets[symbol].update(fbgn_to_datasets.get(fbgn, set()))
+                gene_to_datasets[symbol].update(
+                    fbgn_to_datasets_canon.get(fbgn, set())
+                )
 
         # ── 2. Determine stock FBgn IDs ──────────────────────────────
         if 'relevant_gene_symbols' not in stocks_df.columns:
             if verbose:
                 print("    Warning: 'relevant_gene_symbols' column missing "
                       "from stocks data; cannot compute 0-stock genes")
-            return set(), csv_input_genes, {}, len(input_fbgns), dict(gene_to_datasets)
+            return (
+                set(),
+                csv_input_genes,
+                {},
+                len(input_fbgns),
+                dict(gene_to_datasets),
+                input_fbgns,
+                secondary_to_primary,
+            )
 
         current_to_input_map: Dict[str, str] = {}
         stock_fbgns: Set[str] = set()
@@ -4427,20 +5580,38 @@ class StockSplittingPipeline:
         has_fbgn_col = 'relevant_flybase_gene_ids' in stocks_df.columns
 
         if has_fbgn_col:
-            # Preferred path: read FBgn IDs directly from the stocks sheet,
-            # no symbol indirection needed.
+            # Preferred path: read FBgn IDs directly from the stocks sheet
+            # and canonicalize them through the alias map.
             for _, row in stocks_df[['relevant_gene_symbols', 'relevant_flybase_gene_ids']].iterrows():
                 symbols = [s.strip() for s in str(row.get('relevant_gene_symbols', '')).split(';') if s.strip() and s.strip().lower() != 'nan']
                 fbgns = [f.strip() for f in str(row.get('relevant_flybase_gene_ids', '')).split(';') if f.strip() and f.strip().lower() != 'nan']
-                stock_fbgns.update(f for f in fbgns if f.startswith('FBgn'))
+                for f in fbgns:
+                    if not f.startswith('FBgn'):
+                        continue
+                    canon = secondary_to_primary.get(f, f) if secondary_to_primary else f
+                    stock_fbgns.add(canon)
                 for sym, fbgn in zip(symbols, fbgns):
                     if not fbgn.startswith('FBgn'):
                         continue
-                    input_sym = fbgn_to_symbol.get(fbgn)
+                    canon = secondary_to_primary.get(fbgn, fbgn) if secondary_to_primary else fbgn
+                    input_sym = fbgn_to_symbol_canon.get(canon)
                     if input_sym and input_sym != sym:
                         current_to_input_map[sym] = input_sym
                         csv_input_genes.add(sym)
-                        gene_to_datasets[sym].update(fbgn_to_datasets.get(fbgn, set()))
+                        gene_to_datasets[sym].update(
+                            fbgn_to_datasets_canon.get(canon, set())
+                        )
+                # Allow display-time lookup of either the raw stock FBgn (which
+                # may be a secondary alias) or the canonical primary FBgn.
+                for fbgn in fbgns:
+                    if not fbgn.startswith('FBgn'):
+                        continue
+                    canon = secondary_to_primary.get(fbgn, fbgn) if secondary_to_primary else fbgn
+                    input_sym = fbgn_to_symbol_canon.get(canon)
+                    if input_sym:
+                        current_to_input_map[fbgn] = input_sym
+                        if canon != fbgn:
+                            current_to_input_map[canon] = input_sym
         else:
             # Fallback for old Stage 1 outputs without the FBgn column.
             stock_symbols: Set[str] = set()
@@ -4456,7 +5627,9 @@ class StockSplittingPipeline:
 
         # ── 3. Compare the two FBgn sets ─────────────────────────────
         missing_fbgns = input_fbgns - stock_fbgns
-        genes_no_stocks = {fbgn_to_symbol[fbgn] for fbgn in missing_fbgns}
+        genes_no_stocks = {
+            fbgn_to_symbol_canon.get(fbgn, fbgn) for fbgn in missing_fbgns
+        }
 
         if verbose:
             print(f"    Input genes (from CSVs): {len(input_fbgns)}")
@@ -4473,6 +5646,8 @@ class StockSplittingPipeline:
             current_to_input_map,
             len(input_fbgns),
             dict(gene_to_datasets),
+            input_fbgns,
+            secondary_to_primary,
         )
     
     def _compute_derived_columns(
@@ -4539,13 +5714,17 @@ class StockSplittingPipeline:
         self,
         excel_path: Path,
         verbose: bool = True
-    ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], List[str]]:
-        """Load stocks and references from an Excel file."""
+    ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], List[str], Optional[pd.DataFrame]]:
+        """Load stocks, references, and (optional) reagent index from Excel."""
         if verbose:
             print(f"\n  Loading: {excel_path.name}")
         
         # Read Stocks sheet
         stocks_df = pd.read_excel(excel_path, sheet_name='Stocks')
+        stocks_df = _ensure_rnai_type_column(
+            stocks_df,
+            self.settings.flybase_data_path,
+        )
         
         # Read References sheet if it exists
         references_df = None
@@ -4553,7 +5732,19 @@ class StockSplittingPipeline:
             references_df = pd.read_excel(excel_path, sheet_name='References')
         except ValueError:
             pass
-        
+
+        # Read Gene Reagent Index sheet (primary phenotype-sheet reagent
+        # universe). Older Stage 1 workbooks do not include this sheet; the
+        # caller falls back to the legacy `all_stocks_df`-derived union with
+        # a warning so existing files still run.
+        reagent_index_df: Optional[pd.DataFrame] = None
+        try:
+            reagent_index_df = pd.read_excel(
+                excel_path, sheet_name='Gene Reagent Index'
+            )
+        except ValueError:
+            reagent_index_df = None
+
         # Extract keywords from the title/abstract keyword-hit column
         keywords = []
         kw_ta_col = find_keyword_title_abstract_column(stocks_df)
@@ -4569,10 +5760,17 @@ class StockSplittingPipeline:
             print(f"    Loaded {len(stocks_df)} stocks")
             if references_df is not None:
                 print(f"    Loaded {len(references_df)} references")
+            if reagent_index_df is not None:
+                print(f"    Loaded {len(reagent_index_df)} gene reagent index rows")
+            else:
+                print(
+                    "    Warning: Gene Reagent Index sheet not found; "
+                    "phenotype sheet will fall back to legacy stocks_df union (best-effort)"
+                )
             if keywords:
                 print(f"    Keywords: {', '.join(keywords)}")
         
-        return stocks_df, references_df, keywords
+        return stocks_df, references_df, keywords, reagent_index_df
     
     def _sort_stocks_for_priority(
         self,
@@ -4944,7 +6142,7 @@ class StockSplittingPipeline:
         # Process each file
         for excel_path in excel_files:
             # Load data
-            stocks_df, references_df, file_keywords = self._load_stocks_from_excel(excel_path, verbose)
+            stocks_df, references_df, file_keywords, reagent_index_df = self._load_stocks_from_excel(excel_path, verbose)
             
             # Identify genes from original CSV input with 0 matched stocks
             (
@@ -4953,6 +6151,8 @@ class StockSplittingPipeline:
                 current_to_input_map,
                 n_input_genes,
                 gene_to_datasets,
+                csv_input_fbgns,
+                secondary_to_primary,
             ) = self._find_genes_without_stocks(workbook_dir, stocks_df, verbose)
             
             # Use keywords from config, fallback to file keywords
@@ -4964,24 +6164,23 @@ class StockSplittingPipeline:
             # Sort for priority selection
             stocks_df = self._sort_stocks_for_priority(stocks_df, active_keywords)
             
-            # Extract gene symbols from stocks_df (genes that have matched stocks)
-            # Filter to input genes only so counts exclude hitchhiker genes
-            all_input_genes: Set[str] = set()
-            if 'relevant_gene_symbols' in stocks_df.columns:
-                for syms in stocks_df['relevant_gene_symbols'].dropna():
-                    for s in str(syms).split(';'):
-                        s = s.strip()
-                        if s and s != '-':
-                            all_input_genes.add(s)
+            # Identify input genes that have matched stocks. Use canonical
+            # (primary) FBgn IDs as the identity so that distinct input
+            # genes sharing a FlyBase display symbol are not collapsed
+            # together, and so that two input rows pointing at the same
+            # biological gene via secondary FBgns ARE collapsed.
+            if csv_input_fbgns is not None:
+                all_input_genes: Set[str] = _input_fbgns_from_df(
+                    stocks_df,
+                    csv_input_fbgns,
+                    secondary_to_primary,
+                )
             else:
-                _input_gene_col = _find_gene_id_column(stocks_df)
-                if _input_gene_col:
-                    for val in stocks_df[_input_gene_col].dropna().astype(str):
-                        for v in val.split(';'):
-                            v = v.strip()
-                            if v and v != '-':
-                                all_input_genes.add(v)
-            if csv_input_genes is not None:
+                all_input_genes = _gene_display_values_from_df(
+                    stocks_df,
+                    current_to_input_map,
+                )
+            if csv_input_fbgns is None and csv_input_genes is not None:
                 all_input_genes &= csv_input_genes
             if verbose:
                 print(f"    Genes with matched stocks: {len(all_input_genes)}")
@@ -5034,33 +6233,37 @@ class StockSplittingPipeline:
                 allele_col = _find_allele_column(limited_df)
                 
                 num_stocks = limited_df[stock_col].nunique() if stock_col and len(limited_df) > 0 else 0
-                # Split semicolon-separated values before counting unique genes/alleles
-                # Prefer relevant_gene_symbols (symbols) so counts are consistent
-                # with csv_input_genes; filter to input genes only.
-                _gene_sym_col = 'relevant_gene_symbols' if 'relevant_gene_symbols' in limited_df.columns else gene_col
-                if _gene_sym_col and len(limited_df) > 0:
-                    _genes = set()
-                    for cell in limited_df[_gene_sym_col].dropna().astype(str):
-                        for v in cell.split(';'):
-                            v = v.strip()
-                            if v and v != '-':
-                                _genes.add(v)
+                if csv_input_fbgns is not None:
+                    _genes = _input_fbgns_from_df(
+                        limited_df,
+                        csv_input_fbgns,
+                        secondary_to_primary,
+                    )
+                else:
+                    _genes = _gene_display_values_from_df(
+                        limited_df,
+                        current_to_input_map,
+                    )
                     if csv_input_genes is not None:
                         _genes &= csv_input_genes
-                    num_genes = len(_genes)
-                else:
-                    num_genes = 0
+                num_genes = len(_genes)
                 if allele_col and len(limited_df) > 0:
                     _alleles = set()
                     # Only count alleles from rows whose gene(s) are in the input set
                     for _, _row in limited_df.iterrows():
-                        if csv_input_genes is not None and _gene_sym_col:
-                            row_genes = set()
-                            raw = str(_row.get(_gene_sym_col, ''))
-                            for g in raw.split(';'):
-                                g = g.strip()
-                                if g and g != '-' and g.lower() != 'nan':
-                                    row_genes.add(g)
+                        if csv_input_fbgns is not None:
+                            row_fbgns = _input_fbgns_from_row(
+                                _row,
+                                csv_input_fbgns,
+                                secondary_to_primary,
+                            )
+                            if not row_fbgns:
+                                continue
+                        elif csv_input_genes is not None:
+                            row_genes = _gene_display_values_from_row(
+                                _row,
+                                current_to_input_map,
+                            )
                             if not (row_genes & csv_input_genes):
                                 continue
                         raw_a = str(_row.get(allele_col, ''))
@@ -5145,6 +6348,8 @@ class StockSplittingPipeline:
                 all_input_genes=all_input_genes,
                 genes_no_stocks=genes_no_stocks,
                 csv_input_genes=csv_input_genes,
+                csv_input_fbgns=csv_input_fbgns,
+                secondary_to_primary=secondary_to_primary,
                 n_input_genes=n_input_genes,
                 gene_synonyms_map=gene_synonyms_map,
                 soft_run=self.settings.soft_run,
@@ -5154,6 +6359,7 @@ class StockSplittingPipeline:
                 current_to_input_map=current_to_input_map,
                 gene_to_datasets=gene_to_datasets,
                 pipeline_settings=self.settings,
+                reagent_index_df=reagent_index_df,
             )
         
         # Print summary

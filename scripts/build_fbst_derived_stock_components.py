@@ -22,7 +22,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 
 import pandas as pd
 
@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ALLELES_AND_STOCKS_DIR = REPO_ROOT / "data" / "flybase" / "alleles_and_stocks"
 REFERENCES_DIR = REPO_ROOT / "data" / "flybase" / "references"
 
-DEFAULT_CHADO_PATH = ALLELES_AND_STOCKS_DIR / "chado_FBst.xml.gz"
+CHADO_FBST_PREFIX = "chado_FBst"
 DEFAULT_OUTPUT_PATH = ALLELES_AND_STOCKS_DIR / "fbst_to_derived_stock_component.csv"
 
 TOKEN_PATTERN = re.compile(r"@(FB[A-Za-z]{2}\d+):([^@]+)@")
@@ -55,6 +55,35 @@ def find_latest_tsv(directory: Path, pattern: str) -> Path:
     raise FileNotFoundError(f"No TSV file matching '{pattern}' found in {directory}")
 
 
+def find_latest_xml(directory: Path, prefix: str) -> Path:
+    """Return the latest XML or XML.GZ matching a prefix.
+
+    Pattern matching is intentionally loose so that callers do not need to
+    know whether FlyBase has started embedding a release suffix into chado
+    XML filenames yet.
+    """
+    gz_matches = sorted(directory.glob(f"{prefix}*.xml.gz"), reverse=True)
+    if gz_matches:
+        return gz_matches[0]
+    xml_matches = sorted(directory.glob(f"{prefix}*.xml"), reverse=True)
+    if xml_matches:
+        return xml_matches[0]
+    raise FileNotFoundError(f"No XML file matching '{prefix}' found in {directory}")
+
+
+def _safe_find_latest_xml(directory: Path, prefix: str) -> Optional[Path]:
+    """``find_latest_xml`` variant that returns ``None`` instead of raising."""
+    try:
+        return find_latest_xml(directory, prefix)
+    except FileNotFoundError:
+        return None
+
+
+# Resolved lazily so importing this module does not require the chado XML to
+# be present (e.g. when scripts/audit_stock_phenotype_pipeline.py loads it).
+DEFAULT_CHADO_PATH: Optional[Path] = _safe_find_latest_xml(
+    ALLELES_AND_STOCKS_DIR, CHADO_FBST_PREFIX
+)
 DEFAULT_STOCKS_PATH = find_latest_tsv(ALLELES_AND_STOCKS_DIR, "stocks_FB")
 DEFAULT_FBAL_PATH = find_latest_tsv(ALLELES_AND_STOCKS_DIR, "fbal_to_fbgn_fb_")
 
@@ -366,7 +395,10 @@ def parse_args() -> argparse.Namespace:
         "--chado-path",
         type=Path,
         default=DEFAULT_CHADO_PATH,
-        help="Path to chado_FBst.xml.gz",
+        help=(
+            "Path to a chado FBst XML(.gz) file. If omitted, the latest "
+            f"'{CHADO_FBST_PREFIX}*.xml(.gz)' file in {ALLELES_AND_STOCKS_DIR} is used."
+        ),
     )
     parser.add_argument(
         "--stocks-path",
@@ -397,6 +429,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+
+    if args.chado_path is None:
+        raise FileNotFoundError(
+            f"No '{CHADO_FBST_PREFIX}*.xml(.gz)' file found in "
+            f"{ALLELES_AND_STOCKS_DIR}. Pass --chado-path explicitly or run "
+            "'python scripts/refresh_flybase_data.py --with-xml' to download it."
+        )
 
     print("Building FBst -> derived_stock_component CSV")
     print(f"  Chado XML: {args.chado_path}")

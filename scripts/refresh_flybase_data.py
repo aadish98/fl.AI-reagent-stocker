@@ -1,29 +1,37 @@
 #!/usr/bin/env python3
 """
-Download the latest FlyBase TSV/TSV.GZ report families used by this repo.
+Download the latest FlyBase report families used by this repo.
 
-The script discovers files from the official FlyBase current-release index under:
+The script discovers TSV/TSV.GZ files from the official FlyBase
+current-release precomputed index under:
     https://s3ftp.flybase.org/releases/current/precomputed_files/
+
+When ``--with-xml`` is passed, it also discovers chado XML/XML.GZ files from:
+    https://s3ftp.flybase.org/releases/current/chado-xml/
 
 It downloads only the report families this repository uses, saves them into the
 expected local data directories, and removes older versions of the same prefix
 only after the latest file is present and non-empty. After all manifest families
-have been processed, it also removes orphan TSV/TSV.GZ files from the managed
-FlyBase directories so stale helper files do not accumulate.
+have been processed, it also removes orphan files from the managed FlyBase
+directories so stale helper files do not accumulate. Orphan cleanup is scoped
+per file kind (TSV vs XML), so omitting ``--with-xml`` never deletes existing
+local XML files.
 
 Usage:
     python scripts/refresh_flybase_data.py
+    python scripts/refresh_flybase_data.py --with-xml
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Callable, Dict, Iterable, List, Set, Tuple
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
@@ -34,8 +42,68 @@ ALLELES_AND_STOCKS_DIR = FLYBASE_ROOT / "alleles_and_stocks"
 REFERENCES_DIR = FLYBASE_ROOT / "references"
 GENES_DIR = FLYBASE_ROOT / "genes"
 TRANSGENIC_CONSTRUCTS_DIR = FLYBASE_ROOT / "transgenic_constructs"
+TRANSGENIC_INSERTIONS_DIR = FLYBASE_ROOT / "transgenic_insertions"
 
 CURRENT_PRECOMPUTED_BASE = "https://s3ftp.flybase.org/releases/current/precomputed_files/"
+CURRENT_CHADO_XML_BASE = "https://s3ftp.flybase.org/releases/current/chado-xml/"
+
+
+def _parse_md5sum_listing(payload: str) -> List[str]:
+    """Parse a FlyBase ``md5sum.txt`` payload into relative paths."""
+    entries: List[str] = []
+    for raw_line in payload.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        entries.append(parts[1].strip())
+    return entries
+
+
+_CHADO_XML_HREF_RE = re.compile(
+    r"href=['\"][^'\"]*?/chado-xml/([^'\"/]+\.xml(?:\.gz)?)['\"]",
+    re.IGNORECASE,
+)
+
+
+def _parse_chado_xml_listing(payload: str) -> List[str]:
+    """Parse the FlyBase ``chado-xml/`` HTML index into relative filenames."""
+    seen: Dict[str, None] = {}
+    for match in _CHADO_XML_HREF_RE.finditer(payload):
+        seen.setdefault(match.group(1), None)
+    return list(seen.keys())
+
+
+@dataclass(frozen=True)
+class RemoteSource:
+    """Describes a remote FlyBase listing/download source.
+
+    ``base_url`` is joined with the relative paths returned by ``listing_parser``
+    when constructing download URLs. ``listing_url`` is the listing endpoint
+    fetched once per run and parsed by ``listing_parser``.
+    """
+
+    name: str
+    base_url: str
+    listing_url: str
+    listing_parser: Callable[[str], List[str]]
+
+
+PRECOMPUTED_SOURCE = RemoteSource(
+    name="precomputed",
+    base_url=CURRENT_PRECOMPUTED_BASE,
+    listing_url=urljoin(CURRENT_PRECOMPUTED_BASE, "md5sum.txt"),
+    listing_parser=_parse_md5sum_listing,
+)
+
+CHADO_XML_SOURCE = RemoteSource(
+    name="chado_xml",
+    base_url=CURRENT_CHADO_XML_BASE,
+    listing_url=urljoin(CURRENT_CHADO_XML_BASE, "index.html"),
+    listing_parser=_parse_chado_xml_listing,
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +112,7 @@ class ReportFamily:
     prefix: str
     remote_subdir: str
     destination_dir: Path
+    source: RemoteSource = PRECOMPUTED_SOURCE
     required: bool = True
     preferred_extensions: tuple[str, ...] = (".tsv.gz", ".tsv")
 
@@ -97,6 +166,35 @@ MANIFEST: List[ReportFamily] = [
         remote_subdir="synonyms",
         destination_dir=GENES_DIR,
     ),
+    ReportFamily(
+        name="fbgn_annotation_ID",
+        prefix="fbgn_annotation_ID",
+        remote_subdir="genes",
+        destination_dir=GENES_DIR,
+    ),
+]
+
+
+# Optional XML families. Files in chado-xml/ live directly under the source
+# base URL, so ``remote_subdir`` is empty. Only the families used by this repo
+# are listed here so the rest of the chado-xml/ directory is never touched.
+XML_MANIFEST: List[ReportFamily] = [
+    ReportFamily(
+        name="chado_FBst",
+        prefix="chado_FBst",
+        remote_subdir="",
+        destination_dir=ALLELES_AND_STOCKS_DIR,
+        source=CHADO_XML_SOURCE,
+        preferred_extensions=(".xml.gz", ".xml"),
+    ),
+    ReportFamily(
+        name="chado_FBti",
+        prefix="chado_FBti",
+        remote_subdir="",
+        destination_dir=TRANSGENIC_INSERTIONS_DIR,
+        source=CHADO_XML_SOURCE,
+        preferred_extensions=(".xml.gz", ".xml"),
+    ),
 ]
 
 
@@ -106,8 +204,7 @@ REQUEST_HEADERS = {
     "Accept": "*/*",
     "Accept-Language": "en-US,en;q=0.9",
 }
-MD5SUM_URL = urljoin(CURRENT_PRECOMPUTED_BASE, "md5sum.txt")
-_CURRENT_FILE_LISTING: Optional[List[str]] = None
+_LISTING_CACHE: Dict[str, List[str]] = {}
 
 
 class FlyBaseRequestBlocked(RuntimeError):
@@ -173,34 +270,37 @@ def basename_from_url(url: str) -> str:
     return Path(urlparse(url).path).name
 
 
-def current_precomputed_listing() -> List[str]:
-    global _CURRENT_FILE_LISTING
-    if _CURRENT_FILE_LISTING is None:
-        entries: List[str] = []
-        for raw_line in fetch_text(MD5SUM_URL).splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            parts = line.split(None, 1)
-            if len(parts) != 2:
-                continue
-            entries.append(parts[1].strip())
-        _CURRENT_FILE_LISTING = entries
-    return _CURRENT_FILE_LISTING
+def current_listing(source: RemoteSource) -> List[str]:
+    """Return cached listing entries for ``source`` (relative paths)."""
+    cached = _LISTING_CACHE.get(source.name)
+    if cached is None:
+        cached = source.listing_parser(fetch_text(source.listing_url))
+        _LISTING_CACHE[source.name] = cached
+    return cached
 
 
 def discover_latest_url(family: ReportFamily) -> str:
-    matches = [
-        relative_path
-        for relative_path in current_precomputed_listing()
-        if relative_path.startswith(f"{family.remote_subdir}/")
-        and basename_from_url(relative_path).startswith(family.prefix)
-        and basename_from_url(relative_path).endswith(family.preferred_extensions)
-    ]
+    listing = current_listing(family.source)
+    subdir_prefix = f"{family.remote_subdir}/" if family.remote_subdir else ""
+
+    matches: List[str] = []
+    for relative_path in listing:
+        if subdir_prefix and not relative_path.startswith(subdir_prefix):
+            continue
+        if not subdir_prefix and "/" in relative_path:
+            continue
+        name = basename_from_url(relative_path)
+        if not name.startswith(family.prefix):
+            continue
+        if not name.endswith(family.preferred_extensions):
+            continue
+        matches.append(relative_path)
+
     if not matches:
         if family.required:
             raise FileNotFoundError(
-                f"Could not discover a download URL for prefix '{family.prefix}' from {MD5SUM_URL}"
+                f"Could not discover a download URL for prefix '{family.prefix}' "
+                f"from {family.source.listing_url}"
             )
         return ""
 
@@ -217,7 +317,7 @@ def discover_latest_url(family: ReportFamily) -> str:
         return (ext_rank, name)
 
     matches.sort(key=sort_key)
-    return urljoin(CURRENT_PRECOMPUTED_BASE, matches[0])
+    return urljoin(family.source.base_url, matches[0])
 
 
 def atomic_download(url: str, destination_path: Path) -> int:
@@ -245,10 +345,10 @@ def atomic_download(url: str, destination_path: Path) -> int:
 
 
 def _list_family_candidates(family: ReportFamily) -> List[Path]:
-    candidates = list(family.destination_dir.glob(f"{family.prefix}*.tsv")) + list(
-        family.destination_dir.glob(f"{family.prefix}*.tsv.gz")
-    )
-    return sorted(set(candidates))
+    candidates: Set[Path] = set()
+    for extension in family.preferred_extensions:
+        candidates.update(family.destination_dir.glob(f"{family.prefix}*{extension}"))
+    return sorted(candidates)
 
 
 def prune_older_versions(family: ReportFamily, keep_path: Path) -> List[Path]:
@@ -265,43 +365,66 @@ def list_older_versions(family: ReportFamily, keep_path: Path) -> List[Path]:
     return [path for path in _list_family_candidates(family) if path != keep_path]
 
 
-def _manifest_prefixes_by_dir(manifest: Iterable[ReportFamily]) -> Dict[Path, Set[str]]:
-    prefixes_by_dir: Dict[Path, Set[str]] = {}
+@dataclass(frozen=True)
+class _DirExtensionScope:
+    directory: Path
+    extensions: Tuple[str, ...]
+
+
+def _scope_prefixes(
+    manifest: Iterable[ReportFamily],
+) -> Dict[_DirExtensionScope, Set[str]]:
+    """Group manifest prefixes by destination directory + file-extension family.
+
+    Orphan cleanup must respect the file kind a manifest manages: a TSV-only
+    refresh should never remove sibling XML files (and vice versa) that live
+    in the same destination directory.
+    """
+    scopes: Dict[_DirExtensionScope, Set[str]] = {}
     for family in manifest:
-        prefixes_by_dir.setdefault(family.destination_dir, set()).add(family.prefix)
-    return prefixes_by_dir
+        scope = _DirExtensionScope(
+            directory=family.destination_dir,
+            extensions=tuple(family.preferred_extensions),
+        )
+        scopes.setdefault(scope, set()).add(family.prefix)
+    return scopes
 
 
-def _list_orphan_tsvs(manifest: Iterable[ReportFamily]) -> List[Path]:
+def _list_orphan_files(manifest: Iterable[ReportFamily]) -> List[Path]:
     orphan_paths: List[Path] = []
-    for directory, prefixes in _manifest_prefixes_by_dir(manifest).items():
-        if not directory.exists():
+    for scope, prefixes in _scope_prefixes(manifest).items():
+        if not scope.directory.exists():
             continue
-        candidates = sorted(set(directory.glob("*.tsv")) | set(directory.glob("*.tsv.gz")))
-        for candidate in candidates:
+        candidates: Set[Path] = set()
+        for extension in scope.extensions:
+            candidates.update(scope.directory.glob(f"*{extension}"))
+        for candidate in sorted(candidates):
             if any(candidate.name.startswith(prefix) for prefix in prefixes):
                 continue
             orphan_paths.append(candidate)
     return orphan_paths
 
 
-def cleanup_orphan_tsvs(manifest: Iterable[ReportFamily]) -> List[Path]:
-    orphan_paths = _list_orphan_tsvs(manifest)
+def cleanup_orphan_files(manifest: Iterable[ReportFamily]) -> List[Path]:
+    orphan_paths = _list_orphan_files(manifest)
     for path in orphan_paths:
         path.unlink(missing_ok=True)
     return orphan_paths
 
 
-def find_latest_tsv_like_repo(directory: Path, prefix: str) -> Path:
-    gz_files = sorted(directory.glob(f"{prefix}*.tsv.gz"), reverse=True)
-    if gz_files:
-        return gz_files[0]
+def find_latest_local_for_family(family: ReportFamily) -> Path:
+    """Return the latest local file for ``family`` honoring its preferred extensions."""
+    for extension in family.preferred_extensions:
+        matches = sorted(
+            family.destination_dir.glob(f"{family.prefix}*{extension}"),
+            reverse=True,
+        )
+        if matches:
+            return matches[0]
 
-    tsv_files = sorted(directory.glob(f"{prefix}*.tsv"), reverse=True)
-    if tsv_files:
-        return tsv_files[0]
-
-    raise FileNotFoundError(f"No local files found for prefix '{prefix}' in {directory}")
+    raise FileNotFoundError(
+        f"No local files found for prefix '{family.prefix}' in {family.destination_dir}"
+    )
 
 
 def format_size(size: int) -> str:
@@ -317,20 +440,106 @@ def format_size(size: int) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Refresh FlyBase TSV report files.")
+    parser = argparse.ArgumentParser(description="Refresh FlyBase report files.")
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Discover and report actions without downloading or deleting files.",
     )
+    parser.add_argument(
+        "--with-xml",
+        action="store_true",
+        help=(
+            "Also refresh chado XML report families used by the helper scripts. "
+            "These files (e.g. chado_FBst, chado_FBti) are large and live under "
+            "https://s3ftp.flybase.org/releases/current/chado-xml/."
+        ),
+    )
     return parser.parse_args()
+
+
+def _process_family(family: ReportFamily, dry_run: bool) -> Tuple[bool, bool, int]:
+    """Refresh a single family and return (refreshed, skipped, removed_count)."""
+    print(f"\n[{family.name}]")
+    latest_url = discover_latest_url(family)
+    latest_name = basename_from_url(latest_url)
+    destination_path = family.destination_dir / latest_name
+
+    print(f"  Source: {family.source.name} ({family.source.base_url})")
+    print(f"  Latest URL: {latest_url}")
+    print(f"  Destination: {destination_path}")
+
+    refreshed = False
+    skipped = False
+    if destination_path.exists() and destination_path.stat().st_size > 0:
+        skipped = True
+        size = destination_path.stat().st_size
+        print(f"  Status: already current ({format_size(size)})")
+    elif dry_run:
+        print("  Status: would download")
+    else:
+        size = atomic_download(latest_url, destination_path)
+        refreshed = True
+        print(f"  Status: downloaded ({format_size(size)})")
+
+    removed: List[Path] = []
+    if dry_run:
+        removed = list_older_versions(family, destination_path)
+    elif destination_path.exists() and destination_path.stat().st_size > 0:
+        removed = prune_older_versions(family, destination_path)
+
+    if removed:
+        if dry_run:
+            print("  Old versions that would be removed:")
+        else:
+            print("  Removed old versions:")
+        for path in removed:
+            print(f"    - {path.name}")
+    else:
+        print("  Removed old versions: none")
+
+    try:
+        selected = find_latest_local_for_family(family)
+    except FileNotFoundError:
+        selected = None
+
+    if dry_run and not destination_path.exists():
+        if selected is None:
+            print("  Active latest file now: none")
+        else:
+            print(f"  Active latest file now: {selected.name}")
+        print(f"  Active latest file after download: {destination_path.name}")
+        print("  Loader compatibility after download: OK")
+    else:
+        if selected is None:
+            raise RuntimeError(
+                f"Compatibility check failed for {family.name}: no local file exists "
+                f"for prefix {family.prefix} after refresh"
+            )
+        print(f"  Active latest file: {selected.name}")
+        if selected != destination_path:
+            raise RuntimeError(
+                f"Compatibility check failed for {family.name}: expected {destination_path.name}, "
+                f"but repo-style latest selection chose {selected.name}"
+            )
+        print("  Loader compatibility: OK")
+
+    return refreshed, skipped, len(removed) if not dry_run else 0
 
 
 def main() -> int:
     args = parse_args()
 
-    print("Refreshing FlyBase TSV report families")
-    print(f"  Source base: {CURRENT_PRECOMPUTED_BASE}")
+    manifest: List[ReportFamily] = list(MANIFEST)
+    if args.with_xml:
+        manifest.extend(XML_MANIFEST)
+
+    print("Refreshing FlyBase report families")
+    print(f"  Precomputed source: {CURRENT_PRECOMPUTED_BASE}")
+    if args.with_xml:
+        print(f"  Chado XML source:   {CURRENT_CHADO_XML_BASE}")
+    else:
+        print("  Chado XML source:   skipped (use --with-xml to include)")
     print(f"  Repo root: {REPO_ROOT}")
     if args.dry_run:
         print("  Mode: dry-run (no downloads or deletions)")
@@ -339,94 +548,41 @@ def main() -> int:
     skipped = 0
     removed_total = 0
 
-    for family in MANIFEST:
-        print(f"\n[{family.name}]")
-        latest_url = discover_latest_url(family)
-        latest_name = basename_from_url(latest_url)
-        destination_path = family.destination_dir / latest_name
-
-        print(f"  Latest URL: {latest_url}")
-        print(f"  Destination: {destination_path}")
-
-        status = "download"
-        if destination_path.exists() and destination_path.stat().st_size > 0:
-            status = "already current"
-            size = destination_path.stat().st_size
-        elif args.dry_run:
-            size = 0
-        else:
-            size = atomic_download(latest_url, destination_path)
+    for family in manifest:
+        family_refreshed, family_skipped, family_removed = _process_family(
+            family, dry_run=args.dry_run
+        )
+        if family_refreshed:
             refreshed += 1
-
-        if status == "already current":
+        if family_skipped:
             skipped += 1
-            print(f"  Status: already current ({format_size(size)})")
-        elif args.dry_run:
-            print("  Status: would download")
-        else:
-            print(f"  Status: downloaded ({format_size(size)})")
+        removed_total += family_removed
 
-        removed: List[Path] = []
-        if args.dry_run:
-            removed = list_older_versions(family, destination_path)
-        elif destination_path.exists() and destination_path.stat().st_size > 0:
-            removed = prune_older_versions(family, destination_path)
-            removed_total += len(removed)
-
-        if removed:
-            if args.dry_run:
-                print("  Old versions that would be removed:")
-            else:
-                print("  Removed old versions:")
-            for path in removed:
-                print(f"    - {path.name}")
-        else:
-            print("  Removed old versions: none")
-
-        try:
-            selected = find_latest_tsv_like_repo(family.destination_dir, family.prefix)
-        except FileNotFoundError:
-            selected = None
-
-        if args.dry_run and not destination_path.exists():
-            if selected is None:
-                print("  Active latest file now: none")
-            else:
-                print(f"  Active latest file now: {selected.name}")
-            print(f"  Active latest file after download: {destination_path.name}")
-            print("  Loader compatibility after download: OK")
-        else:
-            if selected is None:
-                raise RuntimeError(
-                    f"Compatibility check failed for {family.name}: no local file exists "
-                    f"for prefix {family.prefix} after refresh"
-                )
-            print(f"  Active latest file: {selected.name}")
-            if selected != destination_path:
-                raise RuntimeError(
-                    f"Compatibility check failed for {family.name}: expected {destination_path.name}, "
-                    f"but repo-style latest selection chose {selected.name}"
-                )
-            print("  Loader compatibility: OK")
-
-    orphan_paths = _list_orphan_tsvs(MANIFEST) if args.dry_run else cleanup_orphan_tsvs(MANIFEST)
+    orphan_paths = (
+        _list_orphan_files(manifest) if args.dry_run else cleanup_orphan_files(manifest)
+    )
     if orphan_paths:
         if args.dry_run:
-            print("\nOrphan TSV/TSV.GZ files that would be removed:")
+            print("\nOrphan files that would be removed:")
         else:
-            print("\nRemoved orphan TSV/TSV.GZ files:")
+            print("\nRemoved orphan files:")
         for path in orphan_paths:
             print(f"  - {path.relative_to(REPO_ROOT)}")
         if not args.dry_run:
             removed_total += len(orphan_paths)
     else:
-        print("\nOrphan TSV/TSV.GZ files removed: none")
+        print("\nOrphan files removed: none")
 
     print("\nSummary:")
-    print(f"  Families processed: {len(MANIFEST)}")
+    print(f"  Families processed: {len(manifest)}")
     print(f"  Newly downloaded: {refreshed}")
     print(f"  Already current: {skipped}")
     print(f"  Older files removed: {removed_total if not args.dry_run else 'dry-run'}")
+    if not args.with_xml:
+        print(
+            "  Chado XML refresh: skipped "
+            "(re-run with --with-xml to refresh chado_FBst / chado_FBti)"
+        )
     return 0
 
 

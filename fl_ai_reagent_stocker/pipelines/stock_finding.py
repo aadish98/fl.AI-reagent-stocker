@@ -32,6 +32,7 @@ from ..utils import (
     clean_id,
     parse_semicolon_list,
     unique_join,
+    combine_rnai_type_values,
     find_latest_tsv,
     load_flybase_tsv,
     generate_keyword_column_name,
@@ -39,6 +40,8 @@ from ..utils import (
     apply_experimental_prefix,
     EXPERIMENTAL_PREFIX,
     REAGENT_BUCKET_COLUMNS,
+    RNAI_TYPE_COLUMN,
+    infer_rnai_type_from_text,
 )
 from ..integrations.pubmed import PubMedClient, PubMedCache
 from ..integrations.fulltext import FullTextFetcher, FunctionalValidator
@@ -163,6 +166,41 @@ def _derive_one_hot_reagent_buckets(row: pd.Series) -> Dict[str, bool]:
         bucket: bucket == selected_bucket
         for bucket in REAGENT_BUCKET_COLUMNS
     }
+
+
+def _row_has_rnai_signal(row: pd.Series) -> bool:
+    """Return True when a stock row carries broad RNAi evidence."""
+    raw_signal = row.get("RNAi", False)
+    if raw_signal is True or str(raw_signal).strip().lower() in {"true", "1", "yes"}:
+        return True
+
+    genotype_text = _normalize_text(row.get("genotype", row.get("Genotype", "")))
+    allele_symbols = _normalize_semicolon_tokens(
+        row.get("relevant_fbal_symbols", row.get("AlleleSymbol", ""))
+    )
+    construct_symbols = _normalize_semicolon_tokens(row.get("relevant_fbtp_symbols", ""))
+    transgenic_terms = _normalize_semicolon_tokens(
+        row.get("transgenic_product_class_terms", "")
+    )
+    return bool(
+        "rnai" in genotype_text
+        or any("rnai" in symbol for symbol in allele_symbols + construct_symbols)
+        or any("rnai_reagent" in term or "rnai" in term for term in transgenic_terms)
+    )
+
+
+def _resolve_rnai_type_for_row(row: pd.Series) -> str:
+    """Finalize the RNAi subtype label for one stock row."""
+    inferred = infer_rnai_type_from_text(
+        row.get("genotype", row.get("Genotype", "")),
+        row.get("relevant_fbal_symbols", row.get("AlleleSymbol", "")),
+        row.get("relevant_fbtp_symbols", ""),
+        row.get("transgenic_product_class_terms", ""),
+    )
+    return combine_rnai_type_values(
+        [row.get(RNAI_TYPE_COLUMN, ""), inferred],
+        is_rnai=_row_has_rnai_signal(row),
+    )
 
 
 class StockFindingPipeline:
@@ -498,6 +536,7 @@ class StockFindingPipeline:
                 "FBtpID",
                 "FBtpSymbol",
                 "TransgenicProductClassTerm",
+                "RNAiType",
                 "ConstructSupportingFBrf",
                 "match_provenance",
             ]
@@ -719,6 +758,7 @@ class StockFindingPipeline:
                 "Transgenic Construct (id)",
                 "Transgenic Construct (symbol)",
                 "Transgenic Product class (term)",
+                "Description (text)",
                 "Description (supporting reference)",
             ):
                 if col not in construct_source.columns:
@@ -765,6 +805,7 @@ class StockFindingPipeline:
                         if item.strip()
                     ]
                 )
+                description_text = str(row.get("Description (text)", "") or "").strip()
                 for idx, construct_id in enumerate(construct_ids):
                     construct_symbol = ""
                     if idx < len(construct_symbols):
@@ -772,6 +813,12 @@ class StockFindingPipeline:
                     elif len(construct_symbols) == 1:
                         construct_symbol = construct_symbols[0]
                     for allele_meta in allele_meta_rows:
+                        rnai_type = infer_rnai_type_from_text(
+                            description_text,
+                            construct_symbol,
+                            allele_meta.get("AlleleSymbol", ""),
+                            class_term,
+                        )
                         construct_rows.append(
                             {
                                 "FBgnID": str(allele_meta.get("FBgnID", "")),
@@ -787,6 +834,7 @@ class StockFindingPipeline:
                                 "FBtpID": construct_id,
                                 "FBtpSymbol": construct_symbol,
                                 "TransgenicProductClassTerm": class_term,
+                                "RNAiType": rnai_type,
                                 "ConstructSupportingFBrf": supporting_fbrf,
                                 "match_provenance": str(
                                     allele_meta.get("match_provenance", "")
@@ -919,12 +967,13 @@ class StockFindingPipeline:
             symbol_col: str,
             class_col: str,
             ref_col: str,
+            extra_fields: Optional[Dict[str, str]] = None,
         ) -> Dict[str, Dict[str, str]]:
             grouped: Dict[str, Dict[str, str]] = {}
             if df is None or len(df) == 0:
                 return grouped
             for allele_id, group in df.groupby("AlleleID", sort=False):
-                grouped[str(allele_id).strip()] = {
+                entry = {
                     "IDs": unique_join(group[id_col].tolist()),
                     "Symbols": unique_join(group[symbol_col].tolist()),
                     "ClassTerm": unique_join(group[class_col].tolist())
@@ -934,6 +983,13 @@ class StockFindingPipeline:
                     if ref_col in group.columns
                     else "",
                 }
+                for key, col_name in (extra_fields or {}).items():
+                    entry[key] = (
+                        unique_join(group[col_name].tolist())
+                        if col_name in group.columns
+                        else ""
+                    )
+                grouped[str(allele_id).strip()] = entry
             return grouped
 
         gene_alleles = allele_rows[
@@ -972,6 +1028,7 @@ class StockFindingPipeline:
                 "FBtpSymbol",
                 "TransgenicProductClassTerm",
                 "ConstructSupportingFBrf",
+                extra_fields={"RNAiType": "RNAiType"},
             ),
             "insertions_by_allele": _group_component_rows(
                 insertion_df,
@@ -1233,6 +1290,7 @@ class StockFindingPipeline:
             transgenic_product_class_terms = _gather_from_alleles(
                 source_allele_ids, constructs_by_allele, "ClassTerm"
             )
+            rnai_type = _gather_from_alleles(source_allele_ids, constructs_by_allele, "RNAiType")
             allele_class_terms = _gather_from_match_group(
                 match_group, "SourceAlleleClassTerm"
             )
@@ -1286,6 +1344,7 @@ class StockFindingPipeline:
                     "relevant_fbti_symbols": relevant_fbti_symbols,
                     "relevant_fbti_ids": relevant_fbti_ids,
                     "transgenic_product_class_terms": transgenic_product_class_terms,
+                    RNAI_TYPE_COLUMN: rnai_type,
                     "allele_class_terms": allele_class_terms,
                     "construct_supporting_fbrfs": construct_supporting_fbrfs,
                     "insertion_supporting_fbrfs": insertion_supporting_fbrfs,
@@ -1480,6 +1539,7 @@ class StockFindingPipeline:
                     "transgenic_product_class_terms": construct_info.get(
                         "ClassTerm", ""
                     ),
+                    RNAI_TYPE_COLUMN: construct_info.get("RNAiType", ""),
                     "allele_class_terms": allele_class,
                     "construct_supporting_fbrfs": construct_info.get(
                         "SupportingFBrf", ""
@@ -1497,6 +1557,165 @@ class StockFindingPipeline:
             result["flybase_gene_id"] = result["relevant_flybase_gene_ids"]
         print(f"    Built custom phenotype rows: {len(result)} non-stock reagents")
         return result
+
+    def _build_gene_reagent_index(
+        self,
+        input_genes: List[str],
+        fbal_to_fbgn_df: pd.DataFrame,
+        fbsf_to_fbgn_df: Optional[pd.DataFrame] = None,
+        transgenic_constructs_df: Optional[pd.DataFrame] = None,
+        insertion_alleles_df: Optional[pd.DataFrame] = None,
+        fbtp_to_fbti_df: Optional[pd.DataFrame] = None,
+    ) -> pd.DataFrame:
+        """
+        Persist a complete, flat input-gene reagent index.
+
+        The index includes every FBal / FBtp / FBti reagent associated with
+        each input FBgn, independent of stock availability, ranking, or
+        downstream JSON split limits. Stage 2 uses this as the primary
+        ``all_relevant_ids`` source for the Stock Phenotype Sheet so the
+        phenotype filter is no longer narrowed to Stage-1-selected stocks.
+
+        Columns:
+            input_flybase_gene_id, input_gene_symbol, component_id,
+            component_type, component_symbol, source_allele_id,
+            source_allele_symbol, allele_class_terms,
+            transgenic_product_class_terms, rnai_type, match_provenance.
+        """
+        empty_index = pd.DataFrame(
+            columns=[
+                "input_flybase_gene_id",
+                "input_gene_symbol",
+                "component_id",
+                "component_type",
+                "component_symbol",
+                "source_allele_id",
+                "source_allele_symbol",
+                "allele_class_terms",
+                "transgenic_product_class_terms",
+                "rnai_type",
+                "match_provenance",
+            ]
+        )
+
+        if not input_genes:
+            return empty_index
+
+        component_tables = self._build_gene_component_tables(
+            input_genes,
+            fbal_to_fbgn_df,
+            fbsf_to_fbgn_df,
+            transgenic_constructs_df,
+            insertion_alleles_df,
+            fbtp_to_fbti_df,
+        )
+
+        allele_rows = component_tables["alleles"]
+        construct_rows = component_tables["constructs"]
+        insertion_rows = component_tables["insertions"]
+
+        if len(allele_rows) == 0:
+            return empty_index
+
+        rows: List[Dict[str, str]] = []
+
+        for _, allele_row in allele_rows.iterrows():
+            allele_id = clean_id(allele_row.get("AlleleID", ""))
+            fbgn = clean_id(allele_row.get("FBgnID", ""))
+            if not allele_id or not fbgn:
+                continue
+            rows.append(
+                {
+                    "input_flybase_gene_id": fbgn,
+                    "input_gene_symbol": str(allele_row.get("GeneSymbol", "") or "").strip(),
+                    "component_id": allele_id,
+                    "component_type": "FBal",
+                    "component_symbol": str(allele_row.get("AlleleSymbol", "") or "").strip(),
+                    "source_allele_id": allele_id,
+                    "source_allele_symbol": str(allele_row.get("AlleleSymbol", "") or "").strip(),
+                    "allele_class_terms": str(allele_row.get("AlleleClassTerm", "") or "").strip(),
+                    "transgenic_product_class_terms": "",
+                    "rnai_type": "",
+                    "match_provenance": str(allele_row.get("match_provenance", "") or "").strip(),
+                }
+            )
+
+        if construct_rows is not None and len(construct_rows) > 0:
+            for _, construct_row in construct_rows.iterrows():
+                fbtp_id = clean_id(construct_row.get("FBtpID", ""))
+                fbgn = clean_id(construct_row.get("FBgnID", ""))
+                allele_id = clean_id(construct_row.get("AlleleID", ""))
+                if not fbtp_id or not fbgn:
+                    continue
+                rows.append(
+                    {
+                        "input_flybase_gene_id": fbgn,
+                        "input_gene_symbol": str(construct_row.get("GeneSymbol", "") or "").strip(),
+                        "component_id": fbtp_id,
+                        "component_type": "FBtp",
+                        "component_symbol": str(construct_row.get("FBtpSymbol", "") or "").strip(),
+                        "source_allele_id": allele_id,
+                        "source_allele_symbol": str(construct_row.get("AlleleSymbol", "") or "").strip(),
+                        "allele_class_terms": str(construct_row.get("AlleleClassTerm", "") or "").strip(),
+                        "transgenic_product_class_terms": str(
+                            construct_row.get("TransgenicProductClassTerm", "") or ""
+                        ).strip(),
+                        "rnai_type": str(construct_row.get("RNAiType", "") or "").strip(),
+                        "match_provenance": str(construct_row.get("match_provenance", "") or "").strip(),
+                    }
+                )
+
+        if insertion_rows is not None and len(insertion_rows) > 0:
+            for _, insertion_row in insertion_rows.iterrows():
+                fbti_id = clean_id(insertion_row.get("FBtiID", ""))
+                fbgn = clean_id(insertion_row.get("FBgnID", ""))
+                allele_id = clean_id(insertion_row.get("AlleleID", ""))
+                if not fbti_id or not fbgn:
+                    continue
+                rows.append(
+                    {
+                        "input_flybase_gene_id": fbgn,
+                        "input_gene_symbol": str(insertion_row.get("GeneSymbol", "") or "").strip(),
+                        "component_id": fbti_id,
+                        "component_type": "FBti",
+                        "component_symbol": str(insertion_row.get("FBtiSymbol", "") or "").strip(),
+                        "source_allele_id": allele_id,
+                        "source_allele_symbol": str(insertion_row.get("AlleleSymbol", "") or "").strip(),
+                        "allele_class_terms": str(insertion_row.get("AlleleClassTerm", "") or "").strip(),
+                        "transgenic_product_class_terms": "",
+                        "rnai_type": "",
+                        "match_provenance": str(insertion_row.get("match_provenance", "") or "").strip(),
+                    }
+                )
+
+        if not rows:
+            return empty_index
+
+        index_df = pd.DataFrame(rows, columns=empty_index.columns)
+        # Collapse duplicates so a (gene, component, source_allele, provenance)
+        # tuple does not appear multiple times. Use a deterministic order so
+        # downstream consumers get stable output.
+        index_df = index_df.drop_duplicates(
+            subset=[
+                "input_flybase_gene_id",
+                "component_id",
+                "source_allele_id",
+                "match_provenance",
+            ]
+        ).reset_index(drop=True)
+
+        n_genes = index_df["input_flybase_gene_id"].nunique()
+        n_components = index_df["component_id"].nunique()
+        type_counts = index_df["component_type"].value_counts().to_dict()
+        type_summary = ", ".join(
+            f"{ctype}={int(type_counts.get(ctype, 0))}"
+            for ctype in ("FBal", "FBtp", "FBti")
+        )
+        print(
+            f"    Built gene reagent index: {len(index_df)} rows, "
+            f"{n_components} unique components, {n_genes} input genes ({type_summary})"
+        )
+        return index_df
 
     def _refresh_stock_metadata_from_flybase(
         self,
@@ -1986,6 +2205,21 @@ class StockFindingPipeline:
         if len(stock_mapping) > 0:
             stock_mapping["custom_stock"] = False
 
+        # Build complete gene reagent index for the primary Stock Phenotype
+        # Sheet flow. This must be persisted independently of stock matching
+        # so Stage 2 can drive the sheet from the full input-gene reagent
+        # universe rather than the Stage-1-survived stocks_df subset.
+        print(f"\n{'='*60}")
+        print("Building gene reagent index...")
+        gene_reagent_index = self._build_gene_reagent_index(
+            unique_genes,
+            tables["fbal_to_fbgn"],
+            tables.get("fbsf_to_fbgn"),
+            tables.get("transgenic_construct_descriptions"),
+            tables.get("insertion_allele_descriptions"),
+            tables.get("fbtp_to_fbti"),
+        )
+
         phenotype_df = tables.get("genotype_phenotype_data")
         if phenotype_df is not None and len(phenotype_df) > 0:
             custom_phenotype_rows = self._build_custom_phenotype_rows(
@@ -2007,8 +2241,59 @@ class StockFindingPipeline:
                 stock_mapping["custom_stock"] = stock_mapping["custom_stock"].fillna(False)
 
         if len(stock_mapping) == 0:
-            print("No stocks or custom phenotype reagents found for input genes")
-            return None
+            if gene_reagent_index is None or len(gene_reagent_index) == 0:
+                print("No stocks, custom phenotype reagents, or gene reagents found for input genes")
+                return None
+
+            # Persist the complete reagent index even when no stock/custom rows
+            # exist. This lets Stage 2 build no-stock phenotype rows from the
+            # phenotype table instead of depending on Stage 1 stock survival.
+            output_path = output_dir / "aggregated_stock_refs.xlsx"
+            print(
+                "No stocks or custom phenotype reagents found for input genes; "
+                "writing Gene Reagent Index-only workbook."
+            )
+            empty_stocks_df = pd.DataFrame(
+                columns=[
+                    "FBst",
+                    "stock_number",
+                    "collection",
+                    "genotype",
+                    "num_Balancers",
+                    "Balancers",
+                    "FBti_count",
+                    "attP_count",
+                    "matched_component_symbols",
+                    "matched_component_ids",
+                    "matched_component_types",
+                    "relevant_fbal_symbols",
+                    "relevant_fbal_ids",
+                    "relevant_fbtp_symbols",
+                    "relevant_fbtp_ids",
+                    "relevant_fbti_symbols",
+                    "relevant_fbti_ids",
+                    "relevant_component_symbols",
+                    "relevant_component_ids",
+                    "relevant_gene_symbols",
+                    "relevant_flybase_gene_ids",
+                    "transgenic_product_class_terms",
+                    RNAI_TYPE_COLUMN,
+                    "allele_class_terms",
+                    "custom_stock",
+                    *REAGENT_BUCKET_COLUMNS,
+                    "sgRNA",
+                    "RNAi",
+                ]
+            )
+            with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+                empty_stocks_df.to_excel(writer, sheet_name="Stocks", index=False)
+                gene_reagent_index.to_excel(
+                    writer,
+                    sheet_name="Gene Reagent Index",
+                    index=False,
+                )
+            print(f"  Output: {output_path}")
+            return output_path
         
         # Get references
         print(f"\nGetting references...")
@@ -2050,6 +2335,10 @@ class StockFindingPipeline:
         )
         rnai_count = int(stock_mapping['RNAi'].sum())
         print(f"    RNAi proxy: {rnai_count} stocks marked as RNAi")
+        stock_mapping[RNAI_TYPE_COLUMN] = stock_mapping.apply(
+            _resolve_rnai_type_for_row,
+            axis=1,
+        )
 
         reagent_bucket_df = stock_mapping.apply(
             lambda row: pd.Series(_derive_one_hot_reagent_buckets(row)),
@@ -2149,6 +2438,7 @@ class StockFindingPipeline:
             'relevant_gene_symbols',
             'relevant_flybase_gene_ids',
             'transgenic_product_class_terms',
+            RNAI_TYPE_COLUMN,
             'allele_class_terms',
             'FBal PMID',
             'FBtp PMID',
@@ -2236,6 +2526,12 @@ class StockFindingPipeline:
             stock_mapping_out.to_excel(writer, sheet_name='Stocks', index=False)
             if references_df is not None and len(references_df) > 0:
                 references_df.to_excel(writer, sheet_name='References', index=False)
+            if gene_reagent_index is not None and len(gene_reagent_index) > 0:
+                gene_reagent_index.to_excel(
+                    writer,
+                    sheet_name='Gene Reagent Index',
+                    index=False,
+                )
             
             if not self.settings.soft_run:
                 # Apply light grey fill to GPT-derived column headers only

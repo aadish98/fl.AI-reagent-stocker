@@ -32,9 +32,20 @@ from fl_ai_reagent_stocker.pipelines.stock_splitting import (  # noqa: E402
     _build_stock_phenotype_sheet,
     _extract_flybase_ids,
 )
-from fl_ai_reagent_stocker.utils import clean_id, load_flybase_tsv, unique_join  # noqa: E402
+from fl_ai_reagent_stocker.utils import (  # noqa: E402
+    clean_id,
+    find_latest_xml,
+    load_flybase_tsv,
+    unique_join,
+)
 
 ALLELES = REPO_ROOT / "data" / "flybase" / "alleles_and_stocks"
+CHADO_FBST_PREFIX = "chado_FBst"
+
+
+def _resolve_chado_fbst_path() -> Path:
+    """Return the latest chado FBst XML(.gz) file under ALLELES."""
+    return find_latest_xml(ALLELES, CHADO_FBST_PREFIX)
 # Chado / stocks genotype strings may contain human symbols like "FBXO11" that match a loose
 # "FB + letters + digits" heuristic but are not FlyBase database IDs.
 CANONICAL_FB_ID_RE = re.compile(
@@ -63,8 +74,12 @@ def _load_build_module():
 
 
 def freeze_artifacts() -> Dict[str, Any]:
+    try:
+        chado_fbst_path = _resolve_chado_fbst_path()
+    except FileNotFoundError:
+        chado_fbst_path = ALLELES / f"{CHADO_FBST_PREFIX}.xml.gz"
     paths = {
-        "chado_FBst_xml_gz": ALLELES / "chado_FBst.xml.gz",
+        "chado_FBst_xml_gz": chado_fbst_path,
         "fbst_to_derived_stock_component_csv": ALLELES / "fbst_to_derived_stock_component.csv",
         "stocks_FB": ALLELES / "stocks_FB2026_01.tsv.gz",
         "fbal_to_fbgn": ALLELES / "fbal_to_fbgn_fb_2026_01.tsv.gz",
@@ -186,6 +201,11 @@ def audit_chado_token_gaps(build_mod) -> Dict[str, Any]:
     genotype_no_tokens = 0
 
     chado_path = build_mod.DEFAULT_CHADO_PATH
+    if chado_path is None:
+        raise FileNotFoundError(
+            f"No '{CHADO_FBST_PREFIX}*.xml(.gz)' file found in {ALLELES}. "
+            "Run 'python scripts/refresh_flybase_data.py --with-xml' first."
+        )
     with gzip.open(chado_path, "rt", encoding="utf-8") as handle:
         for _, elem in ET.iterparse(handle, events=("end",)):
             if elem.tag != "stock":
@@ -476,7 +496,15 @@ def spot_check_stocks(
 
 
 def relevant_component_ablation(flybase_data_path: Path) -> List[Dict[str, Any]]:
-    """Reconstruct join: phenotype sheet row counts when relevant_component_ids is narrowed."""
+    """Reconstruct join: phenotype sheet row counts when relevant_component_ids is narrowed.
+
+    This audit intentionally exercises the legacy fallback path of
+    ``_build_stock_phenotype_sheet`` (no ``reagent_index_df`` supplied), which
+    drives the reagent universe from ``relevant_component_ids`` on the
+    provided stocks dataframe. The primary (true full-scope) flow uses a
+    persisted Stage 1 reagent index instead, which is exercised by the
+    end-to-end pipeline tests, not this ablation.
+    """
     fbst = "FBst0000006"
     full_ids = "FBal0018186; FBal0028921; FBba0000025; FBti0002044"
     narrow_ids = "FBal0018186"
@@ -517,7 +545,12 @@ def relevant_component_ablation(flybase_data_path: Path) -> List[Dict[str, Any]]
 
 
 def synthetic_sheet_smoke(flybase_data_path: Path) -> Dict[str, Any]:
-    """Call _build_stock_phenotype_sheet with minimal included_df; ensure non-empty or explain."""
+    """Call _build_stock_phenotype_sheet with minimal included_df; ensure non-empty or explain.
+
+    This smoke check uses the legacy fallback path (no ``reagent_index_df``)
+    to validate the historic behavior on a synthetic FBst. The primary
+    gene-first flow is covered by ``tests/test_phenotype_reagent_capture.py``.
+    """
     fbst = "FBst0000006"
     included = pd.DataFrame(
         [
@@ -650,7 +683,13 @@ def main() -> int:
     )
 
     print("    Chado XML: extract_stock_component_rows + build_dataframe audit...")
-    extracted_rows, ex_summary = build_mod.extract_stock_component_rows(build_mod.DEFAULT_CHADO_PATH)
+    chado_path = build_mod.DEFAULT_CHADO_PATH
+    if chado_path is None:
+        raise FileNotFoundError(
+            f"No '{CHADO_FBST_PREFIX}*.xml(.gz)' file found in {ALLELES}. "
+            "Run 'python scripts/refresh_flybase_data.py --with-xml' first."
+        )
+    extracted_rows, ex_summary = build_mod.extract_stock_component_rows(chado_path)
     payload["audit_chado_extraction"] = format_chado_xml_extraction_audit(
         ex_summary, len(extracted_rows)
     )
