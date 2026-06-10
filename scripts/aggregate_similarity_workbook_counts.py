@@ -183,7 +183,7 @@ def parse_cosine_contents(contents_df: pd.DataFrame) -> Dict[str, int]:
         row_count = row[2] if len(row) > 2 else ""
         if not sheet_name:
             continue
-        if sheet_name in {"Gene Set", "Stock Phenotype Sheet"}:
+        if sheet_name in {"Gene Set", "All Phenotypic Stocks Sheet"}:
             continue
         tier_label = _extract_cosine_range_label(sheet_name, meaning)
         tier_counts[tier_label] = _coerce_non_negative_int(

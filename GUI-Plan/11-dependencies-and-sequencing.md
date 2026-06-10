@@ -8,7 +8,7 @@ guarantees for the GUI.
 
 | Plan | Status | Purpose for the GUI |
 |---|---|---|
-| [`/Users/aadishms/.cursor/plans/phenotype_sheet_rework_844d6a5c.plan.md`](/Users/aadishms/.cursor/plans/phenotype_sheet_rework_844d6a5c.plan.md) | Implemented | Provides the gene-first `Stock Phenotype Sheet` and the persisted Stage 1 `Gene Reagent Index`. |
+| [`/Users/aadishms/.cursor/plans/phenotype_sheet_rework_844d6a5c.plan.md`](/Users/aadishms/.cursor/plans/phenotype_sheet_rework_844d6a5c.plan.md) | Implemented | Provides the gene-first `All Phenotypic Stocks Sheet` and the persisted Stage 1 `Gene Reagent Index`. |
 | [`/Users/aadishms/.cursor/plans/simplify-cli_b16a2d0c.plan.md`](/Users/aadishms/.cursor/plans/simplify-cli_b16a2d0c.plan.md) | Pending | Cleans up the public CLI surface so the GUI can rely on a single, clearer set of commands and flag semantics. |
 
 ## Phenotype-Sheet Rework: What The GUI Now Inherits
@@ -20,7 +20,7 @@ and
 
 What this gives the GUI:
 
-- `Stock Phenotype Sheet` is **gene-first**: every input-gene FBal/FBtp/FBti
+- `All Phenotypic Stocks Sheet` is **gene-first**: every input-gene FBal/FBtp/FBti
   reagent is considered, regardless of whether a stock survived earlier stages.
 - A `Gene Reagent Index` sheet is persisted in `aggregated_stock_refs.xlsx`
   for every input gene.
@@ -49,7 +49,7 @@ After the simplify-cli plan executes, the public CLI surface becomes:
 ```text
 fl-ai-reagent-stocker find-stocks         GENE_LIST_DIR --config ...
 fl-ai-reagent-stocker split-stocks        STOCKS_DIR    --config ...
-fl-ai-reagent-stocker phenotype-sheet     STOCKS_DIR    --config ... --similarity none|tiers|simple-buckets|keyword-buckets
+fl-ai-reagent-stocker phenotype-sheet     STOCKS_DIR    --config ... [--similarity tiers|simple-buckets|keyword-buckets] [--embeddings|--no-embeddings]
 fl-ai-reagent-stocker validate-stocks     STOCKS_DIR    --config ...
 fl-ai-reagent-stocker run-full-pipeline   GENE_LIST_DIR --config ... --mode normal|phenotype
 ```
@@ -61,11 +61,13 @@ GUI consequences:
   enum makes documentation, smoke checks, and any optional
   shell-out commands much simpler.
 - The GUI's default phenotype-first run cleanly maps to:
-  - Equivalent of `phenotype-sheet ... --similarity none` when OpenAI is off.
+  - Equivalent of `phenotype-sheet ... --no-embeddings` when OpenAI is off.
   - Equivalent of `phenotype-sheet ... --similarity keyword-buckets` if the
-    user wants the keyword-hit/no-hit sidecar workbook.
+    user wants the keyword-hit/no-hit sidecar workbook without OpenAI.
+  - Equivalent of `phenotype-sheet ... --similarity tiers --embeddings` when
+    the user explicitly wants cosine-tier output.
 - Internal `Settings` flags (`soft_run`, `enable_oai_embedding`,
-  `simple_buckets`, `keyword_bucketing`) are kept as the implementation
+  `simple_buckets`, `keyword_bucketing`, `phenotype_similarity_sidecar`) are kept as the implementation
   substrate; the GUI does not have to care about them once the simplify-cli
   mapping is in place.
 
@@ -92,7 +94,7 @@ GUI consequences:
   more rows than the legacy narrowing. The GUI should default to keyword-hit
   + filtered views, not full-table dumps.
 - **Schema regression for Maddy's PowerShell scripts**: those scripts read
-  `Stock Phenotype Sheet` by name and column shape; column-name changes
+  `All Phenotypic Stocks Sheet` by name and column shape; column-name changes
   must keep aliases until the Python RNAi planning module replaces the
   PowerShell flow end-to-end.
 - **Streamlit fragility for senior users**: trade-off accepted for MVP; track

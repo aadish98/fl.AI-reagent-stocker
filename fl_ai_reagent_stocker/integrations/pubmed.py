@@ -9,12 +9,18 @@ This module provides:
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import requests
 
+from ..config import DEFAULT_CONTACT_EMAIL
 from ..utils import clean_id
+
+
+# Process-level cache of parsed PubMed metadata CSVs. Values are copied into
+# each PubMedCache instance so per-instance writes/fetch updates remain isolated.
+_PARSED_PUBMED_CACHE_BY_PATH_MTIME: Dict[Tuple[str, int], Dict[str, dict]] = {}
 
 # Try to import Biopython
 try:
@@ -162,6 +168,16 @@ class PubMedCache:
             return self._cache
 
         if self.cache_path.exists():
+            cache_key = (
+                str(self.cache_path.resolve()),
+                self.cache_path.stat().st_mtime_ns,
+            )
+            cached = _PARSED_PUBMED_CACHE_BY_PATH_MTIME.get(cache_key)
+            if cached is not None:
+                self._cache = dict(cached)
+                self._loaded = True
+                return self._cache
+
             try:
                 cache_df = pd.read_csv(self.cache_path, dtype=str, keep_default_na=False)
                 drop_cols = [c for c in cache_df.columns if str(c).startswith("Unnamed")]
@@ -193,6 +209,7 @@ class PubMedCache:
                         if not pmid:
                             continue
                         self._cache[pmid] = self._normalize_entry(row.to_dict())
+                _PARSED_PUBMED_CACHE_BY_PATH_MTIME[cache_key] = dict(self._cache)
                 print(f"    Loaded {len(self._cache)} entries from PubMed cache")
             except Exception as e:
                 print(f"    Warning: Could not load PubMed cache: {e}")
@@ -270,8 +287,9 @@ class PubMedClient:
     def __init__(
         self,
         cache: Optional[PubMedCache] = None,
-        email: str = "flybase_scraper@example.com",
-        api_key: Optional[str] = None
+        email: str = DEFAULT_CONTACT_EMAIL,
+        api_key: Optional[str] = None,
+        batch_size: int = 50,
     ):
         """
         Initialize the PubMed client.
@@ -284,6 +302,7 @@ class PubMedClient:
         self.cache = cache
         self.email = email
         self.api_key = api_key
+        self.batch_size = max(1, min(int(batch_size or 50), 200))
         
         if not BIOPYTHON_AVAILABLE:
             print("    Warning: Biopython not installed. PubMed fetching will be limited.")
@@ -424,7 +443,7 @@ class PubMedClient:
                 pass
             return ""
 
-        batch_size = 200  # NCBI limit
+        batch_size = self.batch_size
         total_fetched = 0
 
         for i in range(0, len(pmids_to_fetch), batch_size):
@@ -592,7 +611,11 @@ class PubMedClient:
         return any(kw.lower() in text for kw in keywords)
 
 
-def convert_pmid_pmcid(ids: List[str], id_type: str = "pmid") -> Dict[str, str]:
+def convert_pmid_pmcid(
+    ids: List[str],
+    id_type: str = "pmid",
+    batch_size: int = 200,
+) -> Dict[str, str]:
     """
     Convert between PMID and PMCID using NCBI's ID Converter API.
     
@@ -608,7 +631,7 @@ def convert_pmid_pmcid(ids: List[str], id_type: str = "pmid") -> Dict[str, str]:
     
     base_url = "https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/"
     results = {}
-    batch_size = 200
+    batch_size = max(1, min(int(batch_size or 200), 200))
     
     clean_ids = [clean_id(id_val) for id_val in ids if clean_id(id_val)]
     
@@ -624,7 +647,7 @@ def convert_pmid_pmcid(ids: List[str], id_type: str = "pmid") -> Dict[str, str]:
                 "ids": ids_str,
                 "format": "json",
                 "tool": "flybase_stock_scraper",
-                "email": "flybase_scraper@example.com"
+                "email": DEFAULT_CONTACT_EMAIL,
             }
             
             response = requests.get(base_url, params=params, timeout=30)

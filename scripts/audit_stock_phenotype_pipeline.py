@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stock Phenotype Sheet / Chado curation audit (plan implementation).
+All Phenotypic Stocks Sheet / Chado curation audit (plan implementation).
 
 Writes machine-readable JSON and a short Markdown summary under audit_outputs/.
 Run from repo root:

@@ -210,6 +210,9 @@ GET_FBGN_IDS_SCRIPT = HELPER_SCRIPTS / "fetch_fbgn_ids.py"
 LOGS_DIR = REPO_ROOT / "data" / "logs"
 GPT_LOGS_DIR = LOGS_DIR / "gpt_queries"
 
+# Contact email used for NCBI/Entrez and Unpaywall requests.
+DEFAULT_CONTACT_EMAIL = "aadishms@umich.edu"
+
 def normalize_phenotype_similarity_targets(
     raw_targets: Optional[List[Dict[str, Any]]],
 ) -> List[Dict[str, str]]:
@@ -309,11 +312,23 @@ class Settings:
     enable_oai_embedding: bool = False
     simple_buckets: bool = False
     keyword_bucketing: bool = False
+    phenotype_similarity_sidecar: Optional[bool] = None
+    # When False, skip generating the phenotype-similarity t-SNE/density plot
+    # folder even if embeddings (cosine scoring) are enabled.
+    phenotype_similarity_plots: bool = True
+    # When False, do not emit the no-PMID FBrf sidecar .txt report.
+    emit_no_pmid_report: bool = True
+    # When set, organized/aggregated workbooks are written directly into this
+    # directory instead of a nested ``Organized Stocks`` subfolder.
+    organized_output_dir: Optional[Path] = None
     skip_fbgnid_conversion: bool = False
     phenotype_similarity_targets: Optional[List[Dict[str, str]]] = None
     
     # Functional validation limits
     max_gpt_calls_per_stock: Optional[int] = 5  # Max OpenAI GPT calls per stock (None = no limit)
+    min_fulltext_chars: int = 500
+    gpt_call_delay_seconds: float = 0.5
+    short_circuit_on_functional_validation: bool = True
     
     def __post_init__(self):
         """Load environment variables if API keys not provided."""
@@ -327,7 +342,7 @@ class Settings:
             self.openai_api_key = os.getenv("OPENAI_API_KEY")
         
         if self.unpaywall_token is None:
-            self.unpaywall_token = os.getenv("UNPAYWALL_TOKEN", "aadish98@gmail.com")
+            self.unpaywall_token = os.getenv("UNPAYWALL_TOKEN", DEFAULT_CONTACT_EMAIL)
         
         # Override model from environment if set
         env_model = os.getenv("OPENAI_MODEL")
@@ -420,16 +435,21 @@ class Settings:
         # Check API keys
         if not self.openai_api_key:
             issues.append("OPENAI_API_KEY not set - functional validation will be disabled")
-        elif self.enable_oai_embedding and not self.soft_run:
-            issues.append("--OAI-embedding is enabled without --soft-run; phenotype similarity embeddings only run in soft-run mode")
-        elif self.keyword_bucketing and not self.enable_oai_embedding:
-            issues.append("--keyword-bucketing is enabled without --OAI-embedding; keyword bucket workbooks only run in the phenotype similarity embedding path")
-        elif self.keyword_bucketing and not self.soft_run:
-            issues.append("--keyword-bucketing is enabled without --soft-run; keyword bucket workbooks only run in soft-run mode")
-        elif self.simple_buckets and not self.enable_oai_embedding:
-            issues.append("--simple-buckets is enabled without --OAI-embedding; simple bucket workbooks only run in the phenotype similarity embedding path")
-        elif self.simple_buckets and not self.soft_run:
-            issues.append("--simple-buckets is enabled without --soft-run; simple bucket workbooks only run in soft-run mode")
+        if self.enable_oai_embedding and not self.soft_run:
+            issues.append(
+                "`enable_oai_embedding` is set without `soft_run`; phenotype "
+                "embeddings only run in the phenotype-sheet path."
+            )
+        if self.keyword_bucketing and not self.soft_run:
+            issues.append(
+                "`keyword_bucketing` is set without `soft_run`; keyword bucket "
+                "workbooks only run in the phenotype-sheet path."
+            )
+        if self.simple_buckets and not self.soft_run:
+            issues.append(
+                "`simple_buckets` is set without `soft_run`; simple bucket "
+                "workbooks only run in the phenotype-sheet path."
+            )
         
         if not self.ncbi_api_key:
             issues.append("NCBI_API_KEY not set - PubMed queries may be rate-limited")

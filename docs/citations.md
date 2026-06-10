@@ -146,7 +146,8 @@ URL: <https://europepmc.org/>
 ### Unpaywall
 
 **Used for:** locating open-access PDFs by DOI when full text is paywalled.
-Set `UNPAYWALL_TOKEN` (your contact email) per Unpaywall's terms of service.
+Set `UNPAYWALL_TOKEN` (your contact email; default `aadishms@umich.edu`) per
+Unpaywall's terms of service.
 
 > Piwowar H. *et al.* The state of OA: a large-scale analysis of the
 > prevalence and impact of Open Access articles. *PeerJ* 6, e4375 (2018).
@@ -178,10 +179,12 @@ URL: <https://openalex.org/>
 
 ## 4. AI models (OpenAI)
 
-**Used for:** (a) phenotype-text embeddings for cosine-similarity bucketing
-in `phenotype-sheet --similarity tiers`, and (b) functional validation of
-`Ref++` stocks in `validate-stocks`. The defaults are configured in
-`fl_ai_reagent_stocker/config.py`:
+**Used for:** (a) phenotype-text embeddings when the embedding analysis is
+enabled with `settings.embeddings.enabled`, which produces cosine columns,
+similarity tiers, and plots, and (b) functional
+validation of `Ref++` stocks during `run` (or `validate-stocks`) when the
+required JSON config block `settings.validation.enabled` is `true`. Model
+defaults are configured in `fl_ai_reagent_stocker/config.py`:
 
 - chat / validation model: `gpt-5-mini` (override with `OPENAI_MODEL`)
 - embedding model: `text-embedding-3-large` (override with

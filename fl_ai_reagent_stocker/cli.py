@@ -1,39 +1,32 @@
 """
 Command-line interface for the ``fl_ai_reagent_stocker`` package.
 
-Public commands:
+Primary command:
 
-- ``find-stocks``: Stage 1 stock and reference discovery; persists the
-  ``Gene Reagent Index`` sheet alongside ``Stocks`` and ``References``.
-- ``split-stocks``: Stage 2 JSON stock organization only. Does not produce
-  the phenotype-sheet workbook.
-- ``phenotype-sheet``: gene-first phenotype reagent flow over Stage 1
-  workbook(s). Selects the optional similarity sidecar layout via
-  ``--similarity``.
-- ``validate-stocks``: Stage 3 GPT validation only. Does not produce the
-  phenotype-sheet workbook.
-- ``run-full-pipeline``: end-to-end wrapper from raw gene-list CSVs.
-  ``--mode normal`` runs Stage 1 + ``split-stocks`` + ``validate-stocks``.
-  ``--mode phenotype`` runs Stage 1 + ``phenotype-sheet`` only and never
-  invokes GPT validation.
+- ``run``: end-to-end pipeline from raw gene-list CSVs. It builds the Stage 1
+  stock/reference workbook, organizes stocks with the JSON config (including
+  any phenotype-relevance filters), and validates ``Ref++`` output stocks.
+  The JSON config controls whether phenotype embeddings are computed.
+
+Advanced per-stage entry points (``find-stocks``, ``split-stocks``,
+``phenotype-sheet``, ``validate-stocks``) remain available for power users and
+tests but are not the primary interface.
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
+import shutil
 import sys
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 import pandas as pd
 
 from .config import Settings
 from .pipelines.stock_finding import StockFindingPipeline
 from .pipelines.stock_splitting import StockSplittingPipeline, load_split_config
-
-
-SIMILARITY_CHOICES = ("none", "tiers", "simple-buckets", "keyword-buckets")
-PIPELINE_MODE_CHOICES = ("normal", "phenotype")
 
 
 ###############################################################################
@@ -60,61 +53,6 @@ def _add_quiet_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_stage1_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--gene-col",
-        default="flybase_gene_id",
-        help="Name of the FBgn ID column in input CSVs (default: flybase_gene_id).",
-    )
-    parser.add_argument(
-        "--input-gene-col",
-        default="ext_gene",
-        help="Name of the gene-symbol column in input CSVs (default: ext_gene).",
-    )
-    parser.add_argument(
-        "--batch-size",
-        "-b",
-        type=int,
-        default=50,
-        help="PubMed/full-text batch size (default: 50).",
-    )
-    parser.add_argument(
-        "--skip-fbgnid-conversion",
-        action="store_true",
-        help="Trust the FBgn IDs in the input CSV without rebuilding them.",
-    )
-
-
-def _add_validation_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--test-log",
-        action="store_true",
-        help="Write per-call GPT logs under data/logs/gpt_queries/.",
-    )
-    parser.add_argument(
-        "--max-gpt-calls-per-stock",
-        type=int,
-        default=5,
-        help="Cap actual GPT calls per stock during validation (default: 5).",
-    )
-
-
-def _add_similarity_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--similarity",
-        choices=SIMILARITY_CHOICES,
-        default="none",
-        help=(
-            "Phenotype similarity sidecar layout. "
-            "'none' writes only the Stock Phenotype Sheet. "
-            "'tiers' adds the cosine-threshold tier workbook. "
-            "'simple-buckets' adds the collection/UAS/sleep-circ/balancer workbook. "
-            "'keyword-buckets' adds the Keyword Hits / No Keyword Hits workbook. "
-            "(default: none)"
-        ),
-    )
-
-
 ###############################################################################
 # Parser construction
 ###############################################################################
@@ -123,25 +61,47 @@ def _add_similarity_arg(parser: argparse.ArgumentParser) -> None:
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fl-ai-reagent-stocker",
-        description="Drosophila stock finding, splitting, phenotype-sheet, and validation pipelines",
+        description="Drosophila reagent-stocker pipeline: gene lists to organized, validated stock sheets",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python -m fl_ai_reagent_stocker find-stocks ./gene_lists --config ./my_config.json
-    python -m fl_ai_reagent_stocker split-stocks ./gene_lists/Stocks --config ./my_config.json
-    python -m fl_ai_reagent_stocker phenotype-sheet ./gene_lists/Stocks --config ./my_config.json --similarity tiers
-    python -m fl_ai_reagent_stocker validate-stocks ./gene_lists/Stocks --config ./my_config.json --test-log
-    python -m fl_ai_reagent_stocker run-full-pipeline ./gene_lists --config ./my_config.json --mode normal
-    python -m fl_ai_reagent_stocker run-full-pipeline ./gene_lists --config ./my_config.json --mode phenotype --similarity tiers
+    python -m fl_ai_reagent_stocker run ./gene_lists --config ./my_config.json
 """,
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
+    # run (primary, config-driven, end-to-end)
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run the end-to-end pipeline from gene-list CSVs (config-driven)",
+        description=(
+            "End-to-end pipeline from gene-list CSVs. Builds the Stage 1 "
+            "stock/reference workbook, organizes stocks with the JSON config "
+            "(including any phenotype-relevance filters), validates Ref++ "
+            "output stocks when enabled by the JSON config, and computes "
+            "phenotype-embedding cosine columns when enabled by the JSON config. "
+            "Outputs are written cleanly: each gene set's final "
+            "<gene set>_aggregated.xlsx lives directly in its Stocks folder, "
+            "and a combined combination-counts summary is written at the input "
+            "root. The similarity sidecar workbook and t-SNE/plot folders are "
+            "not emitted by the primary run."
+        ),
+    )
+    run_parser.add_argument(
+        "input_dir",
+        type=Path,
+        help="Directory containing CSV gene lists.",
+    )
+    _add_config_arg(run_parser)
+    _add_quiet_arg(run_parser)
+
+    # ----- Advanced per-stage entry points (not the primary interface) -----
+
     # find-stocks
     find_parser = subparsers.add_parser(
         "find-stocks",
-        help="Stage 1: map genes to FlyBase stocks, references, and the Gene Reagent Index",
+        help="Advanced: Stage 1 mapping of genes to FlyBase stocks, references, and the Gene Reagent Index",
     )
     find_parser.add_argument(
         "input_dir",
@@ -149,12 +109,11 @@ Examples:
         help="Directory containing CSV gene lists.",
     )
     _add_config_arg(find_parser)
-    _add_stage1_args(find_parser)
 
     # split-stocks (organization-only)
     split_parser = subparsers.add_parser(
         "split-stocks",
-        help="Stage 2: organize stocks using JSON filters only (no phenotype sheet)",
+        help="Advanced: organize stocks using JSON filters only",
     )
     split_parser.add_argument(
         "input_dir",
@@ -167,14 +126,12 @@ Examples:
     # phenotype-sheet (gene-first phenotype reagent flow)
     phenotype_parser = subparsers.add_parser(
         "phenotype-sheet",
-        help="Build the gene-first Stock Phenotype Sheet from Stage 1 workbook(s)",
+        help="Advanced: build the gene-first All Phenotypic Stocks Sheet from Stage 1 workbook(s)",
         description=(
-            "Build the gene-first Stock Phenotype Sheet from Stage 1 workbook(s). "
+            "Build the gene-first All Phenotypic Stocks Sheet from Stage 1 workbook(s). "
             "Consumes a Stage 1 workbook directory such as ./gene_lists/Stocks "
             "and expects a 'Gene Reagent Index' sheet for full-scope output. "
-            "Workbooks without the index still run via a legacy fallback that is "
-            "best-effort and not true full scope; re-run find-stocks to refresh "
-            "the index."
+            "OpenAI phenotype-embedding analysis is controlled by the JSON config."
         ),
     )
     phenotype_parser.add_argument(
@@ -184,12 +141,11 @@ Examples:
     )
     _add_config_arg(phenotype_parser)
     _add_quiet_arg(phenotype_parser)
-    _add_similarity_arg(phenotype_parser)
 
     # validate-stocks (GPT validation only)
     validate_parser = subparsers.add_parser(
         "validate-stocks",
-        help="Stage 3: append GPT validation results to Ref++ output sheets (no phenotype sheet)",
+        help="Advanced: append GPT validation results to Ref++ output sheets",
     )
     validate_parser.add_argument(
         "input_dir",
@@ -198,38 +154,6 @@ Examples:
     )
     _add_config_arg(validate_parser)
     _add_quiet_arg(validate_parser)
-    _add_validation_args(validate_parser)
-
-    # run-full-pipeline (end-to-end wrapper)
-    full_parser = subparsers.add_parser(
-        "run-full-pipeline",
-        help="End-to-end wrapper from raw gene-list CSVs",
-        description=(
-            "End-to-end wrapper from raw gene-list CSVs. "
-            "--mode normal runs Stage 1 + split-stocks + validate-stocks. "
-            "--mode phenotype runs Stage 1 + phenotype-sheet only and never "
-            "invokes GPT validation."
-        ),
-    )
-    full_parser.add_argument(
-        "input_dir",
-        type=Path,
-        help="Directory containing CSV gene lists.",
-    )
-    _add_config_arg(full_parser)
-    _add_quiet_arg(full_parser)
-    _add_stage1_args(full_parser)
-    full_parser.add_argument(
-        "--mode",
-        choices=PIPELINE_MODE_CHOICES,
-        default="normal",
-        help=(
-            "Pipeline mode. 'normal' runs Stage 1 + split-stocks + validate-stocks. "
-            "'phenotype' runs Stage 1 + phenotype-sheet only. (default: normal)"
-        ),
-    )
-    _add_similarity_arg(full_parser)
-    _add_validation_args(full_parser)
 
     return parser
 
@@ -239,42 +163,88 @@ Examples:
 ###############################################################################
 
 
-def _similarity_to_settings_kwargs(similarity: str) -> dict:
-    """Map ``--similarity`` choice to ``Settings`` feature flags."""
-    if similarity == "none":
-        return {
-            "soft_run": True,
-            "enable_oai_embedding": False,
-            "simple_buckets": False,
-            "keyword_bucketing": False,
-        }
-    if similarity == "tiers":
-        return {
-            "soft_run": True,
-            "enable_oai_embedding": True,
-            "simple_buckets": False,
-            "keyword_bucketing": False,
-        }
-    if similarity == "simple-buckets":
-        return {
-            "soft_run": True,
-            "enable_oai_embedding": True,
-            "simple_buckets": True,
-            "keyword_bucketing": False,
-        }
-    if similarity == "keyword-buckets":
-        return {
-            "soft_run": True,
-            "enable_oai_embedding": True,
-            "simple_buckets": False,
-            "keyword_bucketing": True,
-        }
-    raise ValueError(f"Unknown --similarity choice: {similarity!r}")
+def _resolve_config_path(config_path: Optional[Path]) -> Path:
+    """Return the explicit config path, or the Settings default config path."""
+    if config_path:
+        return config_path
+    return Settings().split_config_path
+
+
+def _load_config_settings(config_path: Path) -> dict:
+    """Load validated JSON settings."""
+    return load_split_config(config_path)["settings"]
+
+
+def _load_input_policy(config_path: Path) -> dict:
+    return _load_config_settings(config_path)["input"]
+
+
+def _load_pubmed_policy(config_path: Path) -> dict:
+    return _load_config_settings(config_path)["pubmed"]
+
+
+def _load_embeddings_policy(config_path: Path) -> dict:
+    return _load_config_settings(config_path)["embeddings"]
+
+
+def _load_output_policy(config_path: Path) -> dict:
+    return _load_config_settings(config_path)["output"]
+
+
+def _resolve_phenotype_settings_kwargs(embeddings: bool) -> dict:
+    """Map the phenotype-embedding toggle to ``Settings`` feature flags.
+
+    The phenotype-sheet flow always builds the gene-first Stock Phenotype
+    Sheet. Enabling embeddings additionally computes the OpenAI cosine analysis
+    and writes the similarity-tier sidecar workbook and plots.
+    """
+    enable_embeddings = bool(embeddings)
+    return {
+        "soft_run": True,
+        "enable_oai_embedding": enable_embeddings,
+        "phenotype_similarity_sidecar": enable_embeddings,
+    }
+
+
+def _build_phenotype_settings(config_path: Path) -> Settings:
+    embeddings_enabled = _load_embeddings_policy(config_path)["enabled"]
+    pubmed_policy = _load_pubmed_policy(config_path)
+    settings = Settings(
+        **_resolve_phenotype_settings_kwargs(embeddings_enabled),
+        batch_size=pubmed_policy["batchSize"],
+    )
+    settings.split_config_path = config_path
+    return settings
 
 
 def _load_keywords(config_path: Path) -> list[str]:
     config = load_split_config(config_path)
     return config.get("settings", {}).get("relevantSearchTerms", [])
+
+
+def _load_validation_policy(config_path: Path) -> dict:
+    """Return config-driven validation settings."""
+    config = load_split_config(config_path)
+    return config["settings"]["validation"]
+
+
+def _build_validation_settings(config_path: Path, **overrides) -> Settings:
+    """Build Settings populated from the config validation and PubMed policy."""
+    validation_policy = _load_validation_policy(config_path)
+    pubmed_policy = _load_pubmed_policy(config_path)
+    settings = Settings(
+        batch_size=pubmed_policy["batchSize"],
+        enable_gpt_logging=validation_policy["enableGptLogging"],
+        max_gpt_calls_per_stock=validation_policy["maxGptCallsPerStock"],
+        min_fulltext_chars=validation_policy["minFullTextChars"],
+        gpt_call_delay_seconds=validation_policy["gptCallDelaySeconds"],
+        short_circuit_on_functional_validation=(
+            validation_policy["shortCircuitOnFunctionalValidation"]
+        ),
+        **overrides,
+    )
+    settings.split_config_path = config_path
+    return settings
 
 
 ###############################################################################
@@ -298,6 +268,8 @@ def _iter_stage1_workbooks(input_dir: Path) -> Iterable[Path]:
             if "Organized Stocks" not in str(f)
             and "Organized Stock Sheets" not in str(f)
             and "Uncategorized" not in str(f)
+            and not f.stem.endswith("_aggregated")  # generated outputs
+            and "_similarity" not in f.name          # similarity sidecars
             and not f.name.startswith("~$")
             and not f.name.startswith(".")
         ]
@@ -353,33 +325,37 @@ def _warn_if_missing_reagent_index(input_dir: Path) -> None:
 
 
 def run_find_stocks(args) -> int:
+    config_path = _resolve_config_path(args.config)
+    input_policy = _load_input_policy(config_path)
+    pubmed_policy = _load_pubmed_policy(config_path)
     settings = Settings(
-        batch_size=args.batch_size,
-        skip_fbgnid_conversion=args.skip_fbgnid_conversion,
+        batch_size=pubmed_policy["batchSize"],
+        skip_fbgnid_conversion=input_policy["skipFbgnidConversion"],
     )
+    settings.split_config_path = config_path
     pipeline = StockFindingPipeline(settings)
-    config_path = args.config if args.config else settings.split_config_path
     keywords = _load_keywords(config_path)
 
     output_path = pipeline.run(
         input_dir=args.input_dir,
         keywords=keywords,
-        gene_col=args.gene_col,
-        input_gene_col=args.input_gene_col,
-        skip_fbgnid_conversion=args.skip_fbgnid_conversion,
+        gene_col=input_policy["geneCol"],
+        input_gene_col=input_policy["inputGeneCol"],
+        skip_fbgnid_conversion=input_policy["skipFbgnidConversion"],
         run_functional_validation=False,
     )
     return 0 if output_path else 1
 
 
 def run_split_stocks(args) -> int:
-    settings = Settings()
-    if args.config:
-        settings.split_config_path = args.config
+    config_path = _resolve_config_path(args.config)
+    pubmed_policy = _load_pubmed_policy(config_path)
+    settings = Settings(batch_size=pubmed_policy["batchSize"])
+    settings.split_config_path = config_path
     pipeline = StockSplittingPipeline(settings)
     output_dir = pipeline.run(
         input_dir=args.input_dir,
-        config_path=args.config,
+        config_path=config_path,
         verbose=not args.quiet,
     )
     return 0 if output_dir else 1
@@ -388,146 +364,459 @@ def run_split_stocks(args) -> int:
 def run_phenotype_sheet(args) -> int:
     _warn_if_missing_reagent_index(args.input_dir)
 
-    settings = Settings(**_similarity_to_settings_kwargs(args.similarity))
-    if args.config:
-        settings.split_config_path = args.config
+    config_path = _resolve_config_path(args.config)
+    settings = _build_phenotype_settings(config_path)
     pipeline = StockSplittingPipeline(settings)
     output_dir = pipeline.run(
         input_dir=args.input_dir,
-        config_path=args.config,
+        config_path=config_path,
         verbose=not args.quiet,
     )
     return 0 if output_dir else 1
 
 
 def run_validate_stocks(args) -> int:
-    settings = Settings(
-        enable_gpt_logging=args.test_log,
-        max_gpt_calls_per_stock=args.max_gpt_calls_per_stock,
-    )
-    if args.config:
-        settings.split_config_path = args.config
+    config_path = _resolve_config_path(args.config)
+    validation_policy = _load_validation_policy(config_path)
+    settings = _build_validation_settings(config_path)
+    if not _should_run_validation(
+        settings.openai_api_key,
+        validation_enabled=validation_policy["enabled"],
+    ):
+        if not validation_policy["enabled"]:
+            print("Config settings.validation.enabled is false; skipping validation.")
+        else:
+            print("No OpenAI API key configured; skipping validation.")
+        return 0
     pipeline = StockSplittingPipeline(settings)
     output_dir = pipeline.run(
         input_dir=args.input_dir,
-        config_path=args.config,
+        config_path=config_path,
         verbose=not args.quiet,
         run_validation=True,
     )
     return 0 if output_dir else 1
 
 
-def _run_full_pipeline_normal(args, *, refs_output_path: Path) -> int:
-    split_input_dir = Path(refs_output_path).parent
-
+def _run_embedding_analysis(
+    *,
+    split_input_dir: Path,
+    config_path: Path,
+    quiet: bool,
+) -> int:
+    """Run the phenotype-sheet flow with OpenAI embeddings for analysis output."""
     print(f"\n{'-' * 70}")
-    print("Step 2/3: Running split-stocks")
+    print("Step 4/4: Running phenotype-embedding analysis")
     print(f"{'-' * 70}")
-    split_settings = Settings()
-    if args.config:
-        split_settings.split_config_path = args.config
-    split_pipeline = StockSplittingPipeline(split_settings)
-    split_output_dir = split_pipeline.run(
-        input_dir=split_input_dir,
-        config_path=args.config,
-        verbose=not args.quiet,
-    )
-    if not split_output_dir:
-        return 1
-
-    print(f"\n{'-' * 70}")
-    print("Step 3/3: Running validate-stocks")
-    print(f"{'-' * 70}")
-    validate_settings = Settings(
-        enable_gpt_logging=args.test_log,
-        max_gpt_calls_per_stock=args.max_gpt_calls_per_stock,
-    )
-    if args.config:
-        validate_settings.split_config_path = args.config
-    validate_pipeline = StockSplittingPipeline(validate_settings)
-    validated_output_dir = validate_pipeline.run(
-        input_dir=split_input_dir,
-        config_path=args.config,
-        verbose=not args.quiet,
-        run_validation=True,
-    )
-    if not validated_output_dir:
-        return 1
-
-    print("\nSuccess! Full pipeline completed (mode: normal).")
-    print(f"  Stage 1 output: {refs_output_path}")
-    print(f"  Stage 2 output directory: {split_output_dir}")
-    print(f"  Stage 3 output directory: {validated_output_dir}")
-    return 0
-
-
-def _run_full_pipeline_phenotype(args, *, refs_output_path: Path) -> int:
-    split_input_dir = Path(refs_output_path).parent
-
-    print(f"\n{'-' * 70}")
-    print(f"Step 2/2: Running phenotype-sheet (--similarity {args.similarity})")
-    print(f"{'-' * 70}")
-    # Stage 1 just produced the workbook; the index is guaranteed present, but
-    # keep the same safety net other phenotype-sheet runs use.
     _warn_if_missing_reagent_index(split_input_dir)
 
-    pheno_settings = Settings(**_similarity_to_settings_kwargs(args.similarity))
-    if args.config:
-        pheno_settings.split_config_path = args.config
+    pubmed_policy = _load_pubmed_policy(config_path)
+    pheno_settings = Settings(**_resolve_phenotype_settings_kwargs(embeddings=True))
+    pheno_settings.batch_size = pubmed_policy["batchSize"]
+    pheno_settings.split_config_path = config_path
+    # Keep cosine columns in the aggregated workbook, but do not emit the
+    # similarity sidecar workbook, the t-SNE/plot folders, or .txt reports.
+    pheno_settings.phenotype_similarity_sidecar = False
+    pheno_settings.phenotype_similarity_plots = False
+    pheno_settings.emit_no_pmid_report = False
+    # Write the aggregated workbook directly into the gene set's Stocks folder.
+    pheno_settings.organized_output_dir = split_input_dir
     pheno_pipeline = StockSplittingPipeline(pheno_settings)
     pheno_output_dir = pheno_pipeline.run(
         input_dir=split_input_dir,
-        config_path=args.config,
-        verbose=not args.quiet,
+        config_path=config_path,
+        verbose=not quiet,
     )
-    if not pheno_output_dir:
-        return 1
-
-    print("\nSuccess! Full pipeline completed (mode: phenotype).")
-    print(f"  Stage 1 output: {refs_output_path}")
-    print(f"  phenotype-sheet output directory: {pheno_output_dir}")
-    return 0
+    return 0 if pheno_output_dir else 1
 
 
-def run_full_pipeline(args) -> int:
-    refs_settings = Settings(
-        batch_size=args.batch_size,
-        skip_fbgnid_conversion=args.skip_fbgnid_conversion,
-    )
+def _run_pipeline_for_gene_set(
+    args,
+    *,
+    csv_path: Path,
+    run_dir: Path,
+    config_path: Path,
+    keywords: Optional[List[str]],
+    input_policy: dict,
+    pubmed_policy: dict,
+    embeddings_enabled: bool,
+    output_policy: dict,
+    refs_pipeline: StockFindingPipeline,
+    validation_policy: dict,
+) -> Optional[Path]:
+    """Run Stage 1 -> organize -> validate (+ embeddings) for a single CSV.
 
-    config_path = args.config if args.config else refs_settings.split_config_path
-    keywords = _load_keywords(config_path)
+    The gene set is processed inside its own isolated ``run_dir`` so that
+    stock matching, gene-count accounting, and the organized/embedding outputs
+    are scoped to exactly one input CSV. Returns the organized output
+    directory, or ``None`` if any stage failed for this gene set.
+    """
+    stem = csv_path.stem
 
-    refs_pipeline = StockFindingPipeline(refs_settings)
-
-    print(f"\n{'=' * 70}")
-    print(f"FL.AI REAGENT STOCKER: FULL PIPELINE (mode: {args.mode})")
-    print(f"{'=' * 70}")
+    # Stage the single CSV in a clean, isolated working directory so the
+    # directory-level globbing in Stage 1/2 only ever sees this one gene set.
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(csv_path, run_dir / csv_path.name)
 
     print(f"\n{'-' * 70}")
-    if args.mode == "normal":
-        print("Step 1/3: Running find-stocks")
-    else:
-        print("Step 1/2: Running find-stocks")
+    print(f"[{stem}] Step 1/3: Running find-stocks")
     print(f"{'-' * 70}")
     refs_output_path = refs_pipeline.run(
-        input_dir=args.input_dir,
+        input_dir=run_dir,
         keywords=keywords,
-        gene_col=args.gene_col,
-        input_gene_col=args.input_gene_col,
-        skip_fbgnid_conversion=args.skip_fbgnid_conversion,
+        gene_col=input_policy["geneCol"],
+        input_gene_col=input_policy["inputGeneCol"],
+        skip_fbgnid_conversion=input_policy["skipFbgnidConversion"],
         run_functional_validation=False,
+        output_name=f"{stem}.xlsx",
     )
     if not refs_output_path:
+        return None
+
+    split_input_dir = Path(refs_output_path).parent
+
+    print(f"\n{'-' * 70}")
+    print(f"[{stem}] Step 2/3: Organizing stocks")
+    print(f"{'-' * 70}")
+    split_settings = Settings(
+        batch_size=pubmed_policy["batchSize"],
+        emit_no_pmid_report=False,
+        organized_output_dir=split_input_dir,
+    )
+    split_settings.split_config_path = config_path
+    split_output_dir = StockSplittingPipeline(split_settings).run(
+        input_dir=split_input_dir,
+        config_path=config_path,
+        verbose=not args.quiet,
+    )
+    if not split_output_dir:
+        return None
+
+    print(f"\n{'-' * 70}")
+    print(f"[{stem}] Step 3/3: Validating Ref++ stocks")
+    print(f"{'-' * 70}")
+    validate_settings = _build_validation_settings(
+        config_path,
+        emit_no_pmid_report=False,
+        organized_output_dir=split_input_dir,
+    )
+    if _should_run_validation(
+        validate_settings.openai_api_key,
+        validation_enabled=validation_policy["enabled"],
+    ):
+        validated_output_dir = StockSplittingPipeline(validate_settings).run(
+            input_dir=split_input_dir,
+            config_path=config_path,
+            verbose=not args.quiet,
+            run_validation=True,
+        )
+        if not validated_output_dir:
+            return None
+    elif not validation_policy["enabled"]:
+        print("  Config settings.validation.enabled is false; skipping Ref++ validation pass.")
+    else:
+        print("  No OpenAI API key configured; skipping Ref++ validation pass.")
+
+    if embeddings_enabled:
+        if _run_embedding_analysis(
+            split_input_dir=split_input_dir,
+            config_path=config_path,
+            quiet=args.quiet,
+        ) != 0:
+            return None
+
+    # Enforce a clean output layout: final workbook in Stocks, no unsplit
+    # workbook (unless config output policy preserves it), no .txt or _similarity artifacts, no
+    # Organized Stocks wrapper directory.
+    return _finalize_gene_set_run_outputs(
+        run_dir=run_dir,
+        stem=stem,
+        log_mode=output_policy["preserveUnsplitWorkbook"],
+    )
+
+
+def _should_run_validation(
+    openai_api_key: Optional[str],
+    *,
+    validation_enabled: bool = True,
+) -> bool:
+    """Return whether the GPT validation pass can run with current settings."""
+    return validation_enabled and bool(str(openai_api_key or "").strip())
+
+
+def _finalize_gene_set_run_outputs(
+    run_dir: Path,
+    stem: str,
+    *,
+    log_mode: bool = False,
+) -> Optional[Path]:
+    """Enforce a clean output layout for a single gene-set run.
+
+    Guarantees the invariant the pipeline is designed to produce (the artifacts
+    are also prevented at the source):
+
+    - the final ``<stem>_aggregated.xlsx`` lives directly in ``Stocks``;
+    - no ``Organized Stocks`` wrapper directory remains;
+    - no ``.txt`` sidecar reports remain;
+    - no ``*_similarity`` files/folders remain;
+    - the unsplit Stage 1 ``<stem>.xlsx`` is removed unless ``log_mode``.
+
+    Returns the gene set's ``Stocks`` directory (where the final workbook
+    lives), or ``None`` if the expected final workbook cannot be located.
+    """
+    stocks_dir = run_dir / "Stocks"
+    final_name = f"{stem}_aggregated.xlsx"
+    final_path = stocks_dir / final_name
+
+    # If, for any reason, the aggregated workbook still sits under a nested
+    # "Organized Stocks" directory, move it up into Stocks.
+    if not final_path.exists():
+        for nested in run_dir.rglob(final_name):
+            if "Organized Stocks" in nested.parts and nested.is_file():
+                stocks_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(nested), str(final_path))
+                break
+
+    if not final_path.exists():
+        print(
+            f"ERROR: expected final workbook not found: {final_path}",
+            file=sys.stderr,
+        )
+        return None
+
+    # Remove the unsplit Stage 1 workbook unless preserving for audit.
+    unsplit_path = stocks_dir / f"{stem}.xlsx"
+    if unsplit_path.exists() and not log_mode:
+        try:
+            unsplit_path.unlink()
+        except OSError:
+            pass
+    elif unsplit_path.exists() and log_mode:
+        print(f"  [log-mode] preserved unsplit workbook: {unsplit_path}")
+
+    # Remove any leftover .txt sidecars and *_similarity artifacts, and any
+    # Organized Stocks wrapper directories under this run.
+    for txt_file in run_dir.rglob("*.txt"):
+        try:
+            txt_file.unlink()
+        except OSError:
+            pass
+    for similarity_path in sorted(
+        run_dir.rglob("*_similarity*"), key=lambda p: len(p.parts), reverse=True
+    ):
+        try:
+            if similarity_path.is_dir():
+                shutil.rmtree(similarity_path, ignore_errors=True)
+            else:
+                similarity_path.unlink()
+        except OSError:
+            pass
+    for organized_dir in run_dir.rglob("Organized Stocks"):
+        if organized_dir.is_dir():
+            shutil.rmtree(organized_dir, ignore_errors=True)
+
+    return stocks_dir
+
+
+# Directory names produced by the pipeline itself. Discovery skips anything that
+# lives under one of these so recursive runs never reprocess prior outputs or
+# the per-run staged input copies.
+_GENERATED_DIR_NAMES = {
+    "Per Gene Set Runs",
+    "Stocks",
+    "Organized Stocks",
+    "Organized Stock Sheets",
+    "Uncategorized",
+}
+
+
+def _discover_input_csvs(input_dir: Path) -> List[Path]:
+    """Recursively find gene-set CSVs under ``input_dir``.
+
+    Generated/output trees (``Per Gene Set Runs``, ``Stocks``, ``Organized
+    Stocks``, ``*_similarity`` plot folders, etc.) and hidden files are excluded
+    so re-runs never reprocess prior outputs or staged copies.
+    """
+    discovered: List[Path] = []
+    for path in sorted(input_dir.rglob("*.csv")):
+        if path.name.startswith("."):
+            continue
+        rel_parts = path.relative_to(input_dir).parts[:-1]
+        if any(part in _GENERATED_DIR_NAMES for part in rel_parts):
+            continue
+        if any(part.endswith("_similarity") for part in rel_parts):
+            continue
+        discovered.append(path)
+    return discovered
+
+
+def _validate_gene_columns(
+    csv_files: List[Path], gene_col: str, input_gene_col: str
+) -> List[str]:
+    """Return error messages for any CSV missing the required gene columns.
+
+    A single config-provided gene column pair applies to the whole
+    recursive run, so any discovered CSV that lacks either column is a fatal
+    error (the caller aborts before heavy work).
+    """
+    required = [gene_col, input_gene_col]
+    errors: List[str] = []
+    for path in csv_files:
+        try:
+            header = pd.read_csv(path, nrows=0)
+        except Exception as exc:  # noqa: BLE001 - report unreadable headers
+            errors.append(f"{path}: could not read header ({exc})")
+            continue
+        missing = [col for col in required if col not in header.columns]
+        if missing:
+            errors.append(f"{path}: missing required column(s): {', '.join(missing)}")
+    return errors
+
+
+def run_pipeline(args) -> int:
+    """Primary end-to-end command: Stage 1 -> organize -> validate (+ embeddings).
+
+    Each gene-set CSV in ``input_dir`` is processed independently and produces
+    its own organized workbook (named after the CSV), rather than being merged
+    into a single aggregated workbook. Behavior is config-driven: the JSON
+    config determines the organized output sheets (including any
+    phenotype-relevance filters) and whether to run phenotype embeddings.
+    """
+    input_dir = Path(args.input_dir)
+    if not input_dir.is_dir():
+        print(f"ERROR: input path is not a directory: {input_dir}", file=sys.stderr)
         return 1
 
-    if args.mode == "normal":
-        return _run_full_pipeline_normal(args, refs_output_path=refs_output_path)
-    if args.mode == "phenotype":
-        return _run_full_pipeline_phenotype(args, refs_output_path=refs_output_path)
+    csv_files = _discover_input_csvs(input_dir)
+    if not csv_files:
+        print(f"ERROR: no gene-list CSV files found in {input_dir}", file=sys.stderr)
+        return 1
 
-    print(f"Unknown --mode: {args.mode!r}", file=sys.stderr)
-    return 1
+    config_path = _resolve_config_path(args.config)
+    input_policy = _load_input_policy(config_path)
+    pubmed_policy = _load_pubmed_policy(config_path)
+    embeddings_policy = _load_embeddings_policy(config_path)
+    output_policy = _load_output_policy(config_path)
+    validation_policy = _load_validation_policy(config_path)
+
+    column_errors = _validate_gene_columns(
+        csv_files, input_policy["geneCol"], input_policy["inputGeneCol"]
+    )
+    if column_errors:
+        print(
+            "ERROR: the following gene-set CSV(s) are missing required columns "
+            f"(settings.input.geneCol '{input_policy['geneCol']}', "
+            f"settings.input.inputGeneCol '{input_policy['inputGeneCol']}'):",
+            file=sys.stderr,
+        )
+        for message in column_errors:
+            print(f"  - {message}", file=sys.stderr)
+        return 1
+
+    refs_settings = Settings(
+        batch_size=pubmed_policy["batchSize"],
+        skip_fbgnid_conversion=input_policy["skipFbgnidConversion"],
+        emit_no_pmid_report=False,
+    )
+    refs_settings.split_config_path = config_path
+    keywords = _load_keywords(config_path)
+
+    print(f"\n{'=' * 70}")
+    print("FL.AI REAGENT STOCKER: RUN")
+    print(f"{'=' * 70}")
+    print(f"  Input directory: {input_dir}")
+    print(f"  Gene-set CSVs: {len(csv_files)} (one organized workbook each)")
+
+    # Reuse a single Stage 1 pipeline so the heavy FlyBase tables load once and
+    # are cached across gene sets.
+    refs_pipeline = StockFindingPipeline(refs_settings)
+    runs_root = input_dir / "Per Gene Set Runs"
+    runs_root.mkdir(exist_ok=True)
+
+    results: List[Tuple[str, Optional[Path]]] = []
+    for csv_path in csv_files:
+        rel_key = csv_path.relative_to(input_dir).with_suffix("")
+        print(f"\n{'#' * 70}")
+        print(f"# Gene set: {rel_key}")
+        print(f"{'#' * 70}")
+        organized_dir = _run_pipeline_for_gene_set(
+            args,
+            csv_path=csv_path,
+            run_dir=runs_root / rel_key,
+            config_path=config_path,
+            keywords=keywords,
+            input_policy=input_policy,
+            pubmed_policy=pubmed_policy,
+            embeddings_enabled=embeddings_policy["enabled"],
+            output_policy=output_policy,
+            refs_pipeline=refs_pipeline,
+            validation_policy=validation_policy,
+        )
+        results.append((str(csv_path.relative_to(input_dir)), organized_dir))
+        del organized_dir, rel_key
+        gc.collect()
+
+    succeeded = [(name, path) for name, path in results if path is not None]
+    failed = [name for name, path in results if path is None]
+
+    print(f"\n{'=' * 70}")
+    print("RUN SUMMARY")
+    print(f"{'=' * 70}")
+    for name, path in results:
+        stem = Path(name).stem
+        if path is None:
+            print(f"  FAILED  {name}")
+        else:
+            workbook = path / f"{stem}_aggregated.xlsx"
+            print(f"  OK      {name} -> {workbook}")
+    print(f"\n  {len(succeeded)}/{len(results)} gene set(s) completed successfully.")
+
+    # Automatically generate the combined combination-counts summary at the
+    # input root so the user does not need to run the script separately.
+    if succeeded:
+        print(f"\n{'-' * 70}")
+        print("Generating combination-counts summary")
+        print(f"{'-' * 70}")
+        try:
+            _generate_combination_summary(input_dir, config_path=config_path)
+        except Exception as exc:  # noqa: BLE001 - summary is best-effort
+            print(f"WARNING: failed to generate summary: {exc}", file=sys.stderr)
+
+    if not succeeded:
+        return 1
+    return 1 if failed else 0
+
+
+def _generate_combination_summary(
+    input_dir: Path, *, config_path: Optional[Path]
+) -> None:
+    """Load the summarizer script module and write the combined summary."""
+    import importlib.util
+
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "summarize_combination_counts.py"
+    )
+    if not script_path.exists():
+        print(
+            f"WARNING: summary script not found at {script_path}; skipping.",
+            file=sys.stderr,
+        )
+        return
+
+    spec = importlib.util.spec_from_file_location(
+        "summarize_combination_counts", script_path
+    )
+    if spec is None or spec.loader is None:
+        print("WARNING: could not load summary script; skipping.", file=sys.stderr)
+        return
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    module.summarize_combination_counts(input_dir, config_path=config_path)
 
 
 ###############################################################################
@@ -543,6 +832,8 @@ def main(argv: Optional[list] = None) -> int:
         parser.print_help()
         return 0
 
+    if args.command == "run":
+        return run_pipeline(args)
     if args.command == "find-stocks":
         return run_find_stocks(args)
     if args.command == "split-stocks":
@@ -551,8 +842,6 @@ def main(argv: Optional[list] = None) -> int:
         return run_phenotype_sheet(args)
     if args.command == "validate-stocks":
         return run_validate_stocks(args)
-    if args.command == "run-full-pipeline":
-        return run_full_pipeline(args)
 
     parser.print_help()
     return 1

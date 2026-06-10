@@ -127,10 +127,13 @@ def create_expanded_mappings(mappings_df):
     return synonym_to_fbgnid_map
 
 
-def map_gene_ids(df, gene_to_fbgnid_main, gene_to_fbgnid_synonym, gene_col):
+def map_gene_ids(df, gene_to_fbgnid_main, gene_to_fbgnid_synonym, gene_col, corrected_col):
     """
     Efficiently maps ext_gene in df to flybase_gene_id using main and synonym mappings,
     while applying prioritized step combinations in a vectorized manner.
+
+    `corrected_col` records the exact (possibly spelling-/case-normalized) form that
+    produced each successful match, leaving the caller's original column untouched.
     """
     import re
 
@@ -165,8 +168,10 @@ def map_gene_ids(df, gene_to_fbgnid_main, gene_to_fbgnid_synonym, gene_col):
                 series = series.str.upper()
         return series
 
-    # Step 1: Initial mapping
+    # Step 1: Initial mapping. The corrected form starts as the symbol-normalized,
+    # stripped input and is overwritten whenever a cleaning combination resolves a gene.
     df[gene_col] = df[gene_col].str.strip()
+    df[corrected_col] = df[gene_col]
     df["flybase_gene_id"] = df[gene_col].map(gene_to_fbgnid_main)
 
     # Step 2: Synonym mapping for initially unmapped genes
@@ -184,28 +189,27 @@ def map_gene_ids(df, gene_to_fbgnid_main, gene_to_fbgnid_synonym, gene_col):
     # for r in range(1, len(steps) + 1):
     #     all_step_combinations.extend(permutations(steps, r))
 
-    # Cache intermediate results
-    cache = {}
     prev_unmapped_count = df["flybase_gene_id"].isna().sum()
 
     # Step 4: Apply combinations iteratively
     for step_combo in all_step_combinations:
-        unmapped_genes_mask = df["flybase_gene_id"].isna()
-        if not unmapped_genes_mask.any():
+        unmapped_idx = df.index[df["flybase_gene_id"].isna()]
+        if len(unmapped_idx) == 0:
             break  # Exit if all genes are mapped
 
-        # Process only unmapped genes
-        unmapped_genes = df.loc[unmapped_genes_mask, gene_col]
-        if step_combo in cache:
-            cleaned_genes = cache[step_combo]
-        else:
-            cleaned_genes = clean_gene_vectorized(unmapped_genes, step_combo)
-            cache[step_combo] = cleaned_genes
+        # Clean only the still-unmapped genes for this combination.
+        cleaned_genes = clean_gene_vectorized(df.loc[unmapped_idx, gene_col], step_combo)
 
-        # Try mapping with main and synonym mappings
-        df.loc[unmapped_genes_mask, "flybase_gene_id"] = cleaned_genes.map(gene_to_fbgnid_main)
-        unmapped_genes_mask = df["flybase_gene_id"].isna()
-        df.loc[unmapped_genes_mask, "flybase_gene_id"] = cleaned_genes.map(gene_to_fbgnid_synonym)
+        # Try the main symbol mapping, recording the corrected spelling on hits.
+        main_hits = cleaned_genes.map(gene_to_fbgnid_main).dropna()
+        df.loc[main_hits.index, "flybase_gene_id"] = main_hits
+        df.loc[main_hits.index, corrected_col] = cleaned_genes.loc[main_hits.index]
+
+        # Fall back to the synonym mapping for whatever is still unmapped.
+        remaining_idx = unmapped_idx.difference(main_hits.index)
+        syn_hits = cleaned_genes.loc[remaining_idx].map(gene_to_fbgnid_synonym).dropna()
+        df.loc[syn_hits.index, "flybase_gene_id"] = syn_hits
+        df.loc[syn_hits.index, corrected_col] = cleaned_genes.loc[syn_hits.index]
 
         current_unmapped_count = df["flybase_gene_id"].isna().sum()
         if current_unmapped_count == prev_unmapped_count:
@@ -347,10 +351,18 @@ def load_mappings(flybase_data_dir: Path):
             mappings_df["primary_FBid"].astype(str).str.strip(),
         )
     )
-    return gene_to_fbgnid_main, synonym_to_fbgnid_map
+    fbgnid_to_symbol_map = dict(
+        zip(
+            mappings_df["primary_FBid"].astype(str).str.strip(),
+            mappings_df["current_symbol"].astype(str).str.strip(),
+        )
+    )
+    return gene_to_fbgnid_main, synonym_to_fbgnid_map, fbgnid_to_symbol_map
 
 
-def process_csv_file(csv_file, gene_column, gene_to_fbgnid_main, synonym_to_fbgnid_map):
+def process_csv_file(
+    csv_file, gene_column, gene_to_fbgnid_main, synonym_to_fbgnid_map, fbgnid_to_symbol_map
+):
     print(f"Processing file: {csv_file}")
 
     header_row = 0
@@ -402,15 +414,36 @@ def process_csv_file(csv_file, gene_column, gene_to_fbgnid_main, synonym_to_fbgn
             print(f"'{gene_column}' column not found in {csv_file}. Skipping file.")
             return
 
-    if "flybase_gene_id" in df.columns:
-        df.drop(columns=["flybase_gene_id"], inplace=True)
+    working_col = gene_column + "_new"
+    corrected_col = "corrected_" + gene_column
 
+    for existing_col in ("flybase_gene_id", "primary_symbol", corrected_col):
+        if existing_col in df.columns:
+            df.drop(columns=[existing_col], inplace=True)
+
+    # Keep the user's original `gene_column` untouched. All spelling/symbol/
+    # capitalization normalization happens on a throwaway working column; the
+    # form that actually matched is captured in `corrected_col`.
     df[gene_column] = df[gene_column].astype(str)
-    df[gene_column + "_new"] = replace_symbol(df[gene_column])
-    df = df.dropna(subset=[gene_column + "_new"])
-    df = map_gene_ids(df, gene_to_fbgnid_main, synonym_to_fbgnid_map, gene_column + "_new")
+    df[working_col] = replace_symbol(df[gene_column])
+    df = df.dropna(subset=[working_col])
+    df = map_gene_ids(
+        df, gene_to_fbgnid_main, synonym_to_fbgnid_map, working_col, corrected_col
+    )
+    df["primary_symbol"] = df["flybase_gene_id"].map(fbgnid_to_symbol_map)
+
+    # Only surface `corrected_col` when it actually differs from the user's
+    # original input; otherwise mark it as "-" to signal no spelling correction.
+    no_correction_mask = df[corrected_col].astype(str) == df[gene_column].astype(str)
+    df.loc[no_correction_mask, corrected_col] = "-"
+
     df.fillna("-", inplace=True)
-    df.drop(columns=[gene_column + "_new"], inplace=True)
+    df.drop(columns=[working_col], inplace=True)
+
+    # Order the derived columns up front, preserving any other original columns after.
+    ordered = [gene_column, corrected_col, "primary_symbol", "flybase_gene_id"]
+    remaining = [c for c in df.columns if c not in ordered]
+    df = df[ordered + remaining]
     df.to_csv(csv_file, index=False, encoding="utf-8-sig")
 
     print(f"File saved to {csv_file} with {df.shape[0]} rows.")
@@ -450,7 +483,9 @@ def main(argv=None):
         return 0
 
     try:
-        gene_to_fbgnid_main, synonym_to_fbgnid_map = load_mappings(flybase_data_dir)
+        gene_to_fbgnid_main, synonym_to_fbgnid_map, fbgnid_to_symbol_map = load_mappings(
+            flybase_data_dir
+        )
     except Exception as e:
         print(f"Error loading FlyBase synonym mappings: {e}")
         return 1
@@ -461,6 +496,7 @@ def main(argv=None):
             args.input_gene_col,
             gene_to_fbgnid_main,
             synonym_to_fbgnid_map,
+            fbgnid_to_symbol_map,
         )
 
     print("All files processed.")

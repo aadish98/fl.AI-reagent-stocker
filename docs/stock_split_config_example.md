@@ -1,25 +1,30 @@
----
-title: "Stock-splitting config — plain-English walkthrough"
-subtitle: "For review of `data/config/stock_split_config_example.json`"
----
 
-# Stock-splitting config — plain-English walkthrough
+# Stock-Splitting Configuration Reference
+##### For review of `data/config/stock_split_config_example.json`
+
+
+## Stock-Splitting Configuration Reference
 
 **File under review:** `data/config/stock_split_config_example.json`
 
-**Purpose of this document:** the config that drives the pipeline's
-`split-stocks` stage is written in JSON, which can be unfriendly to read.
-This is a faithful plain-English translation of that same file so you can
-review the choices (keywords, filters, output sheets) and flag anything
-you would change. Every key in the JSON is covered below — nothing is
-hidden or summarised away.
+**Purpose of this document:** the config that drives stock organization is
+written in JSON. This document summarizes the configuration choices
+(keywords, filters, and output sheets) in a reviewable format.
 
-A short list of **questions for you** appears at the end. Those are the
-places I'd most like your judgment.
+**Two example configs ship with the pipeline:**
+
+- `data/config/stock_split_config_example.json` — the baseline covered by this
+  reference. It tiers stocks by publication evidence (`Ref++` / `Ref+` /
+  `Ref-`).
+- `data/config/stock_split_config_phenotype_example.json` — the same config plus
+  curated-phenotype tiers. It adds `Phenotype++` and `Phenotype+` filters and
+  inserts matching sheets above each `Ref` group (see section 4i).
+
+A short list of review questions appears at the end.
 
 ---
 
-## 1. TL;DR
+## 1. Overview
 
 The pipeline takes the FlyBase stock report for our input genes and slices
 it into a workbook of prioritised Excel sheets. This config controls three
@@ -50,6 +55,19 @@ From the `settings` block of the JSON:
 | `phenotypeSimilarityTargets` | `sleep`, `circadian` (each with `embedding_text` equal to the keyword) | Targets used **only** when OpenAI embedding-based phenotype similarity is enabled (off by default). Mirrors the keywords above. |
 | `maxStocksPerGene` | `999999999999999` | Per-gene cap on how many stocks survive limiting. The value is so large in practice it imposes **no** cap. |
 | `maxStocksPerAllele` | `9999999999999999` | Same idea, per allele. Also effectively **no** cap. |
+| `input.geneCol` | `flybase_gene_id` | Required input CSV column containing FBgn IDs after conversion. |
+| `input.inputGeneCol` | `ext_gene` | Required input CSV column containing source gene symbols for conversion. |
+| `input.skipFbgnidConversion` | `false` | Required flag controlling whether Stage 1 trusts existing FBgn IDs instead of running gene-symbol conversion. |
+| `pubmed.batchSize` | `50` | Required PubMed/full-text batch size. |
+| `embeddings.enabled` | `false` | Required flag controlling whether embedding cosine columns are added. |
+| `output.preserveUnsplitWorkbook` | `false` | Required flag controlling whether the intermediate unsplit Stage 1 workbook is kept by the primary `run`. |
+| `validation.enabled` | `false` in shipped configs | Required explicit flag controlling whether the Ref++ GPT-validation pass runs when an OpenAI key is available. |
+| `validation.maxGptCallsPerStock` | `5` or `null` | Required explicit cap for GPT validation calls per stock when validation is enabled; `null` means no cap. |
+| `validation.minFullTextChars` | `500` | Required minimum full-text length before a paper is eligible for GPT validation. |
+| `validation.gptCallDelaySeconds` | `0.5` | Required pause after GPT validation calls. |
+| `validation.shortCircuitOnFunctionalValidation` | `true` | Required flag controlling whether remaining refs for a stock are skipped after a functional hit. |
+| `validation.enableGptLogging` | `false` | Required flag controlling per-call GPT logs under `data/logs/gpt_queries/`. |
+| `contentsSeparatorEvery` | `3` | Draws a faint separator after every N rows in the `Contents` sheet breakdown table. |
 
 See the questions at the end about whether the keyword set and the
 effectively-unlimited caps are intentional.
@@ -76,7 +94,8 @@ pipeline derives it from other columns.
 | `multiple_insertions` | **Computed** | `True` if the stock has more than one unique transgenic construct (counted from `all_stock_constructs`). |
 | `FBti_count` | **Computed** | How many FBti (transgenic insertion) elements are associated with the stock. |
 | `attP_count` | **Computed** | How many times `attP` appears in the genotype. |
-| `ALLELE_PAPER_RELEVANCE_SCORE` | **Computed** | 0, 1, or 2. Drives the Ref-/Ref+/Ref++ tier. See section 4. |
+| `ALLELE_PAPER_RELEVANCE_SCORE` | **Computed** | 0, 1, or 2. Drives the Ref-/Ref+/Ref++ tier. See section 4b. |
+| `PHENOTYPE_RELEVANCE_SCORE` | **Computed** | 0, 1, or 2. Drives the Phenotype+/Phenotype++ tier. Computed only when a filter references it (the phenotype-aware config). See section 4i. |
 | `custom_stock` | **Computed** | `True` if this is a phenotype-backed reagent with no matching FBst stock (a "custom phenotype reagent"). Used by the `Custom Phenotype Reagent` filter. |
 
 **Known gap (called out in the JSON itself):** filtering by chromosome arm
@@ -171,6 +190,29 @@ genotype string.
 | Filter | Plain-English rule | Underlying check |
 |---|---|---|
 | `Custom Phenotype Reagent` | Reagent has a phenotype association in FlyBase but no FBst stock record (i.e. it's not stockable; we surface it separately). | `custom_stock` equals `True` |
+
+### 4i. Curated-phenotype tier (phenotype-aware config only)
+
+These filters live in `stock_split_config_phenotype_example.json`, not in the
+baseline config. `PHENOTYPE_RELEVANCE_SCORE` is set per stock from FlyBase
+`genotype_phenotype_data`:
+
+- `2` → a component of the stock has a curated phenotype whose name contains a
+  `phenotypeSimilarityTargets` term (= **Phenotype++**)
+- `1` → a component has a curated phenotype, but none match a target
+  (= **Phenotype+**)
+- `0` → no curated phenotype
+
+| Filter | Plain-English rule | Underlying check |
+|---|---|---|
+| `Phenotype++` | Stock has a curated phenotype matching a target keyword. | `PHENOTYPE_RELEVANCE_SCORE` equals `2` |
+| `Phenotype+` | Stock has a curated phenotype, but none match a target keyword. | `PHENOTYPE_RELEVANCE_SCORE` equals `1` |
+
+In the phenotype-aware config, each `Ref` group is preceded by matching
+`Phenotype++` and `Phenotype+` sheets. Because combinations are priority-ordered
+and a reagent lands in only the first sheet it matches, phenotype-backed stocks
+are claimed by the phenotype sheets before the publication-only `Ref` sheets
+below them. (No `Phenotype-` tier is defined.)
 
 ---
 
@@ -289,35 +331,34 @@ in-house to this pipeline.
 
 ---
 
-## 7. Questions for you
+## 7. Review Questions
 
-These are the spots where I'd like your judgment most. The pipeline will
-do whatever this config tells it to — your call on what we want it to do.
+These items may need confirmation before treating this configuration as final.
 
 1. **Keyword set.** This config uses `sleep` and `circadian` only. The
    GUI-design notes suggest a default of `sleep`, `rhythm`, `circadian`,
    `locomotor`. Should we add `rhythm` and `locomotor` here too, or are
    they too noisy / too broad for this particular screen?
 
-2. **Per-gene / per-allele caps.** Both caps are set to absurdly large
-   numbers (`9.99×10¹⁴` and `9.99×10¹⁵`), which is the same as having
-   **no cap at all**. Is the intent really "give me everything" for this
-   screen? If not, what would a reasonable cap per gene look like
-   (e.g. 5? 10?).
+2. **Per-gene / per-allele caps.** Both caps are set to very large
+   values (`9.99×10¹⁴` and `9.99×10¹⁵`), which is equivalent to having
+   **no cap**. Confirm whether this screen should include all matching
+   stocks, or whether a lower per-gene cap would be preferable
+   (for example, 5 or 10).
 
 3. **Bloomington-only matrix.** The 12 detailed sheets are all
    Bloomington. Vienna / Kyoto / NIG-Fly stocks only appear via the 13th
-   catch-all sheet. Is that intentional (Bloomington is the primary
-   order source for the lab) or is there a Vienna matrix you'd want as
-   well, especially for genes with no Bloomington RNAi line?
+   catch-all sheet. Confirm whether Bloomington should remain the primary
+   order source, or whether a Vienna matrix should also be included,
+   especially for genes with no Bloomington RNAi line.
 
 4. **Unused filters.** These filters are defined but unused in
    `combinations`: `Non-Bloomington`, `UAS`, `AlleleOrInsertion`,
    `Has sgRNA`, `Allele Has Paper Refs`, `Allele Has No Paper Refs`,
    `attP40`, `attP2`, `VALIUM10`, `VALIUM20`, `Split_AD`, `Split_DBD`,
-   `Custom Phenotype Reagent`. Are any of these worth turning into a
-   sheet? For example, do you want dedicated `attP40` vs `attP2`
-   sub-sheets, or a UAS-driver sheet, or a Split-Gal4 sheet?
+   `Custom Phenotype Reagent`. Confirm whether any of these should become
+   dedicated sheets, such as `attP40` vs `attP2` sub-sheets, a UAS-driver
+   sheet, or a Split-Gal4 sheet.
 
 5. **No-sgRNA filter on everything.** Every combination filters out
    CRISPR (`No sgRNA`). Is that the right default for your screen, or

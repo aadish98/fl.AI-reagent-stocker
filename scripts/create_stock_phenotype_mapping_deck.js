@@ -5,8 +5,8 @@ const pptx = new PptxGenJS();
 pptx.layout = "LAYOUT_WIDE";
 pptx.author = "OpenAI";
 pptx.company = "OpenAI";
-pptx.subject = "Stock Phenotype Sheet ID mapping flow";
-pptx.title = "From input gene symbols to Stock Phenotype Sheet rows";
+pptx.subject = "All Phenotypic Stocks Sheet ID mapping flow";
+pptx.title = "From input gene symbols to All Phenotypic Stocks Sheet rows";
 pptx.lang = "en-US";
 pptx.theme = {
   headFontFace: "Georgia",
@@ -367,7 +367,7 @@ function buildTitleSlide() {
     charSpacing: 1.2,
     margin: 0,
   });
-  slide.addText("From input gene symbols to Stock Phenotype Sheet rows", {
+  slide.addText("From input gene symbols to All Phenotypic Stocks Sheet rows", {
     x: 0.7,
     y: 1.18,
     w: 6.25,
@@ -461,7 +461,7 @@ function buildFlowSlide() {
   addSlideFrame(
     slide,
     "End-to-End Flowchart",
-    "Operational path used by the soft-run Stock Phenotype Sheet",
+    "Operational path used by the soft-run All Phenotypic Stocks Sheet",
   );
 
   const leftX = 0.72;
@@ -534,7 +534,7 @@ function buildFlowSlide() {
       step: 8,
       title: "Write phenotype rows",
       body: "Resolve stock label, gene, reagent symbol, phenotype, qualifier, and reference metadata into the final sheet.",
-      source: "Source: Stock Phenotype Sheet",
+      source: "Source: All Phenotypic Stocks Sheet",
       badgeFill: C.gold,
       bodySize: 11.3,
     },

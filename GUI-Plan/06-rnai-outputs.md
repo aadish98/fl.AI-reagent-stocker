@@ -39,7 +39,7 @@ Audit / supporting outputs (downloadable, not the deliverable):
 Following the spec from Maddy's scripts but with named columns and explicit
 counts:
 
-1. **Select source rows** from `Stock Phenotype Sheet`.
+1. **Select source rows** from `All Phenotypic Stocks Sheet`.
    - Default: keyword-hit RNAi rows.
    - Option: include no-keyword-hit RNAi rows.
 2. **Classify reagents**.

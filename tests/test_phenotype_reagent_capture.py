@@ -1154,7 +1154,7 @@ def _empty_all_stocks_df() -> pd.DataFrame:
 
 
 class TestPhenotypeSheetGeneFirstFlow(unittest.TestCase):
-    """Regression tests for the gene-first Stock Phenotype Sheet flow."""
+    """Regression tests for the gene-first All Phenotypic Stocks Sheet flow."""
 
     def test_find_stocks_writes_reagent_index_when_no_stocks_found(self):
         """Stage 1 should persist Gene Reagent Index even with zero stock rows."""

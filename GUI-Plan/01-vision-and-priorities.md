@@ -19,7 +19,7 @@ currently runs Windows + Excel + PowerShell to produce her screening plan.
 ## Primary Endpoint
 
 **Reagents whose phenotypes hit the user-selected keywords**, sourced from the
-soft-run `Stock Phenotype Sheet`.
+soft-run `All Phenotypic Stocks Sheet`.
 
 That is the canonical thing the GUI is optimizing for. Everything else either
 feeds it (gene list, keywords, priorities) or branches off it (no-hit
@@ -28,7 +28,7 @@ aggregation, fallback stocks, non-phenotypic explorer, RNAi outputs).
 ## Product Priority Order
 
 1. **Primary**: keyword-hit phenotype-backed reagents from the
-   `Stock Phenotype Sheet`.
+   `All Phenotypic Stocks Sheet`.
 2. **Secondary aggregation material**: phenotype-backed reagents that do not
    hit the selected keywords.
 3. **Tertiary**: input genes with no stocks, no phenotype-backed stocks, or no

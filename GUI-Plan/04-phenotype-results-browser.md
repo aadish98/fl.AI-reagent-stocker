@@ -95,7 +95,7 @@ an opt-in toggle, and excluded from any phenotype-derived export.
   filtered-in.
 - Export target: a separate `Non-Phenotypic Reagents.xlsx` workbook or a
   labeled sheet in the run workbook. **Never inlined into**
-  `Stock Phenotype Sheet`.
+  `All Phenotypic Stocks Sheet`.
 - Default state: collapsed/hidden so the primary phenotype-first journey stays
   uncluttered.
 

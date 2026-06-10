@@ -5,27 +5,41 @@ This file provides guidance to coding agents working in this repository.
 ## Project Overview
 
 `fl_ai_reagent_stocker` is a modular Python pipeline that converts Drosophila
-gene lists into prioritized stock sheets with linked references, optional
-phenotype-similarity scoring, and optional AI-based functional validation.
+gene lists into prioritized stock sheets with linked references,
+curated-phenotype and publication-evidence tiers, and optional AI-based
+functional validation and phenotype-embedding analysis.
 
-High-level flows:
+Primary flow:
 
 ```
-gene lists -> find-stocks -> split-stocks -> validate-stocks         (normal)
-gene lists -> find-stocks -> phenotype-sheet                         (phenotype)
+gene lists -> run  (find-stocks -> organize -> validate [+ embeddings])
 ```
 
-`run-full-pipeline --mode normal` runs the first chain end-to-end.
-`run-full-pipeline --mode phenotype` runs the second chain and never invokes
-GPT validation. `phenotype-sheet` is its own command and is no longer a flag
-on `split-stocks` or `validate-stocks`.
+`run` is the single public command. It builds the Stage 1 workbook, organizes
+stocks with the JSON config, and validates `Ref++` stocks or runs embeddings
+when enabled by the JSON config. The individual stages
+(`find-stocks`, `split-stocks`, `phenotype-sheet`, `validate-stocks`) remain as
+advanced entry points for debugging and tests.
 
-Output locations:
+Output locations (primary `run`, recursive over input gene-set CSVs):
 
-- Stage 1: `./gene_lists/Stocks/aggregated_stock_refs.xlsx`
-- Stage 2/3: `./gene_lists/Stocks/Organized Stocks/<name>_aggregated.xlsx`
-- phenotype-sheet sidecar (when `--similarity tiers|simple-buckets|keyword-buckets`):
-  `./gene_lists/Stocks/Organized Stocks/<name>_aggregated_similarity_tiers.xlsx`
+- Per gene set:
+  `./gene_lists/Per Gene Set Runs/<relative path>/<gene set>/Stocks/<gene set>_aggregated.xlsx`
+- Combined summary at the input root: `combination_counts_summary.xlsx` / `.csv`
+
+The primary `run` produces a clean tree: the final aggregated workbook lives
+directly in `Stocks` (no `Organized Stocks` wrapper), and it does not emit
+`.txt` sidecars, `*_similarity_tiers.xlsx` workbooks, `*_similarity/` plot
+folders, or the intermediate unsplit `<gene set>.xlsx` unless
+`settings.output.preserveUnsplitWorkbook` is `true`. `settings.embeddings.enabled`
+adds cosine columns to the aggregated workbook only.
+
+The advanced per-stage commands (`split-stocks`, `phenotype-sheet`) keep the
+legacy `Stocks/Organized Stocks/<name>_aggregated.xlsx` layout, and
+`phenotype-sheet` still writes the
+`<name>_aggregated_similarity_tiers.xlsx` sidecar plus a
+`<name>_aggregated_similarity/` plot directory when embeddings are enabled in
+config.
 
 ## Related Documentation
 
@@ -37,7 +51,7 @@ relevant doc(s) in the same change:
 - `README.md` — top-level overview, install, quick start, command summary,
   config contract, helper-script entry points.
 - `docs/pipeline_usage.md` — practical end-to-end guide; mirrors the CLI
-  surface and `--similarity` semantics in user terms.
+  surface and config semantics in user terms.
 - `docs/pipeline_flowcharts.md` — Mermaid flowcharts for the data flow,
   high-level command flow, and low-level evidence flow.
 - `docs/citations.md` — how downstream users cite the data sources, APIs, and
@@ -55,143 +69,116 @@ pip install -r requirements.txt
 Environment variables (loaded from repo-root `.env`):
 
 ```bash
-OPENAI_API_KEY=...           # Required for validation and OpenAI embeddings
+OPENAI_API_KEY=...           # Required for validation and phenotype embeddings when enabled in config
 NCBI_API_KEY=...             # Optional, improves PubMed rate limits
-UNPAYWALL_TOKEN=...          # Optional, improves full-text coverage
+UNPAYWALL_TOKEN=...          # Optional contact email; defaults to aadishms@umich.edu
 OPENAI_MODEL=...             # Optional, overrides default (gpt-5-mini)
 OPENAI_EMBEDDING_MODEL=...   # Optional, overrides default (text-embedding-3-large)
 ```
 
-## Canonical Commands
+## Commands
 
-### Stage 1: find-stocks
-
-```bash
-python -m fl_ai_reagent_stocker find-stocks ./gene_lists [options]
-```
-
-Purpose:
-
-1. Convert gene symbols -> FBgn IDs (unless `--skip-fbgnid-conversion`)
-2. Map genes -> FlyBase stocks via
-   `data/flybase/alleles_and_stocks/fbst_to_derived_stock_component.csv`
-3. Expand construct-linked insertions via
-   `data/flybase/transgenic_insertions/fbtp_to_fbti.csv`
-4. Link stocks and components -> references
-5. Score keyword relevance from title/abstract metadata
-
-Common options: `--config/-c`, `--gene-col`, `--input-gene-col`,
-`--batch-size/-b`, `--skip-fbgnid-conversion`.
-
-### Stage 2: split-stocks (organization only)
+### run (primary, config-driven)
 
 ```bash
-python -m fl_ai_reagent_stocker split-stocks ./gene_lists/Stocks --config ./my_config.json [options]
+python -m fl_ai_reagent_stocker run ./gene_lists --config ./my_config.json [--quiet]
 ```
 
-Purpose:
+`run` executes the full pipeline:
 
-1. Load the Stage 1 workbook
-2. Compute derived columns such as `Balancers`, `multiple_insertions`, and
-   `ALLELE_PAPER_RELEVANCE_SCORE`
-3. Apply JSON filter rules and combinations
-4. Write organized workbooks without GPT validation or phenotype-sheet side
-   effects
+1. `find-stocks`: convert gene symbols -> FBgn IDs unless
+   `settings.input.skipFbgnidConversion` is `true`, map genes -> FlyBase stocks, expand
+   construct-linked insertions, link references, score keyword relevance, and
+   write the Stage 1 workbook with `Stocks`, `References`, and the complete
+   `Gene Reagent Index`.
+2. organize: compute derived columns (`Balancers`, `multiple_insertions`,
+   `ALLELE_PAPER_RELEVANCE_SCORE`, and `PHENOTYPE_RELEVANCE_SCORE` when a filter
+   needs it), then apply the JSON filters and combinations.
+3. validate: selectively GPT-validate `Ref++` output stocks and merge the
+   validation columns back into the organized workbook.
 
-`split-stocks` is intentionally narrow: it no longer accepts `--soft-run`,
-`--OAI-embedding`, `--simple-buckets`, or `--keyword-bucketing`. Use
-`phenotype-sheet` for the phenotype reagent flow.
+`settings.embeddings.enabled` additionally runs the phenotype-sheet flow with
+OpenAI embeddings to add cosine columns to the aggregated workbook. For the primary
+`run`, the similarity tier sidecar and t-SNE/plot folders are suppressed; the
+input is scanned recursively for gene-set CSVs; the final aggregated workbook
+is written directly into each gene set's `Stocks` folder; and a combined
+combination-counts summary is generated at the input root when the run finishes.
+During a multi-gene-set `run`, Stage 1 reuses one `StockFindingPipeline`
+instance, the gene-set-independent FlyBase auxiliary loaders in
+`stock_splitting.py` are memoized per process, and `PubMedCache.load()` reuses a
+parsed CSV cache by `(path, mtime)` while copying data into each instance. The
+Ref++ validation pass is skipped when no `OPENAI_API_KEY` is configured or when
+the required JSON config block `settings.validation.enabled` is `false`.
 
-Common options: `--config/-c`, `--quiet/-q`.
+Options: `--config/-c`, `--quiet/-q`. Input columns, FBgn conversion, PubMed
+batch size, embeddings, output preservation, and validation policy are required
+JSON config fields.
 
-### phenotype-sheet (gene-first phenotype reagent flow)
+### Advanced per-stage entry points
+
+These subcommands run individual stages with the same config and outputs as
+`run`:
 
 ```bash
-python -m fl_ai_reagent_stocker phenotype-sheet ./gene_lists/Stocks --config ./my_config.json --similarity tiers
+python -m fl_ai_reagent_stocker find-stocks ./gene_lists --config ./my_config.json
+python -m fl_ai_reagent_stocker split-stocks ./gene_lists/Stocks --config ./my_config.json [--quiet]
+python -m fl_ai_reagent_stocker phenotype-sheet ./gene_lists/Stocks --config ./my_config.json [--quiet]
+python -m fl_ai_reagent_stocker validate-stocks ./gene_lists/Stocks --config ./my_config.json [--quiet]
 ```
 
-Purpose:
-
-1. Load the Stage 1 workbook
-2. Drive the `Stock Phenotype Sheet` from the **complete** Stage 1
-   `Gene Reagent Index` (every FBal / FBtp / FBti reagent associated with each
-   input gene) filtered against FlyBase `genotype_phenotype_data`
-3. Attach stock metadata afterward from the full
-   `fbst_to_derived_stock_component.csv` so the sheet is not restricted to
-   stocks that survived Stage 1 ranking or JSON split limits
-4. Optionally write a similarity sidecar workbook based on `--similarity`
-
-`phenotype-sheet` consumes Stage 1 workbook directories such as
-`./gene_lists/Stocks` and expects a `Gene Reagent Index` sheet for full-scope
-output. Workbooks without the index still run via a legacy fallback that is
-best-effort and not true full scope; the command emits a stderr warning in
-that case (even under `--quiet`) telling you to re-run `find-stocks` to
-regenerate the index.
-
-`--similarity` choices:
-
-- `none` writes only the Stock Phenotype Sheet inside the aggregated workbook.
-- `tiers` adds the cosine-threshold tier sidecar workbook computed against
-  `settings.phenotypeSimilarityTargets`.
-- `simple-buckets` adds the rule-based
-  `collection / UAS / sleep-circ / balancer` sidecar workbook.
-- `keyword-buckets` adds the `Keyword Hits / No Keyword Hits` sidecar
-  workbook.
-
-Common options: `--config/-c`, `--quiet/-q`, `--similarity {none,tiers,simple-buckets,keyword-buckets}`.
-
-### Stage 3: validate-stocks (GPT validation only)
-
-```bash
-python -m fl_ai_reagent_stocker validate-stocks ./gene_lists/Stocks --config ./my_config.json [options]
-```
-
-Purpose:
-
-1. Rebuild the same split outputs using the same JSON config
-2. Identify `Ref++` output-sheet stocks
-3. Run selective AI validation (short-circuits on first functional hit per stock)
-4. Merge validation columns back into the organized workbook
-
-`validate-stocks` no longer accepts `--soft-run`, `--OAI-embedding`,
-`--simple-buckets`, or `--keyword-bucketing`. Use `phenotype-sheet` for the
-phenotype reagent flow.
-
-Validation-specific options: `--test-log` (write GPT call logs under
-`data/logs/gpt_queries/`), `--max-gpt-calls-per-stock` (default `5`).
-
-### End-to-end wrapper
-
-```bash
-python -m fl_ai_reagent_stocker run-full-pipeline ./gene_lists --config ./my_config.json --mode normal [options]
-python -m fl_ai_reagent_stocker run-full-pipeline ./gene_lists --config ./my_config.json --mode phenotype --similarity tiers
-```
-
-`--mode normal` runs Stage 1 + `split-stocks` + `validate-stocks` and accepts
-the Stage 1 args plus `--test-log` and `--max-gpt-calls-per-stock`.
-`--mode phenotype` runs Stage 1 + `phenotype-sheet` only and accepts the
-Stage 1 args plus `--similarity`. Validation flags are ignored in
-`--mode phenotype`; `--similarity` is ignored in `--mode normal`.
+- `split-stocks` writes organized workbooks only (no validation or
+  phenotype-sheet side effects).
+- `phenotype-sheet` drives the gene-first `All Phenotypic Stocks Sheet` from the
+  Stage 1 `Gene Reagent Index` filtered against FlyBase
+  `genotype_phenotype_data`, attaching stock metadata from the full
+  `fbst_to_derived_stock_component.csv`. `settings.embeddings.enabled` adds the
+  cosine analysis and similarity-tier sidecar; without it, only the All
+  Phenotypic Stocks Sheet is written. It expects a `Gene Reagent Index` sheet for full-scope output and
+  warns to stderr (even under `--quiet`) when one is missing.
+- `validate-stocks` rebuilds the split outputs and GPT-validates `Ref++`
+  stocks, short-circuiting on the first functional hit per stock.
 
 Stage 1 always writes a `Gene Reagent Index` sheet alongside `Stocks` /
-`References` in `aggregated_stock_refs.xlsx`. Older workbooks without the
-sheet still run via a legacy fallback that derives the reagent universe from
-the `Stocks` sheet (best-effort, not true full scope).
+`References` in `aggregated_stock_refs.xlsx`.
 
 ## JSON Config Contract
 
-The JSON files in `data/config/` are canonical and must keep the same behavior
-through refactors. The default is `stock_split_config_example.json`.
+The JSON files in `data/config/` are canonical. The default is
+`stock_split_config_example.json`; `stock_split_config_phenotype_example.json`
+is the phenotype-aware variant.
 
-- `settings.relevantSearchTerms` defines keyword relevance and `Ref++`
-- `settings.phenotypeSimilarityTargets` is required for phenotype-sheet
-  cosine similarity targets (each entry needs `keyword` + `embedding_text`,
-  validated by `normalize_phenotype_similarity_targets` in `config.py`)
+- `settings.relevantSearchTerms` defines keyword relevance, backing
+  `ALLELE_PAPER_RELEVANCE_SCORE` and the `Ref++` / `Ref+` / `Ref-` tiers
+- `settings.phenotypeSimilarityTargets` defines the curated-phenotype targets
+  (each entry needs `keyword` + `embedding_text`, validated by
+  `normalize_phenotype_similarity_targets` in `config.py`). Used both for the
+  `PHENOTYPE_RELEVANCE_SCORE` tiers and for the OpenAI embedding analysis.
 - `settings.maxStocksPerGene` and `settings.maxStocksPerAllele` define stock
   limits
+- `settings.input` is required and defines gene columns plus FBgn conversion
+- `settings.pubmed` is required and defines PubMed/full-text batch size
+- `settings.embeddings` is required and controls embedding analysis
+- `settings.output` is required and controls output preservation
+- `settings.validation` is required in every JSON config; shipped configs set
+  `enabled: false` explicitly
+- `settings.validation.maxGptCallsPerStock`, `minFullTextChars`,
+  `gptCallDelaySeconds`, `shortCircuitOnFunctionalValidation`, and
+  `enableGptLogging` are required validation behavior controls
+- `settings.contentsSeparatorEvery` defines how often the `Contents` sheet
+  breakdown table draws a faint separator row (default `3`)
 - `filters` defines reusable column predicates
-- `combinations` defines sheet partitions
+- `combinations` defines ordered sheet partitions; each `(stock_id, collection)`
+  reagent is placed in only the first combination it matches
 - `filterDescriptions` defines user-facing sheet descriptions
+
+Computed score columns available to filters:
+
+- `ALLELE_PAPER_RELEVANCE_SCORE`: `2` (`Ref++`), `1` (`Ref+`), `0` (`Ref-`).
+- `PHENOTYPE_RELEVANCE_SCORE`: `2` (`Phenotype++`, a component has a curated
+  phenotype matching a `phenotypeSimilarityTargets` term), `1` (`Phenotype+`,
+  any curated phenotype), `0` (none). Computed by
+  `compute_phenotype_relevance_score` in `pipelines/stock_splitting.py` only
+  when a filter references the column.
 
 Do not move or rename the existing config files unless explicitly requested.
 
@@ -222,9 +209,9 @@ fl_ai_reagent_stocker/
 └── pipelines/
     ├── __init__.py
     ├── stock_finding.py         # Stage 1: genes → stocks → references → Gene Reagent Index
-    └── stock_splitting.py       # split-stocks, phenotype-sheet, validate-stocks:
+    └── stock_splitting.py       # organize, phenotype-sheet, validate:
                                  # filters, limits, Excel output, gene-first
-                                 # phenotype reagent flow + similarity sidecars
+                                 # phenotype reagent flow + embedding analysis
 ```
 
 ### Key classes
@@ -233,17 +220,22 @@ fl_ai_reagent_stocker/
   Loads FlyBase data, maps `FBgn → FBal → FBtp/FBti → FBst`, fetches
   references, scores keywords, writes the Stage 1 workbook.
 
-- **`StockSplittingPipeline`** (`pipelines/stock_splitting.py`): Stage 2,
-  Stage 3, *and* the phenotype-sheet flow. Loads Stage 1 output, computes
-  derived columns, applies JSON filters and stock limits, writes organized
-  workbooks. Pass `run_validation=True` to also run GPT validation
-  (`validate-stocks`). Set `Settings.soft_run=True` (selected by the
-  `phenotype-sheet` CLI command via `--similarity`) to switch to the
-  phenotype reagent flow and emit the optional similarity sidecars.
+- **`StockSplittingPipeline`** (`pipelines/stock_splitting.py`): the organize,
+  validate, *and* phenotype-sheet flows. Loads Stage 1 output, computes derived
+  columns (including `PHENOTYPE_RELEVANCE_SCORE` when a filter needs it),
+  applies JSON filters and stock limits, and writes organized workbooks. Pass
+  `run_validation=True` to also run GPT validation. Set `Settings.soft_run=True`
+  to switch to the phenotype reagent flow; combine with
+  `enable_oai_embedding=True` to emit the cosine analysis and similarity-tier
+  sidecar.
 
 - **`Settings`** (`config.py`): Dataclass holding API keys, model names,
   paths, and feature flags (`soft_run`, `enable_oai_embedding`,
-  `simple_buckets`, `keyword_bucketing`, `enable_gpt_logging`,
+  `phenotype_similarity_sidecar`, `phenotype_similarity_plots` (gate the
+  t-SNE/density plot folder independently of cosine scoring),
+  `emit_no_pmid_report` (gate the no-PMID `.txt` sidecar),
+  `organized_output_dir` (write the aggregated workbook directly into this
+  directory instead of a nested `Organized Stocks`), `enable_gpt_logging`,
   `max_gpt_calls_per_stock`, `phenotype_similarity_targets`,
   `skip_fbgnid_conversion`). Loads `.env` at init time. Default model is
   `gpt-5-mini`; default embedding model is `text-embedding-3-large`.
@@ -252,8 +244,9 @@ fl_ai_reagent_stocker/
   category mapping, and priority ordering used by Stage 3 outputs.
 
 - **`EmbeddingSimilarityScorer`** (`integrations/phenotype_similarity.py`):
-  Computes phenotype embeddings against configured targets and powers the
-  similarity-tier sidecar workbook.
+  Computes phenotype embeddings against configured targets. It powers cosine
+  columns, plots, and the similarity-tier sidecar when
+  `settings.embeddings.enabled` is `true`.
 
 ## Helper Scripts
 
@@ -330,7 +323,8 @@ Expected local data layout under `data/`:
   - `pmid_to_fulltext_method.csv`
   - `phenotype_text_embeddings.csv`
   - `phenotype_target_embeddings.csv`
-- `logs/gpt_queries/` (gitignored) - GPT call logs when `--test-log` is set
+- `logs/gpt_queries/` (gitignored) - GPT call logs when
+  `settings.validation.enableGptLogging` is `true`
 
 The code prefers the local `data/` directory and falls back to a sibling
 `../Data` directory for legacy layouts (`is_portable_mode()` returns whether

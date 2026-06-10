@@ -5,7 +5,7 @@
 ```mermaid
 flowchart TD
     userInput["Gene list upload or paste"] --> preview["Preview and confirm gene column"]
-    existingOutput["Existing StockerOutput.xlsx"] --> phenotypeSheet["Stock Phenotype Sheet"]
+    existingOutput["Existing StockerOutput.xlsx"] --> phenotypeSheet["All Phenotypic Stocks Sheet"]
     preview --> keywordSetup["Enter phenotype keywords"]
     keywordSetup --> runCore["Run phenotype-first soft-run pipeline"]
     runCore --> phenotypeSheet

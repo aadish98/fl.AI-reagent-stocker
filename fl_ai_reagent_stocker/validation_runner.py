@@ -23,6 +23,9 @@ def run_functional_validation(
     pubmed_client,
     pubmed_cache,
     max_gpt_calls_per_stock: Optional[int],
+    min_fulltext_chars: int = 500,
+    gpt_call_delay_seconds: float = 0.5,
+    short_circuit_on_functional_validation: bool = True,
     component_to_pmids: Optional[Dict[str, Set[str]]] = None,
     component_id_to_symbol: Optional[Dict[str, str]] = None,
     stock_tasks_override: Optional[Dict[str, List[Tuple[str, str]]]] = None,
@@ -246,7 +249,7 @@ def run_functional_validation(
             stock_gpt_call_count[stock_num] = 0
 
             for allele, pmid in tasks:
-                if stock_num in validated_stocks:
+                if short_circuit_on_functional_validation and stock_num in validated_stocks:
                     skipped_short_circuit += 1
                     pbar.update(1)
                     continue
@@ -268,7 +271,7 @@ def run_functional_validation(
                     full_text, _source, fetch_reason = fulltext_fetcher.fetch_with_diagnostics(pmid, pmcid, doi)
                 else:
                     full_text, _source = fulltext_fetcher.fetch(pmid, pmcid, doi)
-                if not full_text or len(full_text) <= 500:
+                if not full_text or len(full_text) <= min_fulltext_chars:
                     reason_suffix = f" ({fetch_reason})" if fetch_reason else ""
                     results[(stock_num, allele, pmid)] = {
                         "functional_validity": ValidationStatus.AMBIGUOUS,
@@ -325,13 +328,17 @@ def run_functional_validation(
                     is_custom_stock=is_custom,
                     gene_terms=gene_terms,
                 )
-                time.sleep(0.5)
+                if gpt_call_delay_seconds > 0:
+                    time.sleep(gpt_call_delay_seconds)
 
                 results[(stock_num, allele, pmid)] = result
                 stock_gpt_call_count[stock_num] += 1
                 actual_gpt_calls += 1
 
-                if result["functional_validity"] == ValidationStatus.FUNCTIONALLY_VALIDATED:
+                if (
+                    short_circuit_on_functional_validation
+                    and result["functional_validity"] == ValidationStatus.FUNCTIONALLY_VALIDATED
+                ):
                     validated_stocks.add(stock_num)
 
                 pbar.update(1)

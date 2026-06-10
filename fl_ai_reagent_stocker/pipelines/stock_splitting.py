@@ -23,6 +23,7 @@ import re
 import shutil
 from collections import defaultdict
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -80,6 +81,7 @@ FILTER_TYPE_PHRASES = {
 PHENOTYPE_SIMILARITY_EMBEDDING_MODEL = "text-embedding-3-large"
 SIMILARITY_TIER_BIN_WIDTH = 0.05
 SIMILARITY_TIER_SHEET_COUNT = int(round(1.0 / SIMILARITY_TIER_BIN_WIDTH))
+DEFAULT_CONTENTS_SEPARATOR_EVERY = 3
 SOURCE_STOCK_COLUMN = "Source/ Stock #"
 SOURCE_COLUMN = "Source"
 STOCK_NUMBER_COLUMN = "Stock #"
@@ -141,6 +143,92 @@ MASTERLIST_TEMPLATE_SOURCE_COLUMNS = {
     "Data Set": "Data Set",
 }
 
+PHENOTYPE_WORKBOOK_COLUMN_LABELS = {
+    "matched_component_types": "How Stock Matched Gene",
+    "allele_class_terms": "Allele Class",
+    "transgenic_product_class_terms": "Transgenic Product Class",
+    CO_REAGENT_FBIDS_COLUMN: "Partner GAL4 FlyBase IDs",
+    CO_REAGENT_SYMBOLS_COLUMN: "Partner GAL4 Symbols",
+}
+
+
+def _normalize_contents_separator_every(value: Any) -> int:
+    """Return the Contents sheet separator interval from config settings."""
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError("settings.contentsSeparatorEvery must be a positive integer")
+    return value
+
+
+def _required_settings_object(settings: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """Return a required nested settings object or raise a schema error."""
+    if key not in settings:
+        raise ValueError(f"settings.{key} is required")
+    value = settings.get(key)
+    if not isinstance(value, dict):
+        raise ValueError(f"settings.{key} must be an object")
+    return value
+
+
+def _required_bool(settings: Dict[str, Any], key: str) -> bool:
+    """Return a required bool from a settings object."""
+    field = key.rsplit('.', 1)[-1]
+    if field not in settings:
+        raise ValueError(f"settings.{key} is required")
+    value = settings.get(field)
+    if not isinstance(value, bool):
+        raise ValueError(f"settings.{key} must be true or false")
+    return value
+
+
+def _required_non_empty_string(settings: Dict[str, Any], key: str) -> str:
+    """Return a required non-empty string from a settings object."""
+    field = key.rsplit('.', 1)[-1]
+    if field not in settings:
+        raise ValueError(f"settings.{key} is required")
+    value = settings.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"settings.{key} must be a non-empty string")
+    return value
+
+
+def _required_non_negative_int_or_null(settings: Dict[str, Any], key: str) -> Optional[int]:
+    """Return a required non-negative int or null from a settings object."""
+    field = key.rsplit('.', 1)[-1]
+    if field not in settings:
+        raise ValueError(f"settings.{key} is required")
+    value = settings.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"settings.{key} must be a non-negative integer or null")
+    return value
+
+
+def _required_positive_int(settings: Dict[str, Any], key: str) -> int:
+    """Return a required positive int from a settings object."""
+    field = key.rsplit('.', 1)[-1]
+    if field not in settings:
+        raise ValueError(f"settings.{key} is required")
+    value = settings.get(field)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError(f"settings.{key} must be a positive integer")
+    return value
+
+
+def _required_non_negative_number(settings: Dict[str, Any], key: str) -> float:
+    """Return a required non-negative int/float from a settings object."""
+    field = key.rsplit('.', 1)[-1]
+    if field not in settings:
+        raise ValueError(f"settings.{key} is required")
+    value = settings.get(field)
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or value < 0
+    ):
+        raise ValueError(f"settings.{key} must be a non-negative number")
+    return float(value)
+
 
 ###############################################################################
 # JSON Configuration Loading and Validation
@@ -187,13 +275,58 @@ def load_split_config(config_path: Path) -> Dict[str, Any]:
     
     settings = config['settings']
     settings.setdefault('relevantSearchTerms', [])
-    if 'phenotypeSimilarityTargets' not in settings:
-        raise ValueError("Config 'settings.phenotypeSimilarityTargets' is required")
-    settings['phenotypeSimilarityTargets'] = normalize_phenotype_similarity_targets(
-        settings.get('phenotypeSimilarityTargets')
-    )
     settings.setdefault('maxStocksPerGene', None)
     settings.setdefault('maxStocksPerAllele', None)
+
+    input_settings = _required_settings_object(settings, 'input')
+    input_settings['geneCol'] = _required_non_empty_string(input_settings, 'input.geneCol')
+    input_settings['inputGeneCol'] = _required_non_empty_string(input_settings, 'input.inputGeneCol')
+    input_settings['skipFbgnidConversion'] = _required_bool(
+        input_settings, 'input.skipFbgnidConversion'
+    )
+    settings['input'] = input_settings
+
+    pubmed_settings = _required_settings_object(settings, 'pubmed')
+    pubmed_settings['batchSize'] = _required_positive_int(
+        pubmed_settings, 'pubmed.batchSize'
+    )
+    settings['pubmed'] = pubmed_settings
+
+    embedding_settings = _required_settings_object(settings, 'embeddings')
+    embedding_settings['enabled'] = _required_bool(
+        embedding_settings, 'embeddings.enabled'
+    )
+    settings['embeddings'] = embedding_settings
+
+    output_settings = _required_settings_object(settings, 'output')
+    output_settings['preserveUnsplitWorkbook'] = _required_bool(
+        output_settings, 'output.preserveUnsplitWorkbook'
+    )
+    settings['output'] = output_settings
+
+    validation_settings = _required_settings_object(settings, 'validation')
+    validation_settings['enabled'] = _required_bool(
+        validation_settings, 'validation.enabled'
+    )
+    validation_settings['maxGptCallsPerStock'] = _required_non_negative_int_or_null(
+        validation_settings, 'validation.maxGptCallsPerStock'
+    )
+    validation_settings['minFullTextChars'] = _required_positive_int(
+        validation_settings, 'validation.minFullTextChars'
+    )
+    validation_settings['gptCallDelaySeconds'] = _required_non_negative_number(
+        validation_settings, 'validation.gptCallDelaySeconds'
+    )
+    validation_settings['shortCircuitOnFunctionalValidation'] = _required_bool(
+        validation_settings, 'validation.shortCircuitOnFunctionalValidation'
+    )
+    validation_settings['enableGptLogging'] = _required_bool(
+        validation_settings, 'validation.enableGptLogging'
+    )
+    settings['validation'] = validation_settings
+    settings['contentsSeparatorEvery'] = _normalize_contents_separator_every(
+        settings.get('contentsSeparatorEvery', DEFAULT_CONTENTS_SEPARATOR_EVERY)
+    )
     if not isinstance(settings['relevantSearchTerms'], list):
         raise ValueError("settings.relevantSearchTerms must be a list")
 
@@ -413,6 +546,125 @@ def compute_allele_paper_relevance_score(
         return 0  # Ref-
 
     return df.apply(calculate_score, axis=1)
+
+
+PHENOTYPE_RELEVANCE_SCORE_COLUMN = "PHENOTYPE_RELEVANCE_SCORE"
+
+
+def _phenotype_target_terms(
+    similarity_targets: Optional[List[Dict[str, str]]],
+) -> Set[str]:
+    """Return lowercased keyword / embedding_text terms used for Phenotype++."""
+    terms: Set[str] = set()
+    for target in similarity_targets or []:
+        if not isinstance(target, dict):
+            continue
+        for key in ("keyword", "embedding_text"):
+            value = str(target.get(key, "") or "").strip().lower()
+            if value:
+                terms.add(value)
+    return terms
+
+
+def _stock_relevant_component_ids(row: pd.Series) -> Set[str]:
+    """Return the FlyBase component IDs a stock is matched through."""
+    ids: Set[str] = set()
+    for column in ("relevant_component_ids", "matched_component_ids"):
+        for raw in parse_semicolon_list(row.get(column, "")):
+            cid = clean_id(raw)
+            if cid:
+                ids.add(cid)
+    return ids
+
+
+def compute_phenotype_relevance_score(
+    df: pd.DataFrame,
+    flybase_data_path: Optional[Path],
+    similarity_targets: Optional[List[Dict[str, str]]] = None,
+    verbose: bool = True,
+) -> pd.Series:
+    """
+    Compute ``PHENOTYPE_RELEVANCE_SCORE`` for each stock row.
+
+    Score meanings (mapped to filter labels in the split config):
+        2 (Phenotype++): at least one of the stock's relevant components appears
+            in a FlyBase ``genotype_phenotype_data`` row whose ``phenotype_name``
+            contains a configured phenotype-similarity target term
+            (case-insensitive substring of the target ``keyword`` or
+            ``embedding_text``).
+        1 (Phenotype+): at least one relevant component appears in any
+            ``genotype_phenotype_data`` row, but none match a target term.
+        0: no associated phenotype row.
+
+    Phenotype evidence is row-level over ``(component, phenotype, reference)``;
+    this collapses that evidence into a single per-stock score so the organized
+    workbook stays reagent-level over ``(stock_id, collection)``. Component
+    matching mirrors the All Phenotypic Stocks Sheet: a component is associated with a
+    phenotype row when its FlyBase ID appears in that row's ``genotype_FBids``.
+    """
+    if len(df) == 0:
+        return pd.Series([], dtype=int)
+
+    zero_series = pd.Series(0, index=df.index, dtype=int)
+    if flybase_data_path is None:
+        return zero_series
+
+    alleles_dir = Path(flybase_data_path) / "alleles_and_stocks"
+    try:
+        phenotype_path = find_latest_tsv(alleles_dir, "genotype_phenotype_data")
+        phenotype_df = load_flybase_tsv(phenotype_path)
+    except FileNotFoundError:
+        if verbose:
+            print(
+                "      Warning: genotype_phenotype_data not found under "
+                f"{alleles_dir}; PHENOTYPE_RELEVANCE_SCORE set to 0"
+            )
+        return zero_series
+
+    if len(phenotype_df) == 0:
+        return zero_series
+
+    target_terms = _phenotype_target_terms(similarity_targets)
+
+    genotype_fbids = (
+        phenotype_df.get("genotype_FBids", pd.Series("", index=phenotype_df.index))
+        .fillna("")
+        .astype(str)
+    )
+    phenotype_names = (
+        phenotype_df.get("phenotype_name", pd.Series("", index=phenotype_df.index))
+        .fillna("")
+        .astype(str)
+    )
+
+    components_any: Set[str] = set()
+    components_target: Set[str] = set()
+    for fbids_value, phenotype_name in zip(
+        genotype_fbids.tolist(), phenotype_names.tolist()
+    ):
+        component_ids = _extract_flybase_ids(fbids_value)
+        if not component_ids:
+            continue
+        name_lower = phenotype_name.strip().lower()
+        is_target = bool(target_terms) and any(
+            term in name_lower for term in target_terms
+        )
+        for cid in component_ids:
+            components_any.add(cid)
+            if is_target:
+                components_target.add(cid)
+
+    def _score(row) -> int:
+        component_ids = _stock_relevant_component_ids(row)
+        if not component_ids:
+            return 0
+        if component_ids & components_target:
+            return 2
+        if component_ids & components_any:
+            return 1
+        return 0
+
+    return df.apply(_score, axis=1).astype(int)
 
 
 ###############################################################################
@@ -864,30 +1116,10 @@ def _derive_stock_keyword_refs_header(keyword_pmids_col: Optional[str]) -> str:
     return f"{base} (all for stock)"
 
 
-def _load_secondary_fbgn_to_primary(
-    flybase_data_path: Optional[Path],
-    verbose: bool = False,
-) -> Dict[str, str]:
-    """
-    Build a ``secondary_FBgn -> primary_FBgn`` alias map from FlyBase's
-    ``fbgn_annotation_ID`` precomputed table.
-
-    Returns an empty dict if the file is missing. The loader parses the
-    FlyBase header line manually (``load_flybase_tsv`` confuses comment
-    lines with data rows in this file format).
-    """
-    if flybase_data_path is None:
-        return {}
-    base = Path(flybase_data_path)
-    candidates = sorted(base.rglob("fbgn_annotation_ID*.tsv*"))
-    if not candidates:
-        if verbose:
-            print(
-                "    Note: Could not find fbgn_annotation_ID TSV under "
-                f"{flybase_data_path}; FBgn alias canonicalization disabled."
-            )
-        return {}
-    src = max(candidates, key=lambda p: p.stat().st_mtime)
+@lru_cache(maxsize=None)
+def _load_secondary_fbgn_to_primary_cached(src_str: str) -> Dict[str, str]:
+    """Parse FlyBase secondary -> primary FBgn aliases from one TSV path."""
+    src = Path(src_str)
     try:
         open_fn = gzip.open if str(src).endswith(".gz") else open
         secondary_to_primary: Dict[str, str] = {}
@@ -916,72 +1148,87 @@ def _load_secondary_fbgn_to_primary(
                     s = s.strip()
                     if s.startswith("FBgn") and s != prim:
                         secondary_to_primary[s] = prim
+        return secondary_to_primary
+    except Exception:
+        return {}
+
+
+def _load_secondary_fbgn_to_primary(
+    flybase_data_path: Optional[Path],
+    verbose: bool = False,
+) -> Dict[str, str]:
+    """
+    Build a ``secondary_FBgn -> primary_FBgn`` alias map from FlyBase's
+    ``fbgn_annotation_ID`` precomputed table.
+
+    Returns an empty dict if the file is missing. The loader parses the
+    FlyBase header line manually (``load_flybase_tsv`` confuses comment
+    lines with data rows in this file format). Parsed maps are cached
+    per-process by resolved TSV path; callers treat the returned dict read-only.
+    """
+    if flybase_data_path is None:
+        return {}
+    base = Path(flybase_data_path)
+    candidates = sorted(base.rglob("fbgn_annotation_ID*.tsv*"))
+    if not candidates:
         if verbose:
+            print(
+                "    Note: Could not find fbgn_annotation_ID TSV under "
+                f"{flybase_data_path}; FBgn alias canonicalization disabled."
+            )
+        return {}
+    src = max(candidates, key=lambda p: p.stat().st_mtime)
+    src_key = str(src.resolve())
+    misses_before = _load_secondary_fbgn_to_primary_cached.cache_info().misses
+    secondary_to_primary = _load_secondary_fbgn_to_primary_cached(src_key)
+    misses_after = _load_secondary_fbgn_to_primary_cached.cache_info().misses
+    if verbose and misses_after > misses_before:
+        if secondary_to_primary:
             print(
                 f"    Loaded FBgn alias map: {len(secondary_to_primary)} "
                 "secondary -> primary entries"
             )
-        return secondary_to_primary
-    except Exception as e:
-        if verbose:
-            print(f"    Warning: Could not load FBgn alias map: {e}")
-        return {}
+        else:
+            print(f"    Warning: Could not load FBgn alias map: {src}")
+    return secondary_to_primary
 
 
-def _load_gene_synonyms_map(
-    flybase_data_path: Optional[Path],
-    verbose: bool = False
-) -> Dict[str, str]:
-    """
-    Load FlyBase gene symbol/synonym table and build symbol -> synonyms display.
+def _find_col_case_insensitive(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    lower_map = {str(c).strip().lower(): c for c in df.columns}
+    for cand in candidates:
+        col = lower_map.get(str(cand).strip().lower())
+        if col is not None:
+            return col
+    return None
 
-    Maps both current symbols and known synonyms to a normalized semicolon list.
-    """
-    def _find_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-        lower_map = {str(c).strip().lower(): c for c in df.columns}
-        for cand in candidates:
-            col = lower_map.get(str(cand).strip().lower())
-            if col is not None:
-                return col
-        return None
 
-    def _find_synonym_tsv(base_path: Path) -> Optional[Path]:
-        genes_dir = base_path / "genes"
-        if genes_dir.exists():
-            try:
-                return find_latest_tsv(genes_dir, "fb_synonym")
-            except FileNotFoundError:
-                pass
-            except Exception:
-                pass
+def _find_synonym_tsv(base_path: Path) -> Optional[Path]:
+    genes_dir = base_path / "genes"
+    if genes_dir.exists():
+        try:
+            return find_latest_tsv(genes_dir, "fb_synonym")
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
 
-        # Fallback: some local data layouts do not include a top-level "Genes"
-        # folder, so search within FlyBase for any fb_synonym TSV/GZ.
-        candidates = sorted(base_path.rglob("fb_synonym*.tsv*"))
-        if candidates:
-            return max(candidates, key=lambda p: p.stat().st_mtime)
-        return None
+    # Fallback: some local data layouts do not include a top-level "Genes"
+    # folder, so search within FlyBase for any fb_synonym TSV/GZ.
+    candidates = sorted(base_path.rglob("fb_synonym*.tsv*"))
+    if candidates:
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    return None
 
-    if flybase_data_path is None:
-        return {}
-    try:
-        synonym_path = _find_synonym_tsv(Path(flybase_data_path))
-        if synonym_path is None:
-            if verbose:
-                print(
-                    f"    Warning: Could not find fb_synonym TSV under {flybase_data_path}"
-                )
-            return {}
-        syn_df = load_flybase_tsv(synonym_path, keep_default_na=False)
-    except Exception as e:
-        if verbose:
-            print(f"    Warning: Could not load FlyBase gene synonyms: {e}")
-        return {}
 
-    organism_col = _find_col(syn_df, ["organism_abbreviation"])
-    current_symbol_col = _find_col(syn_df, ["current_symbol"])
-    synonyms_col = _find_col(syn_df, ["symbol_synonym(s)", "symbol_synonyms"])
-    primary_fbid_col = _find_col(syn_df, ["primary_FBid", "primary_fbid"])
+@lru_cache(maxsize=None)
+def _load_gene_synonyms_map_cached(synonym_path_str: str) -> Dict[str, str]:
+    """Parse a FlyBase fb_synonym TSV into a read-only lookup dict."""
+    syn_df = load_flybase_tsv(Path(synonym_path_str), keep_default_na=False)
+
+    organism_col = _find_col_case_insensitive(syn_df, ["organism_abbreviation"])
+    current_symbol_col = _find_col_case_insensitive(syn_df, ["current_symbol"])
+    synonyms_col = _find_col_case_insensitive(syn_df, ["symbol_synonym(s)", "symbol_synonyms"])
+    primary_fbid_col = _find_col_case_insensitive(syn_df, ["primary_FBid", "primary_fbid"])
 
     if organism_col:
         syn_df = syn_df[
@@ -1025,7 +1272,39 @@ def _load_gene_synonyms_map(
         key = str(name).strip().casefold()
         if key and key not in name_to_synonyms:
             name_to_synonyms[key] = syns
-    if verbose:
+    return name_to_synonyms
+
+
+def _load_gene_synonyms_map(
+    flybase_data_path: Optional[Path],
+    verbose: bool = False
+) -> Dict[str, str]:
+    """
+    Load FlyBase gene symbol/synonym table and build symbol -> synonyms display.
+
+    Maps both current symbols and known synonyms to a normalized semicolon list.
+    Parsed maps are cached per-process by resolved TSV path; callers treat the
+    returned dict read-only.
+    """
+    if flybase_data_path is None:
+        return {}
+    synonym_path = _find_synonym_tsv(Path(flybase_data_path))
+    if synonym_path is None:
+        if verbose:
+            print(
+                f"    Warning: Could not find fb_synonym TSV under {flybase_data_path}"
+            )
+        return {}
+    synonym_key = str(synonym_path.resolve())
+    misses_before = _load_gene_synonyms_map_cached.cache_info().misses
+    try:
+        name_to_synonyms = _load_gene_synonyms_map_cached(synonym_key)
+    except Exception as e:
+        if verbose:
+            print(f"    Warning: Could not load FlyBase gene synonyms: {e}")
+        return {}
+    misses_after = _load_gene_synonyms_map_cached.cache_info().misses
+    if verbose and misses_after > misses_before:
         print(f"    Loaded FlyBase gene synonyms for {len(name_to_synonyms)} symbols")
     return name_to_synonyms
 
@@ -1080,19 +1359,12 @@ def _row_has_rnai_signal(row: pd.Series) -> bool:
     )
 
 
-def _load_rnai_type_lookup(
-    flybase_data_path: Optional[Path],
+@lru_cache(maxsize=None)
+def _load_rnai_type_lookup_cached(
+    construct_path_str: str,
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """Build allele- and construct-level RNAi subtype lookups from FlyBase."""
-    if flybase_data_path is None:
-        return {}, {}
-
-    constructs_dir = Path(flybase_data_path) / "transgenic_constructs"
-    try:
-        construct_path = find_latest_tsv(constructs_dir, "transgenic_construct_descriptions")
-        construct_df = load_flybase_tsv(construct_path)
-    except FileNotFoundError:
-        return {}, {}
+    """Build allele- and construct-level RNAi subtype lookups from one TSV."""
+    construct_df = load_flybase_tsv(Path(construct_path_str))
 
     raw_cols = list(construct_df.columns)
 
@@ -1167,6 +1439,25 @@ def _load_rnai_type_lookup(
     )
 
 
+def _load_rnai_type_lookup(
+    flybase_data_path: Optional[Path],
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Build allele- and construct-level RNAi subtype lookups from FlyBase.
+
+    Parsed lookups are cached per-process by resolved construct TSV path; callers
+    treat the returned dictionaries read-only.
+    """
+    if flybase_data_path is None:
+        return {}, {}
+
+    constructs_dir = Path(flybase_data_path) / "transgenic_constructs"
+    try:
+        construct_path = find_latest_tsv(constructs_dir, "transgenic_construct_descriptions")
+    except FileNotFoundError:
+        return {}, {}
+    return _load_rnai_type_lookup_cached(str(construct_path.resolve()))
+
+
 def _ensure_rnai_type_column(
     stocks_df: pd.DataFrame,
     flybase_data_path: Optional[Path],
@@ -1228,9 +1519,17 @@ def _build_phenotype_similarity_context(
     """Instantiate similarity targets and scorers for the soft-run sheet."""
     config_settings = config.get("settings", {})
     raw_targets = config_settings.get("phenotypeSimilarityTargets")
-    targets = build_similarity_targets(
-        normalize_phenotype_similarity_targets(raw_targets)
+    requires_targets = bool(
+        pipeline_settings
+        and pipeline_settings.soft_run
+        and pipeline_settings.enable_oai_embedding
     )
+    if raw_targets is None and not requires_targets:
+        targets: List[PhenotypeSimilarityTarget] = []
+    else:
+        targets = build_similarity_targets(
+            normalize_phenotype_similarity_targets(raw_targets)
+        )
 
     embedding_scorer: Optional[EmbeddingSimilarityScorer] = None
 
@@ -1240,7 +1539,7 @@ def _build_phenotype_similarity_context(
     if pipeline_settings.soft_run and pipeline_settings.enable_oai_embedding:
         embedding_scorer = EmbeddingSimilarityScorer(
             openai_api_key=pipeline_settings.openai_api_key,
-            model=PHENOTYPE_SIMILARITY_EMBEDDING_MODEL,
+            model=pipeline_settings.openai_embedding_model,
             phenotype_cache_path=pipeline_settings.phenotype_embedding_cache_path,
             target_cache_path=pipeline_settings.phenotype_target_embedding_cache_path,
         )
@@ -1296,12 +1595,15 @@ def _split_genotype_symbol_tokens(value: Any) -> List[str]:
     return tokens
 
 
-def _extract_genotype_id_symbol_pairs(
-    genotype_fbids: Any,
+def _extract_genotype_id_symbol_pairs_with_ids(
+    ids: List[str],
     genotype_symbols: Any,
 ) -> List[Tuple[str, str]]:
-    """Best-effort alignment between genotype FBids and symbol tokens."""
-    ids = _extract_flybase_ids(genotype_fbids)
+    """Best-effort alignment between pre-extracted FBids and symbol tokens.
+
+    Useful when callers already have the cleaned FBid list from
+    ``_extract_flybase_ids`` and want to avoid the redundant extraction.
+    """
     if not ids:
         return []
 
@@ -1339,6 +1641,17 @@ def _extract_genotype_id_symbol_pairs(
             ]
 
     return []
+
+
+def _extract_genotype_id_symbol_pairs(
+    genotype_fbids: Any,
+    genotype_symbols: Any,
+) -> List[Tuple[str, str]]:
+    """Best-effort alignment between genotype FBids and symbol tokens."""
+    return _extract_genotype_id_symbol_pairs_with_ids(
+        _extract_flybase_ids(genotype_fbids),
+        genotype_symbols,
+    )
 
 
 def _looks_like_gal4_symbol(symbol: Any, gene_symbol: Any = "") -> bool:
@@ -1400,7 +1713,7 @@ def _build_stock_phenotype_sheet(
     gene_to_datasets: Optional[Dict[str, Set[str]]] = None,
     reagent_index_df: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    """Build the soft-run Stock Phenotype Sheet.
+    """Build the soft-run All Phenotypic Stocks Sheet.
 
     When ``reagent_index_df`` is provided, the function uses it as the
     primary input-gene reagent universe (true full-scope behavior). Phenotype
@@ -1662,6 +1975,39 @@ def _build_stock_phenotype_sheet(
     ):
         return pd.DataFrame()
 
+    # Precomputed FBst-keyed lookups. These replace per-row
+    # ``lookup_derived_df['FBst'] == stock_key`` and
+    # ``derived_df['FBst'] == stock_key`` scans (each O(N) over the full
+    # 478k-row CSV) with O(1) dict lookups.
+    #
+    # ``*_by_fbst`` returns the full row group for an FBst (used by
+    # ``_build_synthetic_stock_meta`` which inspects multiple columns).
+    # ``*_fbst_dsc_to_genes`` resolves (FBst, derived_stock_component) to
+    # the list of GeneSymbols, used by the per-row gene-symbol fallbacks
+    # in the main phenotype loop.
+    def _build_fbst_dsc_to_genes(df: pd.DataFrame) -> Dict[Tuple[str, str], List[str]]:
+        if len(df) == 0:
+            return {}
+        fbst_arr = df['FBst'].tolist()
+        dsc_arr = df['derived_stock_component'].tolist()
+        gene_arr = (
+            df.get('GeneSymbol', pd.Series('', index=df.index))
+            .fillna('').astype(str).tolist()
+        )
+        out: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+        for fbst, dsc, gene in zip(fbst_arr, dsc_arr, gene_arr):
+            if fbst and dsc:
+                out[(fbst, dsc)].append(gene)
+        return out
+
+    lookup_derived_by_fbst: Dict[str, pd.DataFrame] = (
+        {fbst: group for fbst, group in lookup_derived_df.groupby('FBst', sort=False)}
+        if len(lookup_derived_df) > 0
+        else {}
+    )
+    derived_fbst_dsc_to_genes = _build_fbst_dsc_to_genes(derived_df)
+    lookup_fbst_dsc_to_genes = _build_fbst_dsc_to_genes(lookup_derived_df)
+
     phenotype_df['reference'] = phenotype_df.get('reference', '').fillna('').astype(str)
     phenotype_df['phenotype_name'] = phenotype_df.get('phenotype_name', '').fillna('').astype(str)
     phenotype_df['phenotype_id'] = phenotype_df.get('phenotype_id', '').fillna('').astype(str)
@@ -1689,11 +2035,15 @@ def _build_stock_phenotype_sheet(
                 all_relevant_ids.update(cid for cid in parse_semicolon_list(ids_str) if cid)
     all_relevant_ids.discard('')
 
-    def _row_has_relevant_component(fbids_str):
-        return bool(set(_extract_flybase_ids(fbids_str)) & all_relevant_ids)
-
-    relevant_mask = phenotype_df['genotype_FBids'].apply(_row_has_relevant_component)
+    # Extract FlyBase IDs once per phenotype row and reuse for both the
+    # relevance mask and the main loop below (both previously re-extracted
+    # per row, which is the dominant cost for 100k+ phenotype rows).
+    extracted_fbids_series = phenotype_df['genotype_FBids'].apply(_extract_flybase_ids)
+    relevant_mask = extracted_fbids_series.apply(
+        lambda ids: bool(set(ids) & all_relevant_ids)
+    )
     phenotype_df = phenotype_df[relevant_mask].copy()
+    extracted_fbids_series = extracted_fbids_series[relevant_mask]
 
     if len(phenotype_df) == 0:
         return pd.DataFrame()
@@ -1914,28 +2264,66 @@ def _build_stock_phenotype_sheet(
 
     # Index reagent index rows by component_id for metadata enrichment of
     # newly surfaced FBsts in the gene-first flow.
+    #
+    # Vectorized over zipped column lists (much faster than .iterrows()).
+    # ``component_id`` and ``source_allele_id`` were normalized via clean_id
+    # at the top of this function; cids here are already non-blank because
+    # the reagent index was filtered to ``component_id``-truthy rows.
     reagent_index_by_component: Dict[str, List[Dict[str, str]]] = defaultdict(list)
     linked_lookup_components_by_component: Dict[str, Set[str]] = defaultdict(set)
     if has_reagent_index:
+        cid_arr = reagent_index_df['component_id'].tolist()
+        source_allele_arr = reagent_index_df['source_allele_id'].tolist()
+        gene_symbol_arr = (
+            reagent_index_df['input_gene_symbol'].fillna('').astype(str).str.strip().tolist()
+        )
+        component_symbol_arr = (
+            reagent_index_df['component_symbol'].fillna('').astype(str).str.strip().tolist()
+        )
+        component_type_arr = (
+            reagent_index_df['component_type'].fillna('').astype(str).str.strip().tolist()
+        )
+        allele_class_arr = (
+            reagent_index_df['allele_class_terms'].fillna('').astype(str).str.strip().tolist()
+        )
+        transgenic_class_arr = (
+            reagent_index_df['transgenic_product_class_terms']
+            .fillna('').astype(str).str.strip().tolist()
+        )
+        rnai_type_arr = (
+            reagent_index_df['rnai_type'].fillna('').astype(str).str.strip().tolist()
+        )
         source_allele_to_components: Dict[str, Set[str]] = defaultdict(set)
-        for _, ri_row in reagent_index_df.iterrows():
-            cid = clean_id(ri_row.get('component_id', ''))
-            if not cid:
-                continue
-            source_allele_id = clean_id(ri_row.get('source_allele_id', ''))
+        for (
+            cid,
+            source_allele_id,
+            gene_symbol,
+            component_symbol,
+            component_type,
+            allele_class,
+            transgenic_class,
+            rnai_type,
+        ) in zip(
+            cid_arr,
+            source_allele_arr,
+            gene_symbol_arr,
+            component_symbol_arr,
+            component_type_arr,
+            allele_class_arr,
+            transgenic_class_arr,
+            rnai_type_arr,
+        ):
             if source_allele_id:
                 source_allele_to_components[source_allele_id].add(cid)
             linked_lookup_components_by_component[cid].add(cid)
             reagent_index_by_component[cid].append(
                 {
-                    'gene_symbol': str(ri_row.get('input_gene_symbol', '') or '').strip(),
-                    'component_symbol': str(ri_row.get('component_symbol', '') or '').strip(),
-                    'component_type': str(ri_row.get('component_type', '') or '').strip(),
-                    'allele_class_terms': str(ri_row.get('allele_class_terms', '') or '').strip(),
-                    'transgenic_product_class_terms': str(
-                        ri_row.get('transgenic_product_class_terms', '') or ''
-                    ).strip(),
-                    RNAI_TYPE_COLUMN: str(ri_row.get('rnai_type', '') or '').strip(),
+                    'gene_symbol': gene_symbol,
+                    'component_symbol': component_symbol,
+                    'component_type': component_type,
+                    'allele_class_terms': allele_class,
+                    'transgenic_product_class_terms': transgenic_class,
+                    RNAI_TYPE_COLUMN: rnai_type,
                 }
             )
         for component_ids_for_allele in source_allele_to_components.values():
@@ -1989,11 +2377,7 @@ def _build_stock_phenotype_sheet(
         reagent-index metadata for the matched components, and derives the
         one-hot reagent bucket from a synthetic row using existing helpers.
         """
-        fbst_rows = (
-            lookup_derived_df[lookup_derived_df['FBst'] == fbst]
-            if len(lookup_derived_df) > 0
-            else pd.DataFrame()
-        )
+        fbst_rows = lookup_derived_by_fbst.get(fbst, pd.DataFrame())
         if len(fbst_rows) == 0:
             return {}
 
@@ -2365,9 +2749,35 @@ def _build_stock_phenotype_sheet(
             meta[column] = bool(bucket_flags.get(column, False))
         return meta
 
+    # Pre-extract column lists for the phenotype loop. Iterating zipped
+    # column lists is dramatically faster than ``df.iterrows()`` (which
+    # rebuilds a Series object per row).
+    phenotype_text_arr = phenotype_df['phenotype_text'].tolist()
+    qualifier_text_arr = phenotype_df['qualifier_text'].tolist()
+    phenotype_name_arr = phenotype_df['phenotype_name'].tolist()
+    qualifier_names_arr = phenotype_df['qualifier_names'].tolist()
+    genotype_symbols_arr = phenotype_df['genotype_symbols'].tolist()
+    reference_arr = phenotype_df['reference'].tolist()
+    extracted_fbids_arr = extracted_fbids_series.tolist()
+
     phenotype_rows: List[Dict[str, str]] = []
-    for _, pheno_row in phenotype_df.iterrows():
-        component_ids = _extract_flybase_ids(pheno_row.get('genotype_FBids', ''))
+    for (
+        component_ids,
+        phenotype_text_value,
+        qualifier_text_value,
+        phenotype_name_value,
+        qualifier_names_value,
+        genotype_symbols_value,
+        reference_value,
+    ) in zip(
+        extracted_fbids_arr,
+        phenotype_text_arr,
+        qualifier_text_arr,
+        phenotype_name_arr,
+        qualifier_names_arr,
+        genotype_symbols_arr,
+        reference_arr,
+    ):
         if not component_ids:
             continue
 
@@ -2414,23 +2824,23 @@ def _build_stock_phenotype_sheet(
             continue
 
         phenotype_name = str(
-            pheno_row.get('phenotype_text', '')
-            or normalize_phenotype_text(pheno_row.get('phenotype_name', ''))
+            phenotype_text_value
+            or normalize_phenotype_text(phenotype_name_value)
         ).strip()
         qualifier_text = str(
-            pheno_row.get('qualifier_text', '')
-            or normalize_qualifier_text(pheno_row.get('qualifier_names', ''))
+            qualifier_text_value
+            or normalize_qualifier_text(qualifier_names_value)
         ).strip()
-        genotype_label = str(pheno_row.get('genotype_symbols', '') or '').strip()
-        genotype_id_symbol_pairs = _extract_genotype_id_symbol_pairs(
-            pheno_row.get('genotype_FBids', ''),
+        genotype_label = str(genotype_symbols_value or '').strip()
+        genotype_id_symbol_pairs = _extract_genotype_id_symbol_pairs_with_ids(
+            component_ids,
             genotype_label,
         )
         genotype_symbols_by_id: Dict[str, List[str]] = defaultdict(list)
         for component_id, symbol in genotype_id_symbol_pairs:
             if component_id and symbol:
                 genotype_symbols_by_id[component_id].append(symbol)
-        raw_fbrfs = [clean_id(v) for v in str(pheno_row.get('reference', '') or '').split('|') if clean_id(v)]
+        raw_fbrfs = [clean_id(v) for v in str(reference_value or '').split('|') if clean_id(v)]
         if not phenotype_name and not raw_fbrfs:
             continue
 
@@ -2531,26 +2941,20 @@ def _build_stock_phenotype_sheet(
                 sorted(partner_stock_candidate_set)
             )
             component_gene_symbols = ''
-            if not is_no_stock_row and len(derived_df) > 0:
-                matched_derived = derived_df[
-                    (derived_df['FBst'] == stock_key)
-                    & derived_df['derived_stock_component'].isin(matched_cids)
-                ]
-                if len(matched_derived) > 0:
-                    component_gene_symbols = unique_join(
-                        matched_derived.get('GeneSymbol', pd.Series(dtype=str)).tolist()
-                    )
-            if not component_gene_symbols and not is_no_stock_row and len(lookup_derived_df) > 0:
+            if not is_no_stock_row and derived_fbst_dsc_to_genes:
+                component_gene_symbols = unique_join(
+                    gene
+                    for cid in matched_cids
+                    for gene in derived_fbst_dsc_to_genes.get((stock_key, cid), [])
+                )
+            if not component_gene_symbols and not is_no_stock_row and lookup_fbst_dsc_to_genes:
                 # Fall back to the global lookup for FBsts that were not in
                 # ``included_df`` but now surface via the gene-first path.
-                matched_lookup = lookup_derived_df[
-                    (lookup_derived_df['FBst'] == stock_key)
-                    & lookup_derived_df['derived_stock_component'].isin(matched_cids)
-                ]
-                if len(matched_lookup) > 0:
-                    component_gene_symbols = unique_join(
-                        matched_lookup.get('GeneSymbol', pd.Series(dtype=str)).tolist()
-                    )
+                component_gene_symbols = unique_join(
+                    gene
+                    for cid in matched_cids
+                    for gene in lookup_fbst_dsc_to_genes.get((stock_key, cid), [])
+                )
             if not component_gene_symbols:
                 component_gene_symbols = str(stock_info.get('gene_symbol', '') or '').strip()
             dataset_label = _get_dataset_label_for_gene_value(
@@ -2761,7 +3165,7 @@ def _build_stock_phenotype_sheet(
     ).reset_index(drop=True)
     _assert_one_hot_reagent_buckets(
         phenotype_sheet,
-        "Stock Phenotype Sheet rows",
+        "All Phenotypic Stocks Sheet rows",
     )
     visible_columns = _get_stock_phenotype_sheet_output_columns(
         [col for col in similarity_columns if col in phenotype_sheet.columns]
@@ -2841,6 +3245,144 @@ def _compute_max_cosine_similarity(phenotype_sheet_df: pd.DataFrame) -> pd.Serie
 
     cosine_df = phenotype_sheet_df[cosine_columns].apply(pd.to_numeric, errors="coerce")
     return cosine_df.max(axis=1, skipna=True)
+
+
+def _is_phenotype_tier_combination(combo: List[str]) -> bool:
+    """Return True when an output sheet is gated by a phenotype filter.
+
+    Covers the phenotype-evidence tiers (``Phenotype++``/``Phenotype+``) as well
+    as a plain ``Phenotype`` presence filter, so any phenotype-gated sheet gets
+    the per-reagent cosine similarity columns (including ``Max Cosine
+    Similarity``) appended.
+    """
+    return any(str(name).startswith("Phenotype") for name in combo)
+
+
+def _build_reagent_similarity_scores(
+    phenotype_sheet_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return per-reagent phenotype similarity scores for stock output sheets."""
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return pd.DataFrame()
+
+    cosine_columns = _get_cosine_similarity_columns(phenotype_sheet_df)
+    if not cosine_columns:
+        return pd.DataFrame()
+
+    score_df = phenotype_sheet_df.copy()
+    score_df["_reagent_key"] = _get_source_stock_series(score_df)
+    score_df = score_df.loc[score_df["_reagent_key"].astype(str).str.strip().ne("")]
+    if score_df.empty:
+        return pd.DataFrame()
+
+    numeric_cols = cosine_columns.copy()
+    score_df["Max Cosine Similarity"] = _compute_max_cosine_similarity(score_df)
+    numeric_cols.append("Max Cosine Similarity")
+    for column in numeric_cols:
+        score_df[column] = pd.to_numeric(score_df[column], errors="coerce")
+
+    numeric_scores = score_df.groupby("_reagent_key", as_index=False)[numeric_cols].max()
+    if "Phenotype" not in score_df.columns:
+        return numeric_scores.rename(columns={"_reagent_key": "Source/ Stock #"})
+
+    phenotype_terms = (
+        score_df.groupby("_reagent_key", as_index=False)["Phenotype"]
+        .agg(lambda values: unique_join(values.tolist()))
+    )
+    return (
+        phenotype_terms.merge(numeric_scores, on="_reagent_key", how="left")
+        .rename(columns={"_reagent_key": "Source/ Stock #"})
+    )
+
+
+def _stock_sheet_reagent_key(row: pd.Series) -> str:
+    """Return the Source/Stock label used to join stock rows to phenotype scores."""
+    return _format_source_stock_label(
+        row.get("collection", ""),
+        row.get("stock_number", ""),
+    )
+
+
+def _primary_gene_sort_label(
+    row: pd.Series,
+    current_to_input_map: Optional[Dict[str, str]] = None,
+) -> str:
+    """Return a stable display gene used for grouping stock-sheet rows."""
+    genes = _gene_display_values_from_row(row, current_to_input_map)
+    if not genes:
+        return ""
+    return sorted(genes, key=lambda value: (str(value).lower(), str(value)))[0]
+
+
+def _add_phenotype_similarity_scores_to_stock_sheet(
+    stock_df: pd.DataFrame,
+    reagent_similarity_scores: pd.DataFrame,
+    current_to_input_map: Optional[Dict[str, str]] = None,
+) -> pd.DataFrame:
+    """Attach stock-level phenotype similarity scores and sort by gene group."""
+    if stock_df is None or len(stock_df) == 0:
+        return stock_df.copy() if stock_df is not None else pd.DataFrame()
+    if reagent_similarity_scores is None or len(reagent_similarity_scores) == 0:
+        return stock_df.copy()
+
+    out = stock_df.copy()
+    out["_reagent_key"] = out.apply(_stock_sheet_reagent_key, axis=1)
+    score_columns = [
+        column for column in reagent_similarity_scores.columns
+        if column != "Source/ Stock #"
+    ]
+    out = out.merge(
+        reagent_similarity_scores,
+        how="left",
+        left_on="_reagent_key",
+        right_on="Source/ Stock #",
+        suffixes=("", "_phenotype_score"),
+    )
+    out = out.drop(columns=["_reagent_key", "Source/ Stock #"], errors="ignore")
+
+    if "Max Cosine Similarity" in out.columns:
+        out["_primary_gene_sort"] = out.apply(
+            lambda row: _primary_gene_sort_label(row, current_to_input_map),
+            axis=1,
+        )
+        group_scores = (
+            out.groupby("_primary_gene_sort")["Max Cosine Similarity"]
+            .transform("max")
+            .fillna(float("-inf"))
+        )
+        out["_gene_group_score"] = group_scores
+        out["_row_score"] = pd.to_numeric(
+            out["Max Cosine Similarity"],
+            errors="coerce",
+        ).fillna(float("-inf"))
+        out["_original_order"] = range(len(out))
+        out = out.sort_values(
+            by=[
+                "_gene_group_score",
+                "_primary_gene_sort",
+                "_row_score",
+                "_original_order",
+            ],
+            ascending=[False, True, False, True],
+            kind="mergesort",
+        )
+        out = out.drop(
+            columns=[
+                "_primary_gene_sort",
+                "_gene_group_score",
+                "_row_score",
+                "_original_order",
+            ],
+            errors="ignore",
+        )
+
+    ordered_score_columns = [
+        column for column in score_columns if column in out.columns
+    ]
+    base_columns = [
+        column for column in out.columns if column not in ordered_score_columns
+    ]
+    return out[base_columns + ordered_score_columns].reset_index(drop=True)
 
 
 def _format_input_dataset_name(csv_path: Path) -> str:
@@ -3057,7 +3599,7 @@ def _build_similarity_tier_sheets(
 ) -> List[Tuple[str, pd.DataFrame, Dict[str, Any]]]:
     """Partition scored phenotype rows into fixed max-cosine bins.
 
-    Tier sheets preserve the original Stock Phenotype Sheet row order and skip
+    Tier sheets preserve the original All Phenotypic Stocks Sheet row order and skip
     empty bins entirely so the workbook only contains reagent-bearing tabs.
     """
     if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
@@ -3147,7 +3689,8 @@ def _build_keyword_bucketing_sheets(
         return []
 
     normalized_keywords = _normalize_keyword_bucket_keywords(keywords)
-    bucketed_df = phenotype_sheet_df.copy()
+    input_was_exported = _has_exported_phenotype_workbook_labels(phenotype_sheet_df)
+    bucketed_df = _normalize_phenotype_workbook_input_columns(phenotype_sheet_df)
     max_cosine_similarity = _compute_max_cosine_similarity(bucketed_df).reindex(
         bucketed_df.index
     ).round(6)
@@ -3161,9 +3704,18 @@ def _build_keyword_bucketing_sheets(
         )
 
     source_stock_series = _get_source_stock_series(bucketed_df)
-    phenotype_lower = bucketed_df.get(
-        "Phenotype",
-        pd.Series("", index=bucketed_df.index, dtype=str),
+    phenotype_col = next(
+        (
+            col
+            for col in ("Phenotype", "Published phenotype", "Published Phenotype")
+            if col in bucketed_df.columns
+        ),
+        None,
+    )
+    phenotype_lower = (
+        bucketed_df[phenotype_col]
+        if phenotype_col
+        else pd.Series("", index=bucketed_df.index, dtype=str)
     ).fillna("").astype(str).str.lower()
     keyword_hit_mask = phenotype_lower.apply(
         lambda phenotype: any(keyword in phenotype for keyword in normalized_keywords)
@@ -3187,6 +3739,9 @@ def _build_keyword_bucketing_sheets(
         keyword_hits_df = _sort_similarity_tier_rows(keyword_hits_df)
     if not no_keyword_hits_df.empty:
         no_keyword_hits_df = _sort_similarity_tier_rows(no_keyword_hits_df)
+    if input_was_exported:
+        keyword_hits_df = _apply_phenotype_workbook_column_labels(keyword_hits_df)
+        no_keyword_hits_df = _apply_phenotype_workbook_column_labels(no_keyword_hits_df)
 
     return [
         (
@@ -3241,12 +3796,10 @@ def _write_phenotype_similarity_sheet(
     format_as_masterlist: bool = False,
 ) -> None:
     """Write a phenotype-derived sheet without emitting workbook hyperlinks."""
-    sheet_out = phenotype_sheet_df.copy()
-    if format_as_masterlist:
-        sheet_out = _reorder_to_masterlist_columns(sheet_out)
-    else:
-        sheet_out = _export_source_stock_columns(sheet_out)
-        sheet_out = sheet_out.drop(columns=['_reference_url'], errors='ignore')
+    sheet_out = _prepare_phenotype_workbook_output(
+        phenotype_sheet_df,
+        format_as_masterlist=format_as_masterlist,
+    )
     sheet_out.to_excel(writer, sheet_name=sheet_name, index=False)
 
 
@@ -3306,10 +3859,12 @@ def _get_exported_source_stock_columns(
     if sheet_df is None:
         return pd.Series(dtype=str), pd.Series(dtype=str)
     index = sheet_df.index
-    if SOURCE_COLUMN in sheet_df.columns or STOCK_NUMBER_COLUMN in sheet_df.columns:
+    source_col = SOURCE_COLUMN if SOURCE_COLUMN in sheet_df.columns else "Stock Source"
+    stock_col = STOCK_NUMBER_COLUMN if STOCK_NUMBER_COLUMN in sheet_df.columns else "ID #"
+    if source_col in sheet_df.columns or stock_col in sheet_df.columns:
         return (
-            _normalize_source_stock_series(sheet_df.get(SOURCE_COLUMN), index=index),
-            _normalize_source_stock_series(sheet_df.get(STOCK_NUMBER_COLUMN), index=index),
+            _normalize_source_stock_series(sheet_df.get(source_col), index=index),
+            _normalize_source_stock_series(sheet_df.get(stock_col), index=index),
         )
     parsed = _normalize_source_stock_series(
         sheet_df.get(SOURCE_STOCK_COLUMN, pd.Series("", index=index, dtype=str)),
@@ -3358,6 +3913,61 @@ def _export_source_stock_columns(sheet_df: pd.DataFrame) -> pd.DataFrame:
     sheet_out[SOURCE_COLUMN] = source_series
     sheet_out[STOCK_NUMBER_COLUMN] = stock_series
     return sheet_out[ordered_columns]
+
+
+def _display_phenotype_workbook_column(column: str) -> str:
+    """Return the user-facing workbook label for a phenotype output column."""
+    return PHENOTYPE_WORKBOOK_COLUMN_LABELS.get(column, column)
+
+
+def _has_exported_phenotype_workbook_labels(sheet_df: pd.DataFrame) -> bool:
+    """Return True when a dataframe came from a workbook-facing phenotype sheet."""
+    if sheet_df is None or len(sheet_df.columns) == 0:
+        return False
+    exported_markers = {"Published phenotype", "Stock Source", "ID #", "Column 30"}
+    return any(column in sheet_df.columns for column in exported_markers)
+
+
+def _normalize_phenotype_workbook_input_columns(sheet_df: pd.DataFrame) -> pd.DataFrame:
+    """Map exported/masterlist phenotype labels back to internal names."""
+    if sheet_df is None or len(sheet_df.columns) == 0:
+        return sheet_df.copy() if sheet_df is not None else pd.DataFrame()
+    if not _has_exported_phenotype_workbook_labels(sheet_df):
+        return sheet_df.copy()
+    reverse_labels = {
+        display: internal
+        for internal, display in PHENOTYPE_WORKBOOK_COLUMN_LABELS.items()
+    }
+    reverse_labels.update(MASTERLIST_TEMPLATE_SOURCE_COLUMNS)
+    rename_map = {
+        column: reverse_labels[column]
+        for column in sheet_df.columns
+        if column in reverse_labels and reverse_labels[column] not in sheet_df.columns
+    }
+    return sheet_df.rename(columns=rename_map)
+
+
+def _apply_phenotype_workbook_column_labels(sheet_df: pd.DataFrame) -> pd.DataFrame:
+    """Rename phenotype output columns to workbook-facing labels."""
+    if sheet_df is None or len(sheet_df.columns) == 0:
+        return sheet_df.copy() if sheet_df is not None else pd.DataFrame()
+    return sheet_df.rename(
+        columns={column: _display_phenotype_workbook_column(str(column)) for column in sheet_df.columns}
+    )
+
+
+def _prepare_phenotype_workbook_output(
+    phenotype_sheet_df: pd.DataFrame,
+    format_as_masterlist: bool = False,
+) -> pd.DataFrame:
+    """Return the phenotype sheet exactly as it should appear in Excel."""
+    sheet_out = phenotype_sheet_df.copy() if phenotype_sheet_df is not None else pd.DataFrame()
+    if format_as_masterlist:
+        sheet_out = _reorder_to_masterlist_columns(sheet_out)
+    else:
+        sheet_out = _export_source_stock_columns(sheet_out)
+        sheet_out = sheet_out.drop(columns=['_reference_url'], errors='ignore')
+    return _apply_phenotype_workbook_column_labels(sheet_out)
 
 
 def _has_source_stock_columns(sheet_df: Optional[pd.DataFrame]) -> bool:
@@ -3424,7 +4034,7 @@ def _assert_one_hot_reagent_buckets(df: pd.DataFrame, context: str) -> None:
 def _get_stock_phenotype_sheet_output_columns(
     similarity_columns: List[str],
 ) -> List[str]:
-    """Return the visible Stock Phenotype Sheet column order."""
+    """Return the visible All Phenotypic Stocks Sheet column order."""
     return [
         'Gene',
         'Reagent Type or Allele Symbol',
@@ -3462,24 +4072,24 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
         'Projected Start Date': "Template planning column kept blank by the pipeline.",
         'Projected End Date': "Template planning column kept blank by the pipeline.",
         'Notes/Function': "Template notes column kept blank by the pipeline.",
-        'allele shorthand': "Gene-relevant allele or reagent symbols extracted from the matched FlyBase components.",
+        'allele shorthand': "Allele, insertion, construct, or reagent symbol associated with the gene.",
         'Stock Source': "Collection or source label for the reagent when FlyBase or stock-center metadata provides one.",
         'ID #': "Stock-center stock number or custom reagent label used to identify the reagent.",
         'RNAi Shorthand': "Template column with no stable standalone source in the phenotype sheet; left blank.",
-        'Full Stock Genotype': "FlyBase genotype label copied from the matched genotype_phenotype_data row.",
+        'Full Stock Genotype': "Genotype text reported by FlyBase for this reagent or phenotype record.",
         'balancers in stock?': "FlyBase balancer symbols carried by the source stock. '-' indicates no balancer.",
         'ordered? (date)': "Template inventory column kept blank by the pipeline.",
         'location of stock': "Template inventory column kept blank by the pipeline.",
-        'Published Gal4/ Positive control': "Best-effort partner GAL4 driver symbols, filtered to partner stocks whose derived components are GAL4-only.",
-        'Published Gal4 source': "Best-effort FlyBase stock candidates for partner GAL4 drivers, filtered to GAL4-only partner stocks and formatted as '(<stock #>, <collection>)'.",
-        'Published phenotype': "Normalized phenotype term derived from FlyBase genotype_phenotype_data.",
+        'Published Gal4/ Positive control': "Likely partner GAL4 driver symbol when the phenotype record includes a driver paired with the focal reagent.",
+        'Published Gal4 source': "Candidate stock source for the likely partner GAL4 driver, when one can be identified.",
+        'Published phenotype': "Curated phenotype term associated with this reagent.",
         'Reference': "PubMed ID resolved for the phenotype-supporting reference when available.",
         'Column 31': "PubMed Central ID resolved for the phenotype-supporting reference when available.",
         'Column 30': "Human-readable phenotype-supporting reference label, preferring title or mini-reference text.",
         'Column 29': "Authors for the phenotype-supporting reference when available.",
         'Column 1': "Journal for the phenotype-supporting reference when available.",
         'Column 32': "Publication year for the phenotype-supporting reference when available.",
-        'Circadian/Sleep Relevance (embedding max score)': "Maximum cosine similarity across the configured phenotype similarity target columns.",
+        'Circadian/Sleep Relevance (embedding max score)': "Highest phenotype similarity score for this row. Higher values indicate stronger similarity to the configured phenotype targets.",
         'Experimental Driver': "Template experiment column kept blank by the pipeline.",
         'Gal4 control': "Template experiment column kept blank by the pipeline.",
         'RNAi control': "Template experiment column kept blank by the pipeline.",
@@ -3511,10 +4121,10 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
             "Template notes column kept blank by the pipeline."
         ),
         'allele shorthand': (
-            "Gene-relevant allele or reagent symbols extracted from the matched FlyBase components."
+            "Allele, insertion, construct, or reagent symbol associated with the gene."
         ),
         'Gene': (
-            "Unique gene symbols linked to the matched stock components on this phenotype row."
+            "Gene symbol or symbols from the input list that are connected to this reagent."
         ),
         'Stock Source': (
             "Collection or source label for the reagent when FlyBase or stock-center metadata provides one."
@@ -3526,7 +4136,7 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
             "Template column with no stable standalone source in the phenotype sheet; left blank."
         ),
         'Full Stock Genotype': (
-            "FlyBase genotype label copied from the matched genotype_phenotype_data row."
+            "Genotype text reported by FlyBase for this reagent or phenotype record."
         ),
         'balancers in stock?': (
             "FlyBase balancer symbols carried by the source stock. '-' indicates no balancer."
@@ -3538,13 +4148,13 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
             "Template inventory column kept blank by the pipeline."
         ),
         'Published Gal4/ Positive control': (
-            "Best-effort partner GAL4 driver symbols, filtered to partner stocks whose derived components are GAL4-only."
+            "Likely partner GAL4 driver symbol when the phenotype record includes a driver paired with the focal reagent."
         ),
         'Published Gal4 source': (
-            "Best-effort FlyBase stock candidates for partner GAL4 drivers, filtered to GAL4-only partner stocks and formatted as '(<stock #>, <collection>)'."
+            "Candidate stock source for the likely partner GAL4 driver, when one can be identified."
         ),
         'Published phenotype': (
-            "Normalized phenotype term derived from FlyBase genotype_phenotype_data."
+            "Curated phenotype term associated with this reagent."
         ),
         'Reference': (
             "PubMed ID resolved for the phenotype-supporting reference when available."
@@ -3565,7 +4175,7 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
             "Publication year for the phenotype-supporting reference when available."
         ),
         'Circadian/Sleep Relevance (embedding max score)': (
-            "Maximum cosine similarity across the configured phenotype similarity target columns."
+            "Highest phenotype similarity score for this row. Higher values indicate stronger similarity to the configured phenotype targets."
         ),
         'Experimental Driver': (
             "Template experiment column kept blank by the pipeline."
@@ -3592,41 +4202,40 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
             "Template results-link column kept blank by the pipeline."
         ),
         'Reagent Type or Allele Symbol': (
-            "Gene-relevant allele or reagent symbols extracted from the matched FlyBase components."
+            "Allele, insertion, construct, or reagent symbol associated with the gene."
         ),
         'Balancers': (
             "FlyBase balancer symbols carried by the source stock. '-' indicates no balancer."
         ),
-        'matched_component_types': (
-            "FlyBase component ID types that linked the reagent to the input gene(s), aggregated across matches (for example FBal, FBtp, FBti)."
+        'How Stock Matched Gene': (
+            "How the reagent was connected to the input gene, such as through an allele, insertion, or construct record."
         ),
         'UAS': (
-            "One-hot reagent bucket. True only when the reagent resolves to the UAS bucket using the widened UAS proxy, which includes UAS or RNAi signals, rnai_reagent class terms, and Vienna-style knockdown-family signals."
+            "True when the reagent is categorized as UAS or RNAi-like. Only one reagent category should be true for each row."
         ),
         'GAL4': (
-            "One-hot reagent bucket. True only when GAL4 or driver signals are present and the reagent does not qualify for a higher-precedence mixed bucket."
+            "True when the reagent is categorized as a GAL4 or driver line. Only one reagent category should be true for each row."
         ),
         'mutant/UAS': (
-            "One-hot reagent bucket. True when mutant and UAS signals co-occur, unless the reagent is promoted to 'GAL4 / mutant' by the precedence rule."
+            "True when the reagent has both mutant-like and UAS/RNAi-like evidence. Only one reagent category should be true for each row."
         ),
         'mutant': (
-            "One-hot reagent bucket. True for direct non-transgenic mutant-like reagents when neither mixed bucket wins."
+            "True when the reagent is categorized as a mutant-like reagent. Only one reagent category should be true for each row."
         ),
         'GAL4 / mutant': (
-            "One-hot reagent bucket. True whenever GAL4 and mutant signals co-occur, including GAL4 + mutant + UAS reagents under the selected precedence."
+            "True when the reagent has both GAL4/driver and mutant-like evidence. Only one reagent category should be true for each row."
         ),
         'Other': (
-            "One-hot reagent bucket. True for reagents that do not land in the named buckets, including UAS-GAL4 style reagents without mutant evidence."
+            "True when the reagent does not fit the other listed categories. Only one reagent category should be true for each row."
         ),
-        'allele_class_terms': (
-            "FlyBase allele class terms aggregated from the gene-relevant allele(s) associated with the reagent."
+        'Allele Class': (
+            "Curated allele class terms associated with the reagent, when available."
         ),
-        'transgenic_product_class_terms': (
-            "FlyBase transgenic product class terms aggregated from the gene-relevant construct-linked reagent(s)."
+        'Transgenic Product Class': (
+            "Curated transgenic product class terms associated with the reagent, when available."
         ),
         RNAI_TYPE_COLUMN: (
-            "Best-effort RNAi subtype inferred from FlyBase construct descriptions and symbols. "
-            "Values are `dsRNA`, `shRNA`, or `RNAi (unspecified)` when the reagent is RNAi but no confident subtype cue was found."
+            "RNAi subtype when the reagent appears to be RNAi-based. Possible values include dsRNA, shRNA, or RNAi when the subtype is unclear."
         ),
         SOURCE_COLUMN: (
             "Collection or source label for the reagent when FlyBase or stock-center metadata provides one."
@@ -3638,25 +4247,25 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
             "Display label for the reagent source, typically 'Collection (stock_number)' for stock-center lines or the custom reagent label when no FBst stock exists."
         ),
         'Genotype': (
-            "FlyBase genotype label copied from the matched genotype_phenotype_data row."
+            "Genotype text reported by FlyBase for this reagent or phenotype record."
         ),
-        CO_REAGENT_FBIDS_COLUMN: (
-            "FlyBase IDs for partner genotype components that are not on the focal matched stock and that resolve specifically to GAL4-linked co-reagents."
+        'Partner GAL4 FlyBase IDs': (
+            "FlyBase identifiers for likely partner GAL4 driver components listed with the phenotype record."
         ),
-        CO_REAGENT_SYMBOLS_COLUMN: (
-            "Best-effort symbols for partner GAL4 co-reagents recovered from aligned genotype text or FlyBase stock-component lookups."
+        'Partner GAL4 Symbols': (
+            "Likely partner GAL4 driver symbols listed with the phenotype record."
         ),
         PARTNER_DRIVER_SYMBOLS_COLUMN: (
-            "Best-effort partner GAL4 driver symbols inferred from non-focal genotype components and GAL4-containing genotype text, filtered to drivers with GAL4-only stock candidates."
+            "Likely partner GAL4 driver symbol when the phenotype record includes a driver paired with the focal reagent."
         ),
         PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN: (
-            "Best-effort FlyBase stock candidates for partner GAL4 driver components, filtered to GAL4-only partner stocks and formatted as '(<stock #>, <collection>)'."
+            "Candidate stock source for the likely partner GAL4 driver, when one can be identified."
         ),
         'Phenotype': (
-            "Normalized phenotype term derived from FlyBase genotype_phenotype_data."
+            "Curated phenotype term associated with this reagent."
         ),
         'Qualifier': (
-            "Normalized FlyBase phenotype qualifier text for the matched phenotype record."
+            "Additional phenotype qualifier, such as a modifier that describes direction or context."
         ),
         'PMID': (
             "PubMed ID resolved for the phenotype-supporting reference when available."
@@ -3682,22 +4291,26 @@ def _describe_stock_phenotype_sheet_column(column: str) -> str:
     if column.startswith('Cosine Similarity (') and column.endswith(')'):
         target = column[len('Cosine Similarity ('):-1]
         return (
-            f"Cosine similarity between the phenotype text and the configured '{target}' target concept."
+            f"Embedding-based similarity between this phenotype and the configured '{target}' target concept. Higher values indicate stronger similarity."
         )
-    return "Phenotype-sheet column carried through from the stock and reference aggregation pipeline."
+    if column.startswith('Similarity to ') and column.endswith(' Phenotype'):
+        target = column[len('Similarity to '):-len(' Phenotype')]
+        return (
+            f"Embedding-based similarity between this phenotype and the configured '{target}' target concept. Higher values indicate stronger similarity."
+        )
+    return "Additional phenotype-sheet field included for review."
 
 
 def _get_stock_phenotype_sheet_column_definitions(
     phenotype_sheet_df: pd.DataFrame,
     format_as_masterlist: bool = False,
 ) -> List[Tuple[str, str]]:
-    """Return visible Stock Phenotype Sheet columns with workbook definitions."""
+    """Return visible All Phenotypic Stocks Sheet columns with workbook definitions."""
     if phenotype_sheet_df is None or len(phenotype_sheet_df.columns) == 0:
         return []
-    phenotype_sheet_df = (
-        _reorder_to_masterlist_columns(phenotype_sheet_df)
-        if format_as_masterlist
-        else _export_source_stock_columns(phenotype_sheet_df)
+    phenotype_sheet_df = _prepare_phenotype_workbook_output(
+        phenotype_sheet_df,
+        format_as_masterlist=format_as_masterlist,
     )
     visible_columns = [
         column for column in phenotype_sheet_df.columns
@@ -3712,10 +4325,9 @@ def _get_stock_phenotype_sheet_column_definitions(
 def _get_reagent_bucket_one_hot_note() -> str:
     """Return the shared workbook note for the mutually exclusive bucket set."""
     return (
-        "The reagent-bucket columns "
-        "`UAS`, `GAL4`, `mutant/UAS`, `mutant`, `GAL4 / mutant`, and `Other` "
-        "form a mutually exclusive one-hot set. Exactly one of these columns "
-        "should be true for each reagent row."
+        "The reagent category columns UAS, GAL4, mutant/UAS, mutant, "
+        "GAL4 / mutant, and Other are mutually exclusive. Exactly one of "
+        "these columns should be true for each reagent row."
     )
 
 
@@ -3998,7 +4610,7 @@ def _write_similarity_tier_contents_sheet(
     worksheet.write(
         row,
         1,
-        "Rows are assigned by Max Cosine Similarity, defined as the per-row maximum across all `Cosine Similarity (...)` columns.",
+        "Rows are assigned by their best phenotype similarity score. For each row, the best score is the highest similarity to any configured phenotype target.",
         body_fmt,
     )
     row += 1
@@ -4006,7 +4618,7 @@ def _write_similarity_tier_contents_sheet(
     worksheet.write(
         row,
         1,
-        "Fixed 0.05 cosine bins are evaluated from 0.95-1.0 downward to <0.05; empty buckets are skipped.",
+        "Scores are grouped into 0.05-wide ranges from 0.95-1.0 downward to <0.05. Empty score ranges are skipped.",
         body_fmt,
     )
     row += 1
@@ -4014,7 +4626,7 @@ def _write_similarity_tier_contents_sheet(
     worksheet.write(
         row,
         1,
-        "Rows are grouped by gene using only reagents present in that tier. Gene groups with more unique reagents appear first, and reagents within each gene are sorted by max cosine similarity.",
+        "Rows are grouped by gene within each score range. Genes with more unique reagents appear first, and reagents within each gene are sorted by phenotype similarity score.",
         body_fmt,
     )
     row += 2
@@ -4023,7 +4635,7 @@ def _write_similarity_tier_contents_sheet(
     row += 1
     worksheet.write_row(row, 0, ["Gene Set", "Copied from the input gene-list CSV data when available.", ""])
     row += 1
-    worksheet.write_row(row, 0, ["Stock Phenotype Sheet", "Full phenotype table used to build all similarity tiers.", ""])
+    worksheet.write_row(row, 0, ["All Phenotypic Stocks Sheet", "Phenotype evidence table used to build all similarity tiers.", ""])
     row += 1
     for sheet_name, tier_df, metadata in similarity_tiers:
         worksheet.write_row(
@@ -4042,7 +4654,7 @@ def _write_similarity_tier_contents_sheet(
     )
     if column_definitions:
         row += 2
-        worksheet.write(row, 0, "Stock Phenotype Sheet columns", header_fmt)
+        worksheet.write(row, 0, "All Phenotypic Stocks Sheet columns", header_fmt)
         worksheet.write(row, 1, _get_reagent_bucket_one_hot_note(), body_fmt)
         row += 1
         worksheet.write_row(row, 0, ["Column", "Definition"], header_fmt)
@@ -4080,8 +4692,8 @@ def _write_keyword_bucket_contents_sheet(
     worksheet.write(
         row,
         1,
-        "Rows are assigned to `Keyword Hits` when that row's `Phenotype` contains any configured keyword. "
-        "Rows without a keyword hit are assigned to `No Keyword Hits`.",
+        "Rows are assigned to Keyword Hits when the phenotype text contains any configured keyword. "
+        "Rows without a keyword hit are assigned to No Keyword Hits.",
         body_fmt,
     )
     row += 1
@@ -4089,7 +4701,7 @@ def _write_keyword_bucket_contents_sheet(
     worksheet.write(
         row,
         1,
-        f"Configured `relevantSearchTerms`: {keyword_text}. Matching uses case-insensitive substring checks against the `Phenotype` column.",
+        f"Configured phenotype keywords: {keyword_text}. Matching is case-insensitive.",
         body_fmt,
     )
     row += 1
@@ -4097,7 +4709,7 @@ def _write_keyword_bucket_contents_sheet(
     worksheet.write(
         row,
         1,
-        "Both sheets keep gene groups together and sort reagents within each gene by max cosine similarity computed within that sheet.",
+        "Both sheets keep gene groups together and sort reagents within each gene by phenotype similarity score.",
         body_fmt,
     )
     row += 2
@@ -4109,17 +4721,17 @@ def _write_keyword_bucket_contents_sheet(
     worksheet.write_row(
         row,
         0,
-        ["Stock Phenotype Sheet", "Full phenotype table used to build the keyword buckets.", ""],
+        ["All Phenotypic Stocks Sheet", "Phenotype evidence table used to build the keyword buckets.", ""],
     )
     row += 1
     for sheet_name, bucket_df, metadata in keyword_bucket_entries:
         if metadata.get("bucket_label") == "keyword_hits":
             meaning = (
-                "Phenotype rows whose `Phenotype` value contains at least one configured keyword."
+                "Phenotype rows whose phenotype text contains at least one configured keyword."
             )
         else:
             meaning = (
-                "Phenotype rows with no keyword hit; reagent blocks are ordered by max cosine similarity within each gene."
+                "Phenotype rows with no keyword hit; reagent blocks are ordered by phenotype similarity score within each gene."
             )
         worksheet.write_row(
             row,
@@ -4138,7 +4750,7 @@ def _write_keyword_bucket_contents_sheet(
     )
     if column_definitions:
         row += 2
-        worksheet.write(row, 0, "Stock Phenotype Sheet columns", header_fmt)
+        worksheet.write(row, 0, "All Phenotypic Stocks Sheet columns", header_fmt)
         worksheet.write(row, 1, _get_reagent_bucket_one_hot_note(), body_fmt)
         row += 1
         worksheet.write_row(row, 0, ["Column", "Definition"], header_fmt)
@@ -4258,7 +4870,7 @@ def _write_simple_bucket_contents_sheet(
     worksheet.write(
         row, 1,
         "Whether any phenotype row linked to the stock mentions 'sleep' or 'circadian'. "
-        "Derived from the FlyBase genotype_phenotype_data phenotype descriptions.",
+        "Derived from curated FlyBase phenotype descriptions.",
         body_fmt,
     )
     row += 1
@@ -4266,7 +4878,7 @@ def _write_simple_bucket_contents_sheet(
     worksheet.write(
         row, 1,
         "Whether the stock carries at least one balancer chromosome (e.g. CyO, TM3, TM6B, FM7). "
-        "Derived from the FBba (balancer) component count in the Stage 1 workbook.",
+        "Derived from FlyBase balancer annotations in the Stage 1 workbook.",
         body_fmt,
     )
     row += 2
@@ -4345,7 +4957,7 @@ def _write_simple_bucket_contents_sheet(
         worksheet.set_column(definition_col, definition_col, 28)
         worksheet.set_column(definition_col + 1, definition_col + 1, 80)
         row += 2
-        worksheet.write(row, definition_col, "Stock Phenotype Sheet columns", section_fmt)
+        worksheet.write(row, definition_col, "All Phenotypic Stocks Sheet columns", section_fmt)
         row += 1
         worksheet.write(row, definition_col, "Column", header_fmt)
         worksheet.write(row, definition_col + 1, "Definition", header_fmt)
@@ -4380,8 +4992,16 @@ def _write_similarity_tier_workbook(
     if stock_phenotype_sheet_df is None or len(stock_phenotype_sheet_df) == 0:
         return None
 
+    tier_source_df = (
+        _prepare_phenotype_workbook_output(
+            stock_phenotype_sheet_df,
+            format_as_masterlist=True,
+        )
+        if format_as_masterlist and not keyword_bucketing and not simple_buckets
+        else stock_phenotype_sheet_df
+    )
     similarity_tiers = (
-        _build_similarity_tier_sheets(stock_phenotype_sheet_df)
+        _build_similarity_tier_sheets(tier_source_df)
         if not keyword_bucketing and not simple_buckets
         else []
     )
@@ -4430,7 +5050,7 @@ def _write_similarity_tier_workbook(
         _write_phenotype_similarity_sheet(
             writer,
             workbook,
-            "Stock Phenotype Sheet",
+            "All Phenotypic Stocks Sheet",
             stock_phenotype_sheet_df,
             format_as_masterlist=format_as_masterlist,
         )
@@ -4771,6 +5391,9 @@ def write_aggregated_excel(
     )
     max_per_gene = settings.get('maxStocksPerGene')
     max_per_allele = settings.get('maxStocksPerAllele')
+    contents_separator_every = _normalize_contents_separator_every(
+        settings.get('contentsSeparatorEvery', DEFAULT_CONTENTS_SEPARATOR_EVERY)
+    )
     
     # Build summary data, assigning sheet names based on stock presence
     summary_rows = []
@@ -4804,7 +5427,7 @@ def write_aggregated_excel(
         if name not in filters_config:
             continue
         spec = filters_config[name]
-        meaning = filter_descriptions.get(name, "Filter applied (see config for technical details).")
+        meaning = filter_descriptions.get(name, "Filter applied; see the configuration file for details.")
         filter_def_rows.append((name, meaning))
     
     # Determine which combinations have stocks
@@ -4867,7 +5490,7 @@ def write_aggregated_excel(
                 f"\n    Phenotype keyword hits: {n_unique} unique reagent(s) "
                 f"have {kw_display} in their Phenotype "
                 f"(across {int(kw_mask.sum())} phenotype rows in the "
-                f"Stock Phenotype Sheet)."
+                f"All Phenotypic Stocks Sheet)."
             )
             for kw in keywords_for_pheno:
                 per_kw_mask = pheno_lower.str.contains(kw, na=False)
@@ -4888,6 +5511,16 @@ def write_aggregated_excel(
             gene_synonyms_map=gene_synonyms_map,
             current_to_input_map=current_to_input_map,
         )
+
+    reagent_similarity_scores = (
+        _build_reagent_similarity_scores(stock_phenotype_sheet_df)
+        if (
+            soft_run
+            and pipeline_settings is not None
+            and pipeline_settings.enable_oai_embedding
+        )
+        else pd.DataFrame()
+    )
     
     # Pre-compute the identity of input genes that appear in at least one
     # sheet. We prefer FBgn IDs (when the input CSV contained them) because
@@ -5050,7 +5683,11 @@ def write_aggregated_excel(
             write_row(row, 0, summary_df.columns.tolist(), bold_bottom)
             row += 1
             for i, (_, r) in enumerate(summary_df.iterrows()):
-                row_fmt = fmt_faint_bottom if (i + 1) % 3 == 0 else fmt_13
+                row_fmt = (
+                    fmt_faint_bottom
+                    if (i + 1) % contents_separator_every == 0
+                    else fmt_13
+                )
                 write_row(row, 0, ["" if pd.isna(x) else x for x in r.tolist()], row_fmt)
                 row += 1
             
@@ -5243,7 +5880,7 @@ def write_aggregated_excel(
             row += 2
 
         # Section G: What the references-focused sheets include.
-        sheet_label = "Stock Phenotype Sheet" if soft_run else "Stock Sheet by Gene"
+        sheet_label = "All Phenotypic Stocks Sheet" if soft_run else "Stock Sheet by Gene"
         write_cell(row, 0, f"References and {sheet_label} definitions", fmt_13_bold)
         row += 1
         write_cell(
@@ -5258,7 +5895,7 @@ def write_aggregated_excel(
             write_cell(
                 row,
                 0,
-                "Stock Phenotype Sheet includes unique (source/stock, genotype, reference) rows for stocks present in output sheets, based on shared gene-relevant stock-component IDs found in FlyBase genotype_phenotype_data. Genes, reagent type or allele symbols, Balancers, matched_component_types, one-hot reagent buckets, allele_class_terms, transgenic_product_class_terms, and phenotype terms are aggregated within each row.",
+                "All Phenotypic Stocks Sheet is full-scope for the input gene set and is not limited to the JSON combination sheets. It includes curated phenotype evidence for input-gene reagents even when a stock or reagent was not assigned to Sheet1, Sheet2, or later prioritized output sheets. Each row links a stock or reagent to the relevant input gene, stock source, genotype, phenotype, supporting reference, reagent category, and any available phenotype similarity scores.",
                 fmt_13_wrap,
                 skip_width=True,
             )
@@ -5266,7 +5903,7 @@ def write_aggregated_excel(
             write_cell(
                 row,
                 0,
-                "Stock Phenotype Sheet totals: "
+                "All Phenotypic Stocks Sheet totals: "
                 f"{stock_phenotype_sheet_counts['genes']} unique genes, "
                 f"{stock_phenotype_sheet_counts['stocks']} unique stocks, "
                 f"{stock_phenotype_sheet_counts['references']} unique references.",
@@ -5275,10 +5912,11 @@ def write_aggregated_excel(
             )
             row += 2
             column_definitions = _get_stock_phenotype_sheet_column_definitions(
-                stock_phenotype_sheet_df
+                stock_phenotype_sheet_df,
+                format_as_masterlist=True,
             )
             if column_definitions:
-                write_cell(row, 0, "Stock Phenotype Sheet columns", fmt_13_bold)
+                write_cell(row, 0, "All Phenotypic Stocks Sheet columns", fmt_13_bold)
                 write_cell(
                     row,
                     1,
@@ -5317,6 +5955,16 @@ def write_aggregated_excel(
                 sheet_name = f"Sheet{sheet_index}"
                 # Prefix GPT-derived column headers with [EXPERIMENTAL]
                 cleaned_df = _normalize_stock_sheet_columns(limited_df)
+                if (
+                    _is_phenotype_tier_combination(combo)
+                    and reagent_similarity_scores is not None
+                    and len(reagent_similarity_scores) > 0
+                ):
+                    cleaned_df = _add_phenotype_similarity_scores_to_stock_sheet(
+                        cleaned_df,
+                        reagent_similarity_scores,
+                        current_to_input_map=current_to_input_map,
+                    )
                 limited_df_out = apply_experimental_prefix(cleaned_df)
                 limited_df_out.to_excel(writer, sheet_name=sheet_name, index=False)
                 # Apply light grey fill to GPT-derived column headers
@@ -5345,8 +5993,9 @@ def write_aggregated_excel(
                 _write_phenotype_similarity_sheet(
                     writer,
                     workbook,
-                    "Stock Phenotype Sheet",
+                    "All Phenotypic Stocks Sheet",
                     stock_phenotype_sheet_df,
+                    format_as_masterlist=True,
                 )
         else:
             if stock_sheet_by_gene_df is not None and len(stock_sheet_by_gene_df) > 0:
@@ -5371,33 +6020,50 @@ def write_aggregated_excel(
                 )
 
     if soft_run and stock_phenotype_sheet_df is not None and len(stock_phenotype_sheet_df) > 0:
-        if pipeline_settings is not None and pipeline_settings.enable_oai_embedding:
+        simple_buckets = bool(pipeline_settings and pipeline_settings.simple_buckets)
+        keyword_bucketing = bool(pipeline_settings and pipeline_settings.keyword_bucketing)
+        if pipeline_settings is not None:
+            if pipeline_settings.phenotype_similarity_sidecar is None:
+                should_write_sidecar = (
+                    pipeline_settings.enable_oai_embedding
+                    or simple_buckets
+                    or keyword_bucketing
+                )
+            else:
+                should_write_sidecar = pipeline_settings.phenotype_similarity_sidecar
+        else:
+            should_write_sidecar = False
+
+        if should_write_sidecar:
             _write_similarity_tier_workbook(
                 output_path=output_path,
                 source_workbook_path=source_workbook_path,
                 stock_phenotype_sheet_df=stock_phenotype_sheet_df,
                 combination_outputs=combination_outputs,
                 csv_input_genes=csv_input_genes,
-                simple_buckets=bool(pipeline_settings and pipeline_settings.simple_buckets),
-                keyword_bucketing=bool(
-                    pipeline_settings and pipeline_settings.keyword_bucketing
-                ),
+                simple_buckets=simple_buckets,
+                keyword_bucketing=keyword_bucketing,
                 keywords=keywords_for_pheno,
                 verbose=verbose,
                 format_as_masterlist=True,
             )
-        similarity_output_dir = output_path.parent / f"{output_path.stem}_similarity"
-        written_visuals = plot_similarity_outputs(
-            phenotype_sheet_df=stock_phenotype_sheet_df,
-            targets=similarity_targets,
-            output_dir=similarity_output_dir,
-            embedding_scorer=embedding_scorer,
-        )
-        if verbose and written_visuals:
-            print(
-                f"    Wrote {len(written_visuals)} phenotype similarity plot(s) "
-                f"to {similarity_output_dir}"
+        if (
+            pipeline_settings is not None
+            and pipeline_settings.enable_oai_embedding
+            and pipeline_settings.phenotype_similarity_plots
+        ):
+            similarity_output_dir = output_path.parent / f"{output_path.stem}_similarity"
+            written_visuals = plot_similarity_outputs(
+                phenotype_sheet_df=stock_phenotype_sheet_df,
+                targets=similarity_targets,
+                output_dir=similarity_output_dir,
+                embedding_scorer=embedding_scorer,
             )
+            if verbose and written_visuals:
+                print(
+                    f"    Wrote {len(written_visuals)} phenotype similarity plot(s) "
+                    f"to {similarity_output_dir}"
+                )
     
     if verbose:
         print(f"    Saved: {output_path.name}")
@@ -5424,10 +6090,16 @@ class StockSplittingPipeline:
             settings: Configuration settings (uses defaults if None)
         """
         self.settings = settings or Settings()
+
+        issues = self.settings.validate()
+        for issue in issues:
+            print(f"    Warning: {issue}")
+
         self._pubmed_cache = PubMedCache(self.settings.pubmed_cache_path)
         self._pubmed_client = PubMedClient(
             cache=self._pubmed_cache,
             api_key=self.settings.ncbi_api_key,
+            batch_size=self.settings.batch_size,
         )
         self._fulltext_fetcher = FullTextFetcher(
             unpaywall_token=self.settings.unpaywall_token,
@@ -5654,12 +6326,16 @@ class StockSplittingPipeline:
         self,
         df: pd.DataFrame,
         keywords: List[str],
-        verbose: bool = True
+        verbose: bool = True,
+        *,
+        phenotype_similarity_targets: Optional[List[Dict[str, str]]] = None,
+        compute_phenotype_score: bool = False,
     ) -> pd.DataFrame:
         """
         Compute derived columns needed for filtering.
-        
-        Adds: Balancers, multiple_insertions, ALLELE_PAPER_RELEVANCE_SCORE
+
+        Adds: Balancers, multiple_insertions, ALLELE_PAPER_RELEVANCE_SCORE, and
+        (only when ``compute_phenotype_score`` is set) PHENOTYPE_RELEVANCE_SCORE.
         """
         if verbose:
             print("    Computing derived columns...")
@@ -5684,6 +6360,22 @@ class StockSplittingPipeline:
         if verbose:
             score_counts = df['ALLELE_PAPER_RELEVANCE_SCORE'].value_counts().to_dict()
             print(f"      Relevance scores: Ref++ (2)={score_counts.get(2, 0)}, Ref+ (1)={score_counts.get(1, 0)}, Ref- (0)={score_counts.get(0, 0)}")
+
+        # Compute PHENOTYPE_RELEVANCE_SCORE only when a filter needs it, since it
+        # requires scanning the full FlyBase genotype_phenotype_data report.
+        if compute_phenotype_score:
+            df[PHENOTYPE_RELEVANCE_SCORE_COLUMN] = compute_phenotype_relevance_score(
+                df,
+                self.settings.flybase_data_path,
+                phenotype_similarity_targets,
+                verbose,
+            )
+            if verbose:
+                pheno_counts = df[PHENOTYPE_RELEVANCE_SCORE_COLUMN].value_counts().to_dict()
+                print(
+                    f"      Phenotype relevance: Phenotype++ (2)={pheno_counts.get(2, 0)}, "
+                    f"Phenotype+ (1)={pheno_counts.get(1, 0)}, none (0)={pheno_counts.get(0, 0)}"
+                )
 
         # Recompute one-hot reagent bucket columns from stock metadata so
         # downstream outputs stay consistent even for older Stage 1 workbooks.
@@ -5959,6 +6651,11 @@ class StockSplittingPipeline:
             pubmed_client=self._pubmed_client,
             pubmed_cache=self._pubmed_cache,
             max_gpt_calls_per_stock=self.settings.max_gpt_calls_per_stock,
+            min_fulltext_chars=self.settings.min_fulltext_chars,
+            gpt_call_delay_seconds=self.settings.gpt_call_delay_seconds,
+            short_circuit_on_functional_validation=(
+                self.settings.short_circuit_on_functional_validation
+            ),
             stock_tasks_override=stock_tasks,
         )
 
@@ -6055,6 +6752,15 @@ class StockSplittingPipeline:
         keywords = settings.get('relevantSearchTerms', [])
         max_per_gene = settings.get('maxStocksPerGene')
         max_per_allele = settings.get('maxStocksPerAllele')
+
+        # Only compute the (expensive) phenotype relevance score when a filter
+        # references the PHENOTYPE_RELEVANCE_SCORE column.
+        phenotype_similarity_targets_raw = settings.get('phenotypeSimilarityTargets')
+        needs_phenotype_score = any(
+            isinstance(spec, dict)
+            and spec.get('column') == PHENOTYPE_RELEVANCE_SCORE_COLUMN
+            for spec in filters_config.values()
+        )
         
         print(f"  Keywords: {', '.join(keywords) if keywords else '(none)'}")
         gene_limit_display = 'unlimited' if (max_per_gene is None or max_per_gene >= 1000000) else str(max_per_gene)
@@ -6069,6 +6775,8 @@ class StockSplittingPipeline:
                 if "Organized Stocks" not in str(f)
                 and "Organized Stock Sheets" not in str(f)
                 and "Uncategorized" not in str(f)
+                and not f.stem.endswith("_aggregated")  # generated outputs
+                and "_similarity" not in f.name          # similarity sidecars
                 and not f.name.startswith("~$")  # Excel temp files
                 and not f.name.startswith(".")   # Hidden files
             ]
@@ -6090,6 +6798,8 @@ class StockSplittingPipeline:
             if "Organized Stocks" not in str(f)
             and "Organized Stock Sheets" not in str(f)
             and "Uncategorized" not in str(f)
+            and not f.stem.endswith("_aggregated")  # generated outputs
+            and "_similarity" not in f.name          # similarity sidecars
             and not f.name.startswith("~$")  # Excel temp files
             and not f.name.startswith(".")   # Hidden files
         ]
@@ -6100,39 +6810,56 @@ class StockSplittingPipeline:
 
         print(f"\n  Found {len(excel_files)} Excel file(s)")
 
-        # Create output directory under the resolved workbook directory.
-        output_dir = workbook_dir / "Organized Stocks"
-        output_dir.mkdir(exist_ok=True)
-
-        # Carry forward no-PMID FBrf report from pipeline 1, if present.
-        # Keep exactly one report file in the final Organized Stocks output.
-        no_pmid_report_name = "references_without_pmid_fbrf.txt"
-        no_pmid_sources = [
-            workbook_dir / no_pmid_report_name,
-            input_dir / no_pmid_report_name,
-        ]
-        existing_sources = []
-        for path in no_pmid_sources:
-            if path.exists() and path not in existing_sources:
-                existing_sources.append(path)
-        if existing_sources:
-            dst = output_dir / no_pmid_report_name
-            # Prefer the report that lives alongside the workbook(s) we resolved.
-            preferred_src = workbook_dir / no_pmid_report_name
-            src = preferred_src if preferred_src.exists() else existing_sources[0]
-            shutil.move(str(src), str(dst))
-            print(f"  Moved no-PMID FBrf report to: {dst}")
-            
-            # Remove any leftover duplicate source reports.
-            for extra in existing_sources:
-                if extra != src and extra.exists():
-                    try:
-                        extra.unlink()
-                        print(f"  Removed duplicate no-PMID report: {extra}")
-                    except Exception as e:
-                        print(f"  Warning: Could not remove duplicate report {extra}: {e}")
+        # Create the output directory. When ``organized_output_dir`` is set, the
+        # aggregated workbook is written directly there (e.g. the gene set's
+        # ``Stocks`` folder) instead of a nested ``Organized Stocks`` subfolder.
+        if self.settings.organized_output_dir is not None:
+            output_dir = Path(self.settings.organized_output_dir)
         else:
-            print("  No no-PMID FBrf report found to copy")
+            output_dir = workbook_dir / "Organized Stocks"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Carry forward no-PMID FBrf report from pipeline 1, if present (unless
+        # report emission is disabled). Keep exactly one report file.
+        no_pmid_report_name = "references_without_pmid_fbrf.txt"
+        if not self.settings.emit_no_pmid_report:
+            # Report emission disabled: remove any stray report rather than
+            # carrying it forward into the output directory.
+            for stray in (workbook_dir / no_pmid_report_name, input_dir / no_pmid_report_name):
+                if stray.exists():
+                    try:
+                        stray.unlink()
+                    except OSError:
+                        pass
+        else:
+            no_pmid_sources = [
+                workbook_dir / no_pmid_report_name,
+                input_dir / no_pmid_report_name,
+            ]
+            existing_sources = []
+            for path in no_pmid_sources:
+                if path.exists() and path not in existing_sources:
+                    existing_sources.append(path)
+            if existing_sources:
+                dst = output_dir / no_pmid_report_name
+                # Prefer the report that lives alongside the workbook(s) we resolved.
+                preferred_src = workbook_dir / no_pmid_report_name
+                src = preferred_src if preferred_src.exists() else existing_sources[0]
+                # Avoid moving a file onto itself when output_dir == workbook_dir.
+                if Path(src).resolve() != dst.resolve():
+                    shutil.move(str(src), str(dst))
+                    print(f"  Moved no-PMID FBrf report to: {dst}")
+
+                # Remove any leftover duplicate source reports.
+                for extra in existing_sources:
+                    if extra.resolve() != dst.resolve() and extra.exists():
+                        try:
+                            extra.unlink()
+                            print(f"  Removed duplicate no-PMID report: {extra}")
+                        except Exception as e:
+                            print(f"  Warning: Could not remove duplicate report {extra}: {e}")
+            else:
+                print("  No no-PMID FBrf report found to copy")
 
         gene_synonyms_map = _load_gene_synonyms_map(
             self.settings.flybase_data_path,
@@ -6159,7 +6886,13 @@ class StockSplittingPipeline:
             active_keywords = keywords if keywords else file_keywords
             
             # Compute derived columns
-            stocks_df = self._compute_derived_columns(stocks_df, active_keywords, verbose)
+            stocks_df = self._compute_derived_columns(
+                stocks_df,
+                active_keywords,
+                verbose,
+                phenotype_similarity_targets=phenotype_similarity_targets_raw,
+                compute_phenotype_score=needs_phenotype_score,
+            )
             
             # Sort for priority selection
             stocks_df = self._sort_stocks_for_priority(stocks_df, active_keywords)

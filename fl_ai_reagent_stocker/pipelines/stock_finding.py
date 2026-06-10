@@ -230,7 +230,8 @@ class StockFindingPipeline:
         self._pubmed_cache = PubMedCache(self.settings.pubmed_cache_path)
         self._pubmed_client = PubMedClient(
             cache=self._pubmed_cache,
-            api_key=self.settings.ncbi_api_key
+            api_key=self.settings.ncbi_api_key,
+            batch_size=self.settings.batch_size,
         )
         self._fulltext_fetcher = FullTextFetcher(
             unpaywall_token=self.settings.unpaywall_token,
@@ -1573,7 +1574,7 @@ class StockFindingPipeline:
         The index includes every FBal / FBtp / FBti reagent associated with
         each input FBgn, independent of stock availability, ranking, or
         downstream JSON split limits. Stage 2 uses this as the primary
-        ``all_relevant_ids`` source for the Stock Phenotype Sheet so the
+        ``all_relevant_ids`` source for the All Phenotypic Stocks Sheet so the
         phenotype filter is no longer narrowed to Stage-1-selected stocks.
 
         Columns:
@@ -2120,6 +2121,11 @@ class StockFindingPipeline:
             pubmed_client=self._pubmed_client,
             pubmed_cache=self._pubmed_cache,
             max_gpt_calls_per_stock=self.settings.max_gpt_calls_per_stock,
+            min_fulltext_chars=self.settings.min_fulltext_chars,
+            gpt_call_delay_seconds=self.settings.gpt_call_delay_seconds,
+            short_circuit_on_functional_validation=(
+                self.settings.short_circuit_on_functional_validation
+            ),
             component_to_pmids=component_to_pmids,
             component_id_to_symbol=component_id_to_symbol,
         )
@@ -2132,6 +2138,7 @@ class StockFindingPipeline:
         input_gene_col: str = "ext_gene",
         skip_fbgnid_conversion: bool = False,
         run_functional_validation: bool = False,
+        output_name: str = "aggregated_stock_refs.xlsx",
     ) -> Optional[Path]:
         """
         Run the full pipeline.
@@ -2143,6 +2150,9 @@ class StockFindingPipeline:
             input_gene_col: Column name for gene symbols (before conversion)
             skip_fbgnid_conversion: Skip FBgnID conversion step
             run_functional_validation: Run GPT-based functional validation now
+            output_name: File name for the Stage 1 workbook written under
+                ``input_dir/Stocks`` (defaults to ``aggregated_stock_refs.xlsx``).
+                Set this per gene-set to keep one workbook per input CSV.
         
         Returns:
             Path to output Excel file, or None if failed
@@ -2150,7 +2160,17 @@ class StockFindingPipeline:
         input_dir = Path(input_dir)
         if not input_dir.is_dir():
             raise ValueError(f"Input path is not a directory: {input_dir}")
-        
+
+        if not str(output_name).strip():
+            output_name = "aggregated_stock_refs.xlsx"
+        if not output_name.lower().endswith(".xlsx"):
+            output_name = f"{output_name}.xlsx"
+
+        # Reset per-run state so a reused pipeline instance (e.g. processing
+        # several gene-set CSVs in sequence) does not leak no-PMID records from
+        # an earlier gene set into this workbook's sidecar report.
+        self._no_pmid_fbrf_records = []
+
         if keywords:
             print(f"Keywords: {', '.join(keywords)}")
         
@@ -2248,7 +2268,7 @@ class StockFindingPipeline:
             # Persist the complete reagent index even when no stock/custom rows
             # exist. This lets Stage 2 build no-stock phenotype rows from the
             # phenotype table instead of depending on Stage 1 stock survival.
-            output_path = output_dir / "aggregated_stock_refs.xlsx"
+            output_path = output_dir / output_name
             print(
                 "No stocks or custom phenotype reagents found for input genes; "
                 "writing Gene Reagent Index-only workbook."
@@ -2509,7 +2529,7 @@ class StockFindingPipeline:
             references_df = references_df[final_cols]
         
         # Save output
-        output_path = output_dir / "aggregated_stock_refs.xlsx"
+        output_path = output_dir / output_name
         print(f"\nSaving output to: {output_path}")
         
         if self.settings.soft_run:
@@ -2539,26 +2559,28 @@ class StockFindingPipeline:
                     writer.sheets['Stocks'], stock_mapping_out
                 )
         
-        # Write surviving filtered FBrfs without PMID to a sidecar report.
-        no_pmid_report = output_dir / "references_without_pmid_fbrf.txt"
-        no_pmid_rows = sorted(
-            self._no_pmid_fbrf_records,
-            key=lambda r: (r.get('associated_stocks', ''), r.get('FBrf', ''))
-        )
-        with open(no_pmid_report, 'w', encoding='utf-8') as f:
-            f.write("Filtered-in FlyBase references without PMID\n")
-            f.write(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
-            f.write(f"Count: {len(no_pmid_rows)}\n")
-            f.write("\n")
-            for row in no_pmid_rows:
-                f.write(f"FBrf: {row.get('FBrf', '')}\n")
-                f.write(f"  Stocks: {row.get('associated_stocks', '')}\n")
-                f.write(f"  Components: {row.get('associated_components', '')}\n")
-                f.write(f"  pub_type: {row.get('pub_type', '')}\n")
-                if row.get('miniref', ''):
-                    f.write(f"  miniref: {row.get('miniref', '')}\n")
+        # Write surviving filtered FBrfs without PMID to a sidecar report,
+        # unless report emission is disabled (e.g. the primary clean `run`).
+        if self.settings.emit_no_pmid_report:
+            no_pmid_report = output_dir / "references_without_pmid_fbrf.txt"
+            no_pmid_rows = sorted(
+                self._no_pmid_fbrf_records,
+                key=lambda r: (r.get('associated_stocks', ''), r.get('FBrf', ''))
+            )
+            with open(no_pmid_report, 'w', encoding='utf-8') as f:
+                f.write("Filtered-in FlyBase references without PMID\n")
+                f.write(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
+                f.write(f"Count: {len(no_pmid_rows)}\n")
                 f.write("\n")
-        print(f"  Saved no-PMID FBrf report: {no_pmid_report}")
+                for row in no_pmid_rows:
+                    f.write(f"FBrf: {row.get('FBrf', '')}\n")
+                    f.write(f"  Stocks: {row.get('associated_stocks', '')}\n")
+                    f.write(f"  Components: {row.get('associated_components', '')}\n")
+                    f.write(f"  pub_type: {row.get('pub_type', '')}\n")
+                    if row.get('miniref', ''):
+                        f.write(f"  miniref: {row.get('miniref', '')}\n")
+                    f.write("\n")
+            print(f"  Saved no-PMID FBrf report: {no_pmid_report}")
         
         print(f"\n{'='*60}")
         print("COMPLETE")

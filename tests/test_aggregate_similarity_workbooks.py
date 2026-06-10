@@ -52,7 +52,7 @@ def _build_cosine_contents(tier_counts: dict[str, object]) -> list[list[object]]
         [],
         ["Sheet", "Meaning", "Rows"],
         ["Gene Set", "Copied from the input gene-list CSV data when available.", ""],
-        ["Stock Phenotype Sheet", "Full phenotype table used to build all similarity tiers.", ""],
+        ["All Phenotypic Stocks Sheet", "Full phenotype table used to build all similarity tiers.", ""],
     ]
     for label, count in tier_counts.items():
         rows.append([label, f"Tier for similarity range {label}.", count])

@@ -2,7 +2,7 @@
 Phenotype similarity scoring and visualization helpers.
 
 This module provides OpenAI embedding cosine similarity scoring for FlyBase
-phenotype terms used in the soft-run Stock Phenotype Sheet.
+phenotype terms used in the soft-run All Phenotypic Stocks Sheet.
 """
 
 from __future__ import annotations

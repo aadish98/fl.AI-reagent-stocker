@@ -39,8 +39,8 @@ controls, and emit the same final outputs Maddy's scripts produce
 
 ## Highest-Stakes Decisions In One Place
 
-- The GUI is **phenotype-first**: it runs the `--soft-run` `Stock Phenotype Sheet`
-  flow by default and centers the UI on keyword-hit reagents.
+- The GUI is **phenotype-first**: it runs the `phenotype-sheet` flow by default
+  and centers the UI on keyword-hit reagents.
 - Default keywords: `sleep`, `rhythm`, `circadian`, `locomotor`.
 - Default split config: `data/config/stock_split_config_no_bloomington.json`.
 - OpenAI is **starred premium**, never required. Keyword hit/no-hit grouping

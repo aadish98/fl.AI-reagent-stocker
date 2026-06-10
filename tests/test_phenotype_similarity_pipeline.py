@@ -14,20 +14,28 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from fl_ai_reagent_stocker.config import Settings  # noqa: E402
+from fl_ai_reagent_stocker.config import DEFAULT_CONTACT_EMAIL, Settings  # noqa: E402
 from fl_ai_reagent_stocker.cli import create_parser  # noqa: E402
+from fl_ai_reagent_stocker.integrations.fulltext import FullTextFetcher  # noqa: E402
+from fl_ai_reagent_stocker.integrations.pubmed import PubMedClient  # noqa: E402
 from fl_ai_reagent_stocker.integrations.phenotype_similarity import (  # noqa: E402
     EmbeddingSimilarityScorer,
 )
 from fl_ai_reagent_stocker.pipelines.stock_splitting import (  # noqa: E402
     CO_REAGENT_FBIDS_COLUMN,
     CO_REAGENT_SYMBOLS_COLUMN,
+    PHENOTYPE_RELEVANCE_SCORE_COLUMN,
     PHENOTYPE_SIMILARITY_EMBEDDING_MODEL,
     PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN,
     PARTNER_DRIVER_SYMBOLS_COLUMN,
     SIMILARITY_TIER_SHEET_COUNT,
     StockSplittingPipeline,
+    apply_filter_combination,
+    apply_stock_limits,
+    compute_phenotype_relevance_score,
+    _add_phenotype_similarity_scores_to_stock_sheet,
     _build_keyword_bucketing_sheets,
+    _build_phenotype_similarity_context,
     _build_simple_bucket_workbook_entries,
     _build_similarity_tier_sheets,
     _compute_max_cosine_similarity,
@@ -35,6 +43,74 @@ from fl_ai_reagent_stocker.pipelines.stock_splitting import (  # noqa: E402
     load_split_config,
     write_aggregated_excel,
 )
+
+PHENOTYPE_CONFIG_PATH = (
+    REPO_ROOT / "data" / "config" / "stock_split_config_phenotype_example.json"
+)
+BASELINE_CONFIG_PATH = (
+    REPO_ROOT / "data" / "config" / "stock_split_config_example.json"
+)
+
+
+def _write_phenotype_data_tsv(path: Path, rows: list) -> None:
+    """Write a minimal FlyBase-style genotype_phenotype_data TSV fixture."""
+    header = [
+        "genotype_symbols",
+        "genotype_FBids",
+        "phenotype_name",
+        "phenotype_id",
+        "qualifier_names",
+        "qualifier_ids",
+        "reference",
+    ]
+    lines = ["## FlyBase genotype-phenotype report", "#" + "\t".join(header)]
+    for row in rows:
+        lines.append(
+            "\t".join(
+                [
+                    row.get("genotype_symbols", ""),
+                    row.get("genotype_FBids", ""),
+                    row.get("phenotype_name", ""),
+                    row.get("phenotype_id", ""),
+                    row.get("qualifier_names", ""),
+                    row.get("qualifier_ids", ""),
+                    row.get("reference", ""),
+                ]
+            )
+        )
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _assign_combination_buckets(stocks_df, config):
+    """Replay the StockSplittingPipeline.run combination loop in isolation.
+
+    Returns a list of (combination, limited_df) tuples using the same
+    priority-ordered filter + stock-limit logic as the real pipeline, so a
+    reagent lands only in its first matching combination.
+    """
+    filters_config = config["filters"]
+    combinations = config["combinations"]
+    settings = config.get("settings", {})
+    max_per_gene = settings.get("maxStocksPerGene")
+    max_per_allele = settings.get("maxStocksPerAllele")
+
+    gene_counters: dict = {}
+    allele_counters: dict = {}
+    seen_stocks: set = set()
+    outputs = []
+    for combo in combinations:
+        filtered = apply_filter_combination(stocks_df, combo, filters_config)
+        limited = apply_stock_limits(
+            filtered,
+            max_per_gene,
+            max_per_allele,
+            gene_counters,
+            allele_counters,
+            seen_stocks,
+            verbose=False,
+        )
+        outputs.append((combo, limited))
+    return outputs
 from fl_ai_reagent_stocker.utils import (  # noqa: E402
     REAGENT_BUCKET_COLUMNS,
     RNAI_TYPE_COLUMN,
@@ -69,22 +145,51 @@ def _fake_ensure_embeddings(self, texts, cache):
     return mapping
 
 
-class TestPhenotypeSimilarityPipeline(unittest.TestCase):
-    def _phenotype_settings_kwargs(self, similarity: str) -> dict:
-        from fl_ai_reagent_stocker.cli import _similarity_to_settings_kwargs
+def _required_policy_settings(**overrides):
+    settings = {
+        "input": {
+            "geneCol": "flybase_gene_id",
+            "inputGeneCol": "ext_gene",
+            "skipFbgnidConversion": False,
+        },
+        "pubmed": {
+            "batchSize": 50,
+        },
+        "embeddings": {
+            "enabled": False,
+        },
+        "output": {
+            "preserveUnsplitWorkbook": False,
+        },
+        "validation": {
+            "enabled": False,
+            "maxGptCallsPerStock": 5,
+            "minFullTextChars": 500,
+            "gptCallDelaySeconds": 0.5,
+            "shortCircuitOnFunctionalValidation": True,
+            "enableGptLogging": False,
+        },
+    }
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(settings.get(key), dict):
+            settings[key].update(value)
+        else:
+            settings[key] = value
+    return settings
 
-        return _similarity_to_settings_kwargs(similarity)
+
+class TestPhenotypeSimilarityPipeline(unittest.TestCase):
 
     def test_contents_sheet_is_researcher_facing(self):
         config = {
-            "settings": {
-                "relevantSearchTerms": ["sleep", "circadian"],
-                "phenotypeSimilarityTargets": [
+            "settings": _required_policy_settings(
+                relevantSearchTerms=["sleep", "circadian"],
+                phenotypeSimilarityTargets=[
                     {"keyword": "sleep", "embedding_text": "sleep"},
                 ],
-                "maxStocksPerGene": 5,
-                "maxStocksPerAllele": 3,
-            },
+                maxStocksPerGene=5,
+                maxStocksPerAllele=3,
+            ),
             "filterDescriptions": {
                 "Bloomington": "Stocks from the Bloomington collection in FlyBase.",
                 "RNAi": "Unified RNAi proxy.",
@@ -391,97 +496,39 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
         self.assertEqual(csv_input_fbgns, {"FBgn0004364", "FBgn0000001"})
         self.assertIsInstance(secondary_to_primary, dict)
 
-    def test_cli_parses_phenotype_sheet_similarity_none(self):
+    def test_cli_phenotype_sheet_has_no_embedding_flag(self):
         parser = create_parser()
         args = parser.parse_args(
             [
                 "phenotype-sheet",
                 "./gene_lists/Stocks",
-                "--similarity",
-                "none",
             ]
         )
         self.assertEqual(args.command, "phenotype-sheet")
-        self.assertEqual(args.similarity, "none")
-        kwargs = self._phenotype_settings_kwargs(args.similarity)
-        self.assertEqual(
-            kwargs,
-            {
-                "soft_run": True,
-                "enable_oai_embedding": False,
-                "simple_buckets": False,
-                "keyword_bucketing": False,
-            },
-        )
+        self.assertFalse(hasattr(args, "embeddings"))
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["phenotype-sheet", "./gene_lists/Stocks", "--embeddings"])
 
-    def test_cli_parses_phenotype_sheet_similarity_tiers(self):
+    def test_cli_rejects_removed_similarity_selector(self):
         parser = create_parser()
-        args = parser.parse_args(
-            [
-                "phenotype-sheet",
-                "./gene_lists/Stocks",
-                "--similarity",
-                "tiers",
-            ]
-        )
-        self.assertEqual(args.command, "phenotype-sheet")
-        self.assertEqual(args.similarity, "tiers")
-        kwargs = self._phenotype_settings_kwargs(args.similarity)
-        self.assertEqual(
-            kwargs,
-            {
-                "soft_run": True,
-                "enable_oai_embedding": True,
-                "simple_buckets": False,
-                "keyword_bucketing": False,
-            },
-        )
+        for command in ("phenotype-sheet", "run"):
+            for flag in ("--similarity", "--mode"):
+                with self.subTest(command=command, flag=flag):
+                    with self.assertRaises(SystemExit):
+                        parser.parse_args(
+                            [command, "./gene_lists", flag, "tiers"]
+                        )
 
-    def test_cli_parses_phenotype_sheet_similarity_simple_buckets(self):
+    def test_cli_run_command_is_config_driven(self):
         parser = create_parser()
-        args = parser.parse_args(
-            [
-                "phenotype-sheet",
-                "./gene_lists/Stocks",
-                "--similarity",
-                "simple-buckets",
-            ]
-        )
-        self.assertEqual(args.command, "phenotype-sheet")
-        self.assertEqual(args.similarity, "simple-buckets")
-        kwargs = self._phenotype_settings_kwargs(args.similarity)
-        self.assertEqual(
-            kwargs,
-            {
-                "soft_run": True,
-                "enable_oai_embedding": True,
-                "simple_buckets": True,
-                "keyword_bucketing": False,
-            },
-        )
+        args = parser.parse_args(["run", "./gene_lists", "--config", "./c.json"])
+        self.assertEqual(args.command, "run")
+        self.assertFalse(hasattr(args, "embeddings"))
+        self.assertFalse(hasattr(args, "test_log"))
 
-    def test_cli_parses_phenotype_sheet_similarity_keyword_buckets(self):
-        parser = create_parser()
-        args = parser.parse_args(
-            [
-                "phenotype-sheet",
-                "./gene_lists/Stocks",
-                "--similarity",
-                "keyword-buckets",
-            ]
-        )
-        self.assertEqual(args.command, "phenotype-sheet")
-        self.assertEqual(args.similarity, "keyword-buckets")
-        kwargs = self._phenotype_settings_kwargs(args.similarity)
-        self.assertEqual(
-            kwargs,
-            {
-                "soft_run": True,
-                "enable_oai_embedding": True,
-                "simple_buckets": False,
-                "keyword_bucketing": True,
-            },
-        )
+        # The removed end-to-end wrapper is no longer a valid command.
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["run-full-pipeline", "./gene_lists"])
 
     def test_cli_split_stocks_rejects_removed_phenotype_flags(self):
         parser = create_parser()
@@ -490,6 +537,10 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             "--OAI-embedding",
             "--simple-buckets",
             "--keyword-bucketing",
+            "--similarity",
+            "--mode",
+            "--embeddings",
+            "--no-embeddings",
         ):
             with self.subTest(flag=flag):
                 with self.assertRaises(SystemExit):
@@ -508,6 +559,10 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             "--OAI-embedding",
             "--simple-buckets",
             "--keyword-bucketing",
+            "--similarity",
+            "--mode",
+            "--embeddings",
+            "--no-embeddings",
         ):
             with self.subTest(flag=flag):
                 with self.assertRaises(SystemExit):
@@ -518,32 +573,6 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
                             flag,
                         ]
                     )
-
-    def test_cli_run_full_pipeline_modes(self):
-        parser = create_parser()
-        args_normal = parser.parse_args(
-            [
-                "run-full-pipeline",
-                "./gene_lists",
-            ]
-        )
-        self.assertEqual(args_normal.command, "run-full-pipeline")
-        self.assertEqual(args_normal.mode, "normal")
-        # --similarity defaults to "none" but is only honored in --mode phenotype.
-        self.assertEqual(args_normal.similarity, "none")
-
-        args_phenotype = parser.parse_args(
-            [
-                "run-full-pipeline",
-                "./gene_lists",
-                "--mode",
-                "phenotype",
-                "--similarity",
-                "tiers",
-            ]
-        )
-        self.assertEqual(args_phenotype.mode, "phenotype")
-        self.assertEqual(args_phenotype.similarity, "tiers")
 
     def test_load_stocks_from_excel_backfills_rnai_type_from_flybase(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -642,7 +671,7 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             self.assertIn(RNAI_TYPE_COLUMN, loaded_stocks_df.columns)
             self.assertEqual(loaded_stocks_df[RNAI_TYPE_COLUMN].iloc[0], "shRNA")
 
-    def test_config_requires_explicit_phenotype_similarity_targets(self):
+    def test_config_allows_missing_phenotype_similarity_targets_without_embeddings(self):
         self.assertTrue(CONFIG_PATH.exists(), f"Missing config: {CONFIG_PATH}")
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -651,8 +680,133 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             payload["settings"].pop("phenotypeSimilarityTargets", None)
             tmp_config.write_text(json.dumps(payload), encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "phenotypeSimilarityTargets"):
-                load_split_config(tmp_config)
+            config = load_split_config(tmp_config)
+            self.assertNotIn("phenotypeSimilarityTargets", config["settings"])
+
+            payload["settings"]["phenotypeSimilarityTargets"] = []
+            tmp_config.write_text(json.dumps(payload), encoding="utf-8")
+            config = load_split_config(tmp_config)
+            self.assertEqual(config["settings"]["phenotypeSimilarityTargets"], [])
+
+    def test_embeddings_require_explicit_phenotype_similarity_targets(self):
+        config = {
+            "settings": {
+                "relevantSearchTerms": ["sleep"],
+            }
+        }
+
+        with self.assertRaisesRegex(ValueError, "phenotypeSimilarityTargets"):
+            _build_phenotype_similarity_context(
+                config,
+                Settings(
+                    soft_run=True,
+                    enable_oai_embedding=True,
+                    openai_api_key="test-key",
+                ),
+                verbose=False,
+            )
+
+    def test_openai_embedding_model_setting_reaches_scorer(self):
+        config = {
+            "settings": {
+                "phenotypeSimilarityTargets": [
+                    {"keyword": "sleep", "embedding_text": "sleep"},
+                ],
+            }
+        }
+        settings = Settings(
+            soft_run=True,
+            enable_oai_embedding=True,
+            openai_api_key="test-key",
+            openai_embedding_model="custom-embedding-model",
+        )
+
+        with patch(
+            "fl_ai_reagent_stocker.pipelines.stock_splitting.EmbeddingSimilarityScorer"
+        ) as scorer_cls:
+            _build_phenotype_similarity_context(config, settings, verbose=False)
+
+        self.assertEqual(
+            scorer_cls.call_args.kwargs["model"],
+            "custom-embedding-model",
+        )
+
+    def test_pubmed_client_clamps_configured_batch_size(self):
+        self.assertEqual(PubMedClient(batch_size=100).batch_size, 100)
+        self.assertEqual(PubMedClient(batch_size=999).batch_size, 200)
+        self.assertEqual(PubMedClient(batch_size=0).batch_size, 50)
+
+    def test_contact_email_defaults_use_umich_address(self):
+        self.assertEqual(DEFAULT_CONTACT_EMAIL, "aadishms@umich.edu")
+        self.assertEqual(PubMedClient().email, DEFAULT_CONTACT_EMAIL)
+        self.assertEqual(FullTextFetcher().unpaywall_token, DEFAULT_CONTACT_EMAIL)
+
+    def test_phenotype_stock_sheet_scores_are_grouped_by_gene(self):
+        stock_df = pd.DataFrame(
+            [
+                {
+                    "stock_number": "100",
+                    "collection": "Bloomington",
+                    "relevant_gene_symbols": "geneA",
+                },
+                {
+                    "stock_number": "101",
+                    "collection": "Bloomington",
+                    "relevant_gene_symbols": "geneA",
+                },
+                {
+                    "stock_number": "200",
+                    "collection": "Vienna",
+                    "relevant_gene_symbols": "geneB",
+                },
+            ]
+        )
+        score_df = pd.DataFrame(
+            [
+                {
+                    "Source/ Stock #": "Bloomington (100)",
+                    "Phenotype": "weak sleep phenotype",
+                    "Cosine Similarity (sleep)": 0.10,
+                    "Cosine Similarity (circadian)": 0.20,
+                    "Max Cosine Similarity": 0.20,
+                },
+                {
+                    "Source/ Stock #": "Bloomington (101)",
+                    "Phenotype": "strong sleep phenotype",
+                    "Cosine Similarity (sleep)": 0.95,
+                    "Cosine Similarity (circadian)": 0.40,
+                    "Max Cosine Similarity": 0.95,
+                },
+                {
+                    "Source/ Stock #": "Vienna (200)",
+                    "Phenotype": "moderate circadian phenotype",
+                    "Cosine Similarity (sleep)": 0.80,
+                    "Cosine Similarity (circadian)": 0.30,
+                    "Max Cosine Similarity": 0.80,
+                },
+            ]
+        )
+
+        result = _add_phenotype_similarity_scores_to_stock_sheet(stock_df, score_df)
+
+        self.assertEqual(result["stock_number"].tolist(), ["101", "100", "200"])
+        self.assertEqual(
+            result["relevant_gene_symbols"].tolist(),
+            ["geneA", "geneA", "geneB"],
+        )
+        self.assertIn("Cosine Similarity (sleep)", result.columns)
+        self.assertIn("Cosine Similarity (circadian)", result.columns)
+        self.assertIn("Max Cosine Similarity", result.columns)
+        self.assertIn("Phenotype", result.columns)
+        self.assertEqual(
+            result["Phenotype"].tolist(),
+            [
+                "strong sleep phenotype",
+                "weak sleep phenotype",
+                "moderate circadian phenotype",
+            ],
+        )
+        self.assertEqual(result["Max Cosine Similarity"].tolist(), [0.95, 0.20, 0.80])
 
     def test_soft_run_outputs_similarity_columns_and_plots(self):
         self.assertTrue(TEST_FIXTURE_DIR.exists(), f"Missing test fixture: {TEST_FIXTURE_DIR}")
@@ -691,36 +845,47 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             )
             self.assertTrue(tier_workbook_path.exists(), tier_workbook_path)
 
-            phenotype_df = pd.read_excel(workbook_path, sheet_name="Stock Phenotype Sheet")
-            phenotype_masterlist_df = _reorder_to_masterlist_columns(phenotype_df).fillna("")
+            phenotype_df = pd.read_excel(workbook_path, sheet_name="All Phenotypic Stocks Sheet")
+            phenotype_masterlist_df = phenotype_df.fillna("")
             expected_columns = [
-                "Balancers",
-                "matched_component_types",
+                "Screening Group",
+                "allele shorthand",
+                "Gene",
+                "Stock Source",
+                "ID #",
+                "Full Stock Genotype",
+                "balancers in stock?",
+                "Published phenotype",
+                "Reference",
+                "Column 31",
+                "Column 30",
+                "Column 29",
+                "Column 1",
+                "Column 32",
+                "Circadian/Sleep Relevance (embedding max score)",
+                "How Stock Matched Gene",
                 *REAGENT_BUCKET_COLUMNS,
-                "allele_class_terms",
-                "transgenic_product_class_terms",
+                "Allele Class",
+                "Transgenic Product Class",
                 RNAI_TYPE_COLUMN,
-                "Source",
-                "Stock #",
-                "Genotype",
-                CO_REAGENT_FBIDS_COLUMN,
-                CO_REAGENT_SYMBOLS_COLUMN,
-                PARTNER_DRIVER_SYMBOLS_COLUMN,
-                PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN,
-                "Phenotype",
+                "Partner GAL4 FlyBase IDs",
+                "Partner GAL4 Symbols",
                 "Qualifier",
-                "PMID",
-                "PMCID",
                 "Cosine Similarity (sleep)",
                 "Cosine Similarity (circadian)",
             ]
             for column in expected_columns:
                 self.assertIn(column, phenotype_df.columns)
+            self.assertNotIn("matched_component_types", phenotype_df.columns)
+            self.assertNotIn("allele_class_terms", phenotype_df.columns)
+            self.assertNotIn("transgenic_product_class_terms", phenotype_df.columns)
             self.assertNotIn("Source/ Stock #", phenotype_df.columns)
-            source_idx = phenotype_df.columns.get_loc("Source")
+            self.assertNotIn("Source", phenotype_df.columns)
+            self.assertNotIn("Stock #", phenotype_df.columns)
+            source_idx = phenotype_df.columns.get_loc("Stock Source")
             self.assertEqual(
                 phenotype_df.columns[source_idx:source_idx + 2].tolist(),
-                ["Source", "Stock #"],
+                ["Stock Source", "ID #"],
             )
             self.assertNotIn("_reference_url", phenotype_df.columns)
             self.assertTrue(
@@ -735,24 +900,28 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             aggregated_contents_text = "\n".join(
                 aggregated_contents_df.fillna("").astype(str).agg(" ".join, axis=1).tolist()
             )
-            self.assertIn("Stock Phenotype Sheet columns", aggregated_contents_text)
-            self.assertIn("Source", aggregated_contents_text)
-            self.assertIn("Stock #", aggregated_contents_text)
-            self.assertIn("mutually exclusive one-hot set", aggregated_contents_text)
-            self.assertIn("matched_component_types", aggregated_contents_text)
+            self.assertIn("All Phenotypic Stocks Sheet columns", aggregated_contents_text)
+            self.assertIn("Stock Source", aggregated_contents_text)
+            self.assertIn("ID #", aggregated_contents_text)
+            self.assertIn("full-scope for the input gene set", aggregated_contents_text)
+            self.assertIn("not limited to the JSON combination sheets", aggregated_contents_text)
+            self.assertIn("mutually exclusive", aggregated_contents_text)
+            self.assertIn("How Stock Matched Gene", aggregated_contents_text)
+            self.assertNotIn("matched_component_types", aggregated_contents_text)
+            self.assertNotIn("genotype_phenotype_data", aggregated_contents_text)
+            self.assertNotIn("one-hot", aggregated_contents_text)
             self.assertIn(RNAI_TYPE_COLUMN, aggregated_contents_text)
-            self.assertIn(CO_REAGENT_FBIDS_COLUMN, aggregated_contents_text)
-            self.assertIn(PARTNER_DRIVER_SYMBOLS_COLUMN, aggregated_contents_text)
-            self.assertIn(PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN, aggregated_contents_text)
+            self.assertIn("Partner GAL4 FlyBase IDs", aggregated_contents_text)
+            self.assertIn("Published Gal4/ Positive control", aggregated_contents_text)
+            self.assertIn("Published Gal4 source", aggregated_contents_text)
             self.assertIn("GAL4 / mutant", aggregated_contents_text)
-            self.assertIn("Vienna-style knockdown-family signals", aggregated_contents_text)
 
             tier_workbook = pd.ExcelFile(tier_workbook_path)
             try:
                 expected_tiers = _build_similarity_tier_sheets(phenotype_df)
                 self.assertEqual(
                     tier_workbook.sheet_names,
-                    ["Contents", "Gene Set", "Stock Phenotype Sheet", *[sheet_name for sheet_name, _, _ in expected_tiers]],
+                    ["Contents", "Gene Set", "All Phenotypic Stocks Sheet", *[sheet_name for sheet_name, _, _ in expected_tiers]],
                 )
                 self.assertLessEqual(len(expected_tiers), SIMILARITY_TIER_SHEET_COUNT)
                 self.assertTrue(expected_tiers)
@@ -771,7 +940,7 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
                 )
                 tier_first_df = pd.read_excel(
                     tier_workbook_path,
-                    sheet_name="Stock Phenotype Sheet",
+                    sheet_name="All Phenotypic Stocks Sheet",
                 ).fillna("")
                 self.assertEqual(
                     tier_first_df.columns.tolist(),
@@ -791,14 +960,14 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
                     tier_contents_df.fillna("").astype(str).agg(" ".join, axis=1).tolist()
                 )
                 self.assertIn("Tier Workbook Contents", contents_text)
-                self.assertIn("Max Cosine Similarity", contents_text)
-                self.assertIn("empty buckets are skipped", contents_text)
+                self.assertIn("best phenotype similarity score", contents_text)
+                self.assertIn("empty score ranges are skipped", contents_text.lower())
                 self.assertIn("Gene Set", contents_text)
-                self.assertIn("Stock Phenotype Sheet", contents_text)
-                self.assertIn("Stock Phenotype Sheet columns", contents_text)
-                self.assertIn("mutually exclusive one-hot set", contents_text)
+                self.assertIn("All Phenotypic Stocks Sheet", contents_text)
+                self.assertIn("All Phenotypic Stocks Sheet columns", contents_text)
+                self.assertIn("mutually exclusive", contents_text)
                 self.assertIn("mutant/UAS", contents_text)
-                self.assertIn("rnai_reagent", contents_text)
+                self.assertNotIn("rnai_reagent", contents_text)
 
                 scored_rows = int(_compute_max_cosine_similarity(phenotype_df).notna().sum())
                 tier_row_total = 0
@@ -1016,9 +1185,7 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
 
             settings = Settings(
                 soft_run=True,
-                enable_oai_embedding=True,
                 simple_buckets=True,
-                openai_api_key="test-key",
                 phenotype_embedding_cache_path=tmp_root / "cache" / "phenotype_embeddings.csv",
                 phenotype_target_embedding_cache_path=tmp_root / "cache" / "target_embeddings.csv",
             )
@@ -1026,14 +1193,15 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
 
             with patch.object(
                 EmbeddingSimilarityScorer,
-                "_ensure_embeddings",
-                new=_fake_ensure_embeddings,
-            ):
+                "score_texts",
+                side_effect=AssertionError("embeddings should not run"),
+            ) as score_texts:
                 output_dir = pipeline.run(
                     input_dir=fixture_copy,
                     config_path=CONFIG_PATH,
                     verbose=False,
                 )
+            score_texts.assert_not_called()
 
             self.assertIsNotNone(output_dir)
             tier_workbook_path = (
@@ -1046,7 +1214,7 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
                 self.assertGreater(len(tier_workbook.sheet_names), 3)
                 self.assertEqual(
                     tier_workbook.sheet_names[:3],
-                    ["Contents", "Gene Set", "Stock Phenotype Sheet"],
+                    ["Contents", "Gene Set", "All Phenotypic Stocks Sheet"],
                 )
 
                 expected_gene_set_df = pd.read_csv(fixture_copy / "vGAT_genes.csv", dtype=str)
@@ -1069,8 +1237,8 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
                 self.assertIn("Sheet name", contents_text)
                 self.assertIn("has balancer", contents_text)
                 self.assertNotIn("Max Cosine Similarity", contents_text)
-                self.assertIn("Stock Phenotype Sheet columns", contents_text)
-                self.assertIn("mutually exclusive one-hot set", contents_text)
+                self.assertIn("All Phenotypic Stocks Sheet columns", contents_text)
+                self.assertIn("mutually exclusive", contents_text)
                 self.assertIn("GAL4 / mutant", contents_text)
 
                 header_row_idx = next(
@@ -1099,9 +1267,7 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
 
             settings = Settings(
                 soft_run=True,
-                enable_oai_embedding=True,
                 keyword_bucketing=True,
-                openai_api_key="test-key",
                 phenotype_embedding_cache_path=tmp_root / "cache" / "phenotype_embeddings.csv",
                 phenotype_target_embedding_cache_path=tmp_root / "cache" / "target_embeddings.csv",
             )
@@ -1109,14 +1275,15 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
 
             with patch.object(
                 EmbeddingSimilarityScorer,
-                "_ensure_embeddings",
-                new=_fake_ensure_embeddings,
-            ):
+                "score_texts",
+                side_effect=AssertionError("embeddings should not run"),
+            ) as score_texts:
                 output_dir = pipeline.run(
                     input_dir=fixture_copy,
                     config_path=CONFIG_PATH,
                     verbose=False,
                 )
+            score_texts.assert_not_called()
 
             self.assertIsNotNone(output_dir)
             workbook_path = Path(output_dir) / "aggregated_stock_refs_aggregated.xlsx"
@@ -1126,7 +1293,7 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             self.assertTrue(workbook_path.exists(), workbook_path)
             self.assertTrue(tier_workbook_path.exists(), tier_workbook_path)
 
-            phenotype_df = pd.read_excel(workbook_path, sheet_name="Stock Phenotype Sheet")
+            phenotype_df = pd.read_excel(workbook_path, sheet_name="All Phenotypic Stocks Sheet")
             configured_keywords = load_split_config(CONFIG_PATH)["settings"]["relevantSearchTerms"]
             expected_entries = _build_keyword_bucketing_sheets(
                 phenotype_df,
@@ -1140,7 +1307,7 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
                     [
                         "Contents",
                         "Gene Set",
-                        "Stock Phenotype Sheet",
+                        "All Phenotypic Stocks Sheet",
                         "Keyword Hits",
                         "No Keyword Hits",
                     ],
@@ -1157,9 +1324,10 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
                 self.assertIn("Keyword Bucket Workbook Contents", contents_text)
                 self.assertIn("Keyword Hits", contents_text)
                 self.assertIn("No Keyword Hits", contents_text)
-                self.assertIn("relevantSearchTerms", contents_text)
+                self.assertIn("Configured phenotype keywords", contents_text)
+                self.assertNotIn("relevantSearchTerms", contents_text)
                 self.assertIn("sleep, circadian, locomotor, rhythm", contents_text)
-                self.assertIn("Stock Phenotype Sheet columns", contents_text)
+                self.assertIn("All Phenotypic Stocks Sheet columns", contents_text)
 
                 for sheet_name, expected_df, _metadata in expected_entries:
                     actual_df = pd.read_excel(tier_workbook_path, sheet_name=sheet_name)
@@ -1311,6 +1479,244 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             }
         )
         self.assertEqual(_build_similarity_tier_sheets(no_score_df), [])
+
+
+class TestPhenotypeRelevanceFilters(unittest.TestCase):
+    """Phenotype relevance score + priority bucketing invariants."""
+
+    # Synthetic stock columns the phenotype/ref filter prefixes reference.
+    def _stock_row(self, **overrides):
+        row = {
+            "stock_number": "1",
+            "collection": "Bloomington",
+            "relevant_gene_symbols": "geneA",
+            "AlleleSymbol": "alleleA",
+            "RNAi": True,
+            "sgRNA": False,
+            "num_Balancers": 0,
+            "multiple_insertions": False,
+            "UAS": False,
+            "ALLELE_PAPER_RELEVANCE_SCORE": 0,
+            PHENOTYPE_RELEVANCE_SCORE_COLUMN: 0,
+        }
+        row.update(overrides)
+        return row
+
+    def test_phenotype_score_collapses_multi_row_evidence_to_one_value(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            flybase_root = Path(tmp_dir)
+            alleles_dir = flybase_root / "alleles_and_stocks"
+            alleles_dir.mkdir(parents=True)
+            _write_phenotype_data_tsv(
+                alleles_dir / "genotype_phenotype_data_fb_test.tsv",
+                [
+                    # FBal0000001 has multiple evidence rows: one non-target,
+                    # one target. The target match must win (score 2).
+                    {"genotype_FBids": "FBal0000001", "phenotype_name": "viable"},
+                    {"genotype_FBids": "FBal0000001 Scer\\GAL4[x]", "phenotype_name": "sleep decreased"},
+                    # FBal0000002 has only non-target evidence rows (score 1).
+                    {"genotype_FBids": "FBal0000002", "phenotype_name": "lethal"},
+                    {"genotype_FBids": "FBal0000002", "phenotype_name": "rough eye"},
+                ],
+            )
+
+            stocks_df = pd.DataFrame(
+                [
+                    {"stock_number": "100", "relevant_component_ids": "FBal0000001"},
+                    {"stock_number": "200", "relevant_component_ids": "FBal0000002"},
+                    {"stock_number": "300", "relevant_component_ids": "FBal0009999"},
+                    {"stock_number": "400", "relevant_component_ids": ""},
+                ]
+            )
+            targets = [{"keyword": "sleep", "embedding_text": "sleep"}]
+            scores = compute_phenotype_relevance_score(
+                stocks_df, flybase_root, targets, verbose=False
+            )
+
+            # One score per stock row regardless of phenotype-evidence row count.
+            self.assertEqual(len(scores), len(stocks_df))
+            self.assertEqual(scores.tolist(), [2, 1, 0, 0])
+
+    def test_phenotype_score_requires_targets_for_double_plus(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            flybase_root = Path(tmp_dir)
+            alleles_dir = flybase_root / "alleles_and_stocks"
+            alleles_dir.mkdir(parents=True)
+            _write_phenotype_data_tsv(
+                alleles_dir / "genotype_phenotype_data_fb_test.tsv",
+                [
+                    {"genotype_FBids": "FBal0000001", "phenotype_name": "sleep decreased"},
+                ],
+            )
+            stocks_df = pd.DataFrame(
+                [{"stock_number": "100", "relevant_component_ids": "FBal0000001"}]
+            )
+            # No targets configured: a phenotype exists, so the best score is 1.
+            scores = compute_phenotype_relevance_score(
+                stocks_df, flybase_root, None, verbose=False
+            )
+            self.assertEqual(scores.tolist(), [1])
+
+    def test_phenotype_score_zero_when_data_missing(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            flybase_root = Path(tmp_dir)
+            (flybase_root / "alleles_and_stocks").mkdir(parents=True)
+            stocks_df = pd.DataFrame(
+                [{"stock_number": "100", "relevant_component_ids": "FBal0000001"}]
+            )
+            scores = compute_phenotype_relevance_score(
+                stocks_df, flybase_root, [{"keyword": "sleep", "embedding_text": "sleep"}],
+                verbose=False,
+            )
+            self.assertEqual(scores.tolist(), [0])
+
+    def test_reagent_lands_in_single_highest_priority_bucket(self):
+        config = {
+            "settings": _required_policy_settings(
+                maxStocksPerGene=None,
+                maxStocksPerAllele=None,
+            ),
+            "filters": {
+                "Phenotype++": {"column": PHENOTYPE_RELEVANCE_SCORE_COLUMN, "type": "equals", "value": 2},
+                "Phenotype+": {"column": PHENOTYPE_RELEVANCE_SCORE_COLUMN, "type": "equals", "value": 1},
+                "Ref++": {"column": "ALLELE_PAPER_RELEVANCE_SCORE", "type": "equals", "value": 2},
+                "Ref+": {"column": "ALLELE_PAPER_RELEVANCE_SCORE", "type": "equals", "value": 1},
+                "Ref-": {"column": "ALLELE_PAPER_RELEVANCE_SCORE", "type": "equals", "value": 0},
+            },
+            "combinations": [
+                ["Phenotype++"],
+                ["Phenotype+"],
+                ["Ref++"],
+                ["Ref+"],
+                ["Ref-"],
+            ],
+        }
+        stocks_df = pd.DataFrame(
+            [
+                # Matches Phenotype++ AND Ref++; must land only in Phenotype++.
+                self._stock_row(stock_number="100", PHENOTYPE_RELEVANCE_SCORE=2, ALLELE_PAPER_RELEVANCE_SCORE=2),
+                # Misses Phenotype++ but matches Phenotype+ AND Ref++; -> Phenotype+.
+                self._stock_row(stock_number="200", PHENOTYPE_RELEVANCE_SCORE=1, ALLELE_PAPER_RELEVANCE_SCORE=2),
+                # No phenotype; matches Ref++ only.
+                self._stock_row(stock_number="300", PHENOTYPE_RELEVANCE_SCORE=0, ALLELE_PAPER_RELEVANCE_SCORE=2),
+            ]
+        )
+
+        outputs = _assign_combination_buckets(stocks_df, config)
+        placement = {}
+        for combo, limited in outputs:
+            for stock_number in limited["stock_number"].tolist():
+                placement.setdefault(stock_number, []).append(tuple(combo))
+
+        # Each reagent appears in exactly one bucket.
+        self.assertTrue(all(len(v) == 1 for v in placement.values()), placement)
+        self.assertEqual(placement["100"], [("Phenotype++",)])
+        self.assertEqual(placement["200"], [("Phenotype+",)])
+        self.assertEqual(placement["300"], [("Ref++",)])
+
+    def test_phenotype_config_no_reagent_in_multiple_buckets(self):
+        config = load_split_config(PHENOTYPE_CONFIG_PATH)
+
+        # Distinct gene/allele per stock so per-gene/allele limits never bite;
+        # the assertion is purely about (stock_number, collection) uniqueness.
+        rows = []
+        for idx, (pheno, ref) in enumerate(
+            [(2, 2), (1, 0), (0, 2), (0, 1), (0, 0)]
+        ):
+            rows.append(
+                self._stock_row(
+                    stock_number=str(1000 + idx),
+                    collection="Bloomington",
+                    relevant_gene_symbols=f"gene{idx}",
+                    AlleleSymbol=f"allele{idx}",
+                    PHENOTYPE_RELEVANCE_SCORE=pheno,
+                    ALLELE_PAPER_RELEVANCE_SCORE=ref,
+                )
+            )
+        stocks_df = pd.DataFrame(rows)
+
+        outputs = _assign_combination_buckets(stocks_df, config)
+        seen_identities = []
+        for combo, limited in outputs:
+            for _, srow in limited.iterrows():
+                seen_identities.append((srow["stock_number"], srow["collection"]))
+
+        # No (stock_id, collection) reagent appears in more than one bucket.
+        self.assertEqual(len(seen_identities), len(set(seen_identities)), seen_identities)
+        # The Phenotype++ stock is claimed by a Phenotype++ combination.
+        pheno_pp_stock = [
+            srow["stock_number"]
+            for combo, limited in outputs
+            if "Phenotype++" in combo
+            for _, srow in limited.iterrows()
+        ]
+        self.assertIn("1000", pheno_pp_stock)
+
+    def test_baseline_config_has_no_phenotype_filters(self):
+        baseline = load_split_config(BASELINE_CONFIG_PATH)
+        self.assertNotIn("Phenotype++", baseline["filters"])
+        self.assertNotIn("Phenotype+", baseline["filters"])
+        combo_names = {name for combo in baseline["combinations"] for name in combo}
+        self.assertNotIn("Phenotype++", combo_names)
+        self.assertNotIn("Phenotype+", combo_names)
+
+    def test_contents_separator_every_defaults_and_validates(self):
+        payload = {
+            "settings": _required_policy_settings(),
+            "filters": {
+                "Bloomington": {
+                    "column": "collection",
+                    "type": "contains",
+                    "value": "Bloomington",
+                }
+            },
+            "combinations": [["Bloomington"]],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_config = Path(tmp_dir) / "config.json"
+
+            tmp_config.write_text(json.dumps(payload), encoding="utf-8")
+            config = load_split_config(tmp_config)
+            self.assertEqual(config["settings"]["contentsSeparatorEvery"], 3)
+
+            payload["settings"] = _required_policy_settings(contentsSeparatorEvery=4)
+            tmp_config.write_text(json.dumps(payload), encoding="utf-8")
+            config = load_split_config(tmp_config)
+            self.assertEqual(config["settings"]["contentsSeparatorEvery"], 4)
+
+            payload["settings"] = _required_policy_settings(contentsSeparatorEvery=0)
+            tmp_config.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "contentsSeparatorEvery"):
+                load_split_config(tmp_config)
+
+    def test_shipped_configs_set_contents_separator_grouping(self):
+        baseline = load_split_config(BASELINE_CONFIG_PATH)
+        phenotype = load_split_config(PHENOTYPE_CONFIG_PATH)
+
+        self.assertEqual(baseline["settings"]["contentsSeparatorEvery"], 3)
+        self.assertEqual(phenotype["settings"]["contentsSeparatorEvery"], 4)
+
+    def test_phenotype_config_defines_phenotype_filters_and_combinations(self):
+        config = load_split_config(PHENOTYPE_CONFIG_PATH)
+        self.assertEqual(
+            config["filters"]["Phenotype++"],
+            {"column": PHENOTYPE_RELEVANCE_SCORE_COLUMN, "type": "equals", "value": 2},
+        )
+        self.assertEqual(
+            config["filters"]["Phenotype+"],
+            {"column": PHENOTYPE_RELEVANCE_SCORE_COLUMN, "type": "equals", "value": 1},
+        )
+        # Phenotype++/Phenotype+ are inserted directly above each Ref-tier group.
+        combos = config["combinations"]
+        for idx, combo in enumerate(combos):
+            if "Ref++" in combo:
+                prefix = combo[:-1]
+                self.assertEqual(combos[idx - 2], prefix + ["Phenotype++"])
+                self.assertEqual(combos[idx - 1], prefix + ["Phenotype+"])
+        # No Phenotype- tier was added.
+        combo_names = {name for combo in combos for name in combo}
+        self.assertNotIn("Phenotype-", combo_names)
 
 
 if __name__ == "__main__":

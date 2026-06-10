@@ -7,6 +7,7 @@ This module provides:
 """
 
 import io
+import logging
 import os
 import random
 import re
@@ -19,7 +20,7 @@ from urllib.parse import quote
 import pandas as pd
 import requests
 
-from ..config import ValidationStatus, Settings
+from ..config import DEFAULT_CONTACT_EMAIL, ValidationStatus, Settings
 from ..utils import clean_id
 
 # Try to import PyPDF2 for PDF extraction
@@ -43,7 +44,9 @@ try:
 except ImportError:
     PYDANTIC_AVAILABLE = False
 
-# Try to import metapub
+# Try to import metapub. It logs "NCBI_API_KEY was not set" at import time,
+# even for config-only code paths, so keep that optional-dependency noise quiet.
+logging.getLogger("metapub.config").setLevel(logging.ERROR)
 try:
     from metapub import PubMedFetcher
     METAPUB_AVAILABLE = True
@@ -214,7 +217,7 @@ class FullTextFetcher:
             ncbi_api_key: Optional NCBI API key
             method_cache_path: Path to persistent cache CSV for PMID -> method mapping
         """
-        self.unpaywall_token = unpaywall_token or "aadish98@gmail.com"
+        self.unpaywall_token = unpaywall_token or DEFAULT_CONTACT_EMAIL
         self.ncbi_api_key = ncbi_api_key
         self._method_cache = FullTextMethodCache(method_cache_path)
         self._session_cache: Dict[str, str] = {}  # PMID -> failure reason for this session
@@ -292,7 +295,7 @@ class FullTextFetcher:
         try:
             url = (
                 "https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/"
-                f"?tool=flybase_scraper&email=flybase_scraper@example.com&ids={pmid_clean}&format=json"
+                f"?tool=flybase_scraper&email={quote(DEFAULT_CONTACT_EMAIL)}&ids={pmid_clean}&format=json"
             )
             if self.ncbi_api_key:
                 url += f"&api_key={self.ncbi_api_key}"
@@ -770,7 +773,7 @@ class FullTextFetcher:
         if METAPUB_AVAILABLE:
             try:
                 fetcher = PubMedFetcher(
-                    email="flybase_scraper@example.com",
+                    email=DEFAULT_CONTACT_EMAIL,
                     api_key=self.ncbi_api_key
                 )
                 art = fetcher.article_by_pmcid(pmcid)
@@ -781,14 +784,14 @@ class FullTextFetcher:
         if BIOPYTHON_AVAILABLE:
             try:
                 # Convert PMCID to PMID
-                url = f"https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/?tool=flybase_scraper&email=flybase_scraper@example.com&ids={pmcid}&format=json"
+                url = f"https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/?tool=flybase_scraper&email={quote(DEFAULT_CONTACT_EMAIL)}&ids={pmcid}&format=json"
                 r = requests.get(url, timeout=15)
                 if r.status_code == 200:
                     data = r.json()
                     recs = data.get("records", [])
                     if recs and "pmid" in recs[0]:
                         pmid = recs[0]["pmid"]
-                        Entrez.email = "flybase_scraper@example.com"
+                        Entrez.email = DEFAULT_CONTACT_EMAIL
                         handle = Entrez.efetch(db="pubmed", id=pmid, rettype="xml", retmode="xml")
                         records = Entrez.read(handle)
                         handle.close()

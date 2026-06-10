@@ -117,35 +117,31 @@ flowchart TD
 
 ## High level technical flowchart
 
-The pipeline now has four explicit stages plus an end-to-end wrapper.
-`split-stocks`, `phenotype-sheet`, and `validate-stocks` are sibling
-downstream commands over Stage 1 output. `run-full-pipeline --mode normal`
-runs Stage 1 + `split-stocks` + `validate-stocks`; `run-full-pipeline --mode
-phenotype` runs Stage 1 + `phenotype-sheet` only and never invokes GPT
-validation.
+The single public command `run` chains the stages: build the Stage 1 workbook,
+organize stocks with the JSON config, validate `Ref++` stocks when enabled, and
+run phenotype embeddings when enabled by config. The individual stages remain
+available as advanced entry points.
 
 ```mermaid
 flowchart TD
-    A[Input gene-list CSVs] --> S1[Stage 1<br/>find-stocks]
+    A[Input gene-list CSVs] --> S1[find-stocks]
     S1 --> O1[(aggregated_stock_refs.xlsx<br/>Stocks + References + Gene Reagent Index)]
 
-    O1 --> S2[split-stocks]
-    S2 --> O2[(Organized Stocks workbook)]
-    O2 --> S3[validate-stocks]
+    O1 --> S2[organize<br/>JSON filters + combinations]
+    S2 --> O2[(Organized Stocks workbook<br/>Ref + Phenotype tier sheets)]
+    O2 --> S3[validate Ref++]
     S3 --> O3[(Validated workbook<br/>+ validation columns)]
 
-    O1 --> PS[phenotype-sheet]
-    PS --> P1[(Stock Phenotype Sheet workbook)]
-    PS -. --similarity tiers .-> P2[(Cosine similarity tier workbook)]
-    PS -. --similarity simple-buckets .-> P3[(Simple-bucket workbook)]
-    PS -. --similarity keyword-buckets .-> P4[(Keyword Hits / No Keyword Hits workbook)]
+    O1 -. "settings.embeddings.enabled" .-> PS[phenotype-sheet<br/>+ OpenAI embeddings]
+    PS --> P1[(All Phenotypic Stocks Sheet)]
+    PS --> P2[(Cosine similarity tiers<br/>+ plots)]
 
     classDef stage fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
     classDef artifact fill:#fff8e1,stroke:#f57f17,color:#e65100
     classDef pheno fill:#f3e5f5,stroke:#6a1b9a,color:#4a148c
     class S1,S2,S3 stage
     class PS pheno
-    class O1,O2,O3,P1,P2,P3,P4 artifact
+    class O1,O2,O3,P1,P2 artifact
 ```
 
 ---
@@ -176,32 +172,30 @@ flowchart TD
         A9 --> O1[(aggregated_stock_refs.xlsx)]
     end
 
-    subgraph Stage2["split-stocks (organization only)"]
+    subgraph Stage2["organize (JSON filters)"]
         direction TB
         B1[Load Stage 1 workbook]
-        B1 --> B2[Compute derived columns<br/>Balancers, RNAi,<br/>ALLELE_PAPER_RELEVANCE_SCORE]
-        B2 --> B3[Apply JSON filters and combinations]
+        B1 --> B2[Compute derived columns<br/>Balancers, RNAi,<br/>ALLELE_PAPER_RELEVANCE_SCORE,<br/>PHENOTYPE_RELEVANCE_SCORE*]
+        B2 --> B3[Apply JSON filters and combinations<br/>priority order, one sheet per reagent]
         B3 --> B4[Apply maxStocksPerGene<br/>and maxStocksPerAllele]
         B4 --> O2[(Organized workbook sheets)]
     end
 
-    subgraph PhenotypeSheet["phenotype-sheet (gene-first phenotype reagent flow)"]
+    subgraph PhenotypeSheet["phenotype-sheet (config-controlled embeddings)"]
         direction TB
         C1[Input-gene reagents from Gene Reagent Index]
         C1 --> C2[Match curated phenotype rows<br/>genotype_phenotype_data]
         CL[Global FBst lookup<br/>fbst_to_derived_stock_component.csv]
         CL --> C4
         C2 --> C3[Resolve phenotype FBrf → PMID / PMCID<br/>fbrf_pmid_pmcid_doi]
-        C3 --> C4[(Stock Phenotype Sheet)]
-        C4 --> C5[OpenAI embeddings vs<br/>phenotypeSimilarityTargets]
-        C5 --> C6{"--similarity"}
-        C6 -->|"none"| C10[(no sidecar)]
-        C6 -->|"tiers"| C7[(Cosine similarity tiers)]
-        C6 -->|"simple-buckets"| C8[(Simple buckets)]
-        C6 -->|"keyword-buckets"| C9[(Keyword Hits /<br/>No Keyword Hits)]
+        C3 --> C4[(All Phenotypic Stocks Sheet)]
+        C4 --> C5{"settings.embeddings.enabled?"}
+        C5 -->|"no"| C10[(All Phenotypic Stocks Sheet only)]
+        C5 -->|"yes"| C11[OpenAI embeddings vs<br/>phenotypeSimilarityTargets]
+        C11 --> C7[(Cosine similarity tiers<br/>+ plots)]
     end
 
-    subgraph Stage3["validate-stocks (GPT validation only)"]
+    subgraph Stage3["validate Ref++ (GPT validation)"]
         direction TB
         D1[Rebuild split outputs]
         D1 --> D2[Select Ref++ stocks<br/>in output sheets]
@@ -219,9 +213,12 @@ flowchart TD
 
     classDef artifact fill:#fff8e1,stroke:#f57f17,color:#e65100
     classDef external fill:#ede7f6,stroke:#5e35b1,color:#311b92
-    class O1,O2,O3,C4,C7,C8,C9,C10 artifact
+    class O1,O2,O3,C4,C7,C10 artifact
     class C5,D4,D5 external
 ```
+
+`*` `PHENOTYPE_RELEVANCE_SCORE` is computed only when a config filter references
+it (the `Phenotype++` / `Phenotype+` tiers).
 
 ---
 
@@ -232,13 +229,13 @@ The pipeline has two separate reference concepts:
 - **Stock-level references** come from `entity_publication` and answer: "Which papers are associated with this stock's relevant allele, construct, or insertion components?"
 - **Phenotype-sheet references** come from `genotype_phenotype_data.reference` and answer: "Which paper supports this specific curated phenotype row?"
 
-A PMID can appear in Stage 1 but not in the Stock Phenotype Sheet when FlyBase associates the paper with the stock component but does not use that paper as the reference for a curated phenotype row.
+A PMID can appear in Stage 1 but not in the All Phenotypic Stocks Sheet when FlyBase associates the paper with the stock component but does not use that paper as the reference for a curated phenotype row.
 
 ---
 
-## Stock Phenotype Sheet is Phenotype-Table-Driven
+## All Phenotypic Stocks Sheet is Phenotype-Table-Driven
 
-The Stock Phenotype Sheet is driven by every FBal / FBtp / FBti reagent associated with an input gene (the complete Stage 1 **Gene Reagent Index**), filtered against curated rows in `genotype_phenotype_data`. Stocks are then attached afterward via the full, unfiltered `fbst_to_derived_stock_component.csv`. This means:
+The All Phenotypic Stocks Sheet is driven by every FBal / FBtp / FBti reagent associated with an input gene (the complete Stage 1 **Gene Reagent Index**), filtered against curated rows in `genotype_phenotype_data`. Stocks are then attached afterward via the full, unfiltered `fbst_to_derived_stock_component.csv`. This means:
 
 - A reagent that has a phenotype row is included regardless of whether any FBst stock was found by Stage 1 stock matching or kept by Stage 2 JSON split limits.
 - Every FBst FlyBase associates with a matched reagent surfaces as a Source/ Stock # row, not just the stocks that survived Stage 1 ranking.

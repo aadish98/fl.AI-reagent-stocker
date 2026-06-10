@@ -60,7 +60,7 @@ live count preview where possible.
 ## What Is Hidden Or Locked
 
 - Raw `filters` / `combinations` JSON.
-- CLI flag names (`--soft-run`, `--keyword-bucketing`, etc.).
+- CLI flag names beyond the simplified `--similarity` / `--embeddings` model.
 - OpenAI embedding similarity targets, unless an OpenAI API key is configured
   and the user opts in.
 - `phenotypeSimilarityTargets` editing UI.
