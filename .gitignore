@@ -54,11 +54,18 @@ data/flybase/*.sql.gz
 data/flybase/sequence_features/
 data/flybase/alleles_and_stocks/fbal_to_fbgn_fb_*.tsv
 data/flybase/transgenic_constructs/transgenic_construct_descriptions_fb_*.tsv
+data/bdsc/
 data/cache/
 data/gene_sets/
 data/config/
 data/logs/
 data/test/
+
+# Private GUI planning documents
+GUI-Plan/
+
+# Private local-only research and presentation materials
+private/
 
 # Local analysis / generated report artifacts
 audit_outputs/

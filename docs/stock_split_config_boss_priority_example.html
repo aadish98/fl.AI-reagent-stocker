@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Boss-Priority Stock Split Config</title>
+  <style>
+    :root {
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --pheno: #7c3aed;
+      --pheno-soft: #ede9fe;
+      --ref-high: #059669;
+      --ref-mid: #d97706;
+      --ref-low: #94a3b8;
+      --bloom: #2563eb;
+      --accent: #f59e0b;
+      --radius: 14px;
+      --shadow: 0 10px 40px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #ede9fe 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #fef3c7 0%, transparent 50%),
+        var(--bg);
+      line-height: 1.55;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--pheno);
+      background: var(--pheno-soft);
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      margin-bottom: 0.85rem;
+    }
+
+    h1 {
+      font-size: clamp(1.85rem, 4vw, 2.6rem);
+      line-height: 1.15;
+      margin: 0 0 0.75rem;
+      font-weight: 700;
+    }
+
+    .lede {
+      max-width: 42rem;
+      margin: 0 auto 1.5rem;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+    }
+
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      justify-content: center;
+      margin-bottom: 2rem;
+    }
+
+    .stat {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 0.85rem 1.1rem;
+      min-width: 7.5rem;
+      box-shadow: var(--shadow);
+      text-align: center;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 1.5rem;
+      line-height: 1.1;
+      color: var(--pheno);
+    }
+
+    .stat span {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: calc(var(--radius) + 2px);
+      box-shadow: var(--shadow);
+      padding: 1.5rem 1.35rem;
+      margin-bottom: 1.35rem;
+    }
+
+    h2 {
+      font-size: 1.25rem;
+      margin: 0 0 0.35rem;
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+    }
+
+    h2 .badge {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      background: var(--ink);
+      color: #fff;
+    }
+
+    .section-note {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin: 0 0 1.1rem;
+    }
+
+    .flow {
+      display: flex;
+      align-items: stretch;
+      gap: 0.65rem;
+      margin: 1rem 0 1.35rem;
+      flex-wrap: wrap;
+    }
+
+    .flow-step {
+      flex: 1 1 12rem;
+      border-radius: var(--radius);
+      padding: 0.9rem 1rem;
+      position: relative;
+    }
+
+    .flow-step.pheno {
+      background: linear-gradient(135deg, #7c3aed, #6d28d9);
+      color: #fff;
+    }
+
+    .flow-step.ref {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #fff;
+    }
+
+    .flow-step strong { display: block; font-size: 1.05rem; }
+    .flow-step small { opacity: 0.9; }
+
+    .arrow {
+      align-self: center;
+      color: var(--muted);
+      font-size: 1.4rem;
+      flex: 0 0 auto;
+    }
+
+    .bucket-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+      gap: 0.75rem;
+    }
+
+    .bucket {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--pheno);
+      border-radius: 12px;
+      padding: 0.85rem 0.95rem;
+      background: #fcfbff;
+    }
+
+    .bucket .num {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.75rem;
+      color: var(--pheno);
+      font-weight: 700;
+    }
+
+    .bucket .title {
+      font-weight: 700;
+      margin: 0.15rem 0 0.35rem;
+      font-size: 0.98rem;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .tag {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 6px;
+      background: var(--pheno-soft);
+      color: #5b21b6;
+    }
+
+    .matrix-wrap { overflow-x: auto; }
+
+    table.matrix {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 0.88rem;
+      min-width: 34rem;
+    }
+
+    .matrix th, .matrix td {
+      border: 1px solid var(--line);
+      padding: 0.55rem 0.6rem;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    .matrix th {
+      background: #f1f5f9;
+      font-weight: 600;
+      font-size: 0.8rem;
+    }
+
+    .matrix .corner {
+      text-align: left;
+      background: #fff;
+    }
+
+    .cell {
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 0.35rem 0.25rem;
+      display: inline-block;
+      min-width: 3.1rem;
+    }
+
+    .cell.refpp { background: #d1fae5; color: #065f46; }
+    .cell.refp  { background: #fef3c7; color: #92400e; }
+    .cell.refm  { background: #f1f5f9; color: #475569; }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 0.85rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+    .kw-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 0.5rem;
+    }
+
+    .kw {
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      color: #9a3412;
+      padding: 0.25rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+      gap: 0.65rem;
+    }
+
+    .filter {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+      font-size: 0.88rem;
+    }
+
+    .filter strong {
+      display: block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.82rem;
+      margin-bottom: 0.2rem;
+    }
+
+    .cmd {
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.82rem;
+      overflow-x: auto;
+      white-space: pre;
+      margin-top: 0.75rem;
+    }
+
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.88rem;
+      margin-top: 1.5rem;
+    }
+
+    footer a { color: var(--bloom); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="eyebrow">Phenotypic stocks · priority config</div>
+      <h1>Boss-Priority Stock Split</h1>
+      <p class="lede">
+        <code>data/config/stock_split_config_boss_priority_example.json</code>
+        routes each reagent into one of <strong>18 priority-ordered sheets</strong>:
+        six phenotype buckets first, then a Bloomington RNAi Ref matrix for everything else.
+      </p>
+      <div class="stats">
+        <div class="stat"><strong>18</strong><span>output sheets</span></div>
+        <div class="stat"><strong>2</strong><span>priority tiers</span></div>
+        <div class="stat"><strong>6</strong><span>phenotype buckets</span></div>
+        <div class="stat"><strong>12</strong><span>Ref-tier cells</span></div>
+      </div>
+    </header>
+
+    <section>
+      <h2><span class="badge">Rule</span> First match wins</h2>
+      <p class="section-note">
+        Combinations are evaluated top to bottom. Each
+        <code>(stock_id, collection)</code> lands in only the first sheet it satisfies.
+      </p>
+      <div class="flow">
+        <div class="flow-step pheno">
+          <strong>Tier 1 · Phenotype buckets</strong>
+          <small>Sheets 1–6 · any curated FlyBase phenotype</small>
+        </div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="flow-step ref">
+          <strong>Tier 2 · Bloomington Ref matrix</strong>
+          <small>Sheets 7–18 · remaining Bloomington RNAi reagents</small>
+        </div>
+      </div>
+      <div class="kw-row">
+        <span class="kw">sleep</span>
+        <span class="kw">circadian</span>
+        <span class="kw">rhythm</span>
+        <span class="kw">locomotor</span>
+      </div>
+      <p class="section-note" style="margin-top:0.75rem;margin-bottom:0;">
+        Keywords drive <code>Ref++</code> / <code>Ref+</code> / <code>Ref-</code> and embedding targets.
+        Embeddings are <strong>enabled</strong>; validation is <strong>off</strong>.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="badge">1–6</span> Phenotype-priority buckets</h2>
+      <p class="section-note">All require <code>Phenotype</code> (<code>PHENOTYPE_RELEVANCE_SCORE ≠ 0</code>).</p>
+      <div class="bucket-grid">
+        <div class="bucket">
+          <div class="num">Sheet 1</div>
+          <div class="title">Bloomington · RNAi reagent</div>
+          <div class="tags"><span class="tag">Bloomington</span><span class="tag">RNAi_reagent</span><span class="tag">Phenotype</span></div>
+        </div>
+        <div class="bucket">
+          <div class="num">Sheet 2</div>
+          <div class="title">Vienna · RNAi reagent</div>
+          <div class="tags"><span class="tag">Vienna</span><span class="tag">RNAi_reagent</span><span class="tag">Phenotype</span></div>
+        </div>
+        <div class="bucket">
+          <div class="num">Sheet 3</div>
+          <div class="title">Bloomington · Allele / insertion</div>
+          <div class="tags"><span class="tag">Bloomington</span><span class="tag">AlleleOrInsertion</span><span class="tag">Phenotype</span></div>
+        </div>
+        <div class="bucket">
+          <div class="num">Sheet 4</div>
+          <div class="title">Stock Center · Allele / insertion</div>
+          <div class="tags"><span class="tag">Stock Center</span><span class="tag">AlleleOrInsertion</span><span class="tag">Phenotype</span></div>
+        </div>
+        <div class="bucket">
+          <div class="num">Sheet 5</div>
+          <div class="title">Non Stock Center · RNAi reagent</div>
+          <div class="tags"><span class="tag">Non Stock Center</span><span class="tag">RNAi_reagent</span><span class="tag">Phenotype</span></div>
+        </div>
+        <div class="bucket">
+          <div class="num">Sheet 6</div>
+          <div class="title">Non Stock Center · Allele / insertion</div>
+          <div class="tags"><span class="tag">Non Stock Center</span><span class="tag">AlleleOrInsertion</span><span class="tag">Phenotype</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="badge">7–18</span> Bloomington RNAi Ref matrix</h2>
+      <p class="section-note">
+        Base filters: <code>Bloomington</code> + <code>RNAi_reagent</code> + <code>No sgRNA</code>.
+        Stocks already placed in sheets 1–6 are excluded.
+      </p>
+      <div class="matrix-wrap">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th class="corner">Insertion × Balancer</th>
+              <th colspan="3">No balancers</th>
+              <th colspan="3">Has balancers</th>
+            </tr>
+            <tr>
+              <th class="corner"></th>
+              <th>Ref++</th><th>Ref+</th><th>Ref−</th>
+              <th>Ref++</th><th>Ref+</th><th>Ref−</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th class="corner">Single insertion</th>
+              <td><span class="cell refpp">7</span></td>
+              <td><span class="cell refp">9</span></td>
+              <td><span class="cell refm">11</span></td>
+              <td><span class="cell refpp">8</span></td>
+              <td><span class="cell refp">10</span></td>
+              <td><span class="cell refm">12</span></td>
+            </tr>
+            <tr>
+              <th class="corner">Multiple insertions</th>
+              <td><span class="cell refpp">13</span></td>
+              <td><span class="cell refp">15</span></td>
+              <td><span class="cell refm">17</span></td>
+              <td><span class="cell refpp">14</span></td>
+              <td><span class="cell refp">16</span></td>
+              <td><span class="cell refm">18</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="legend">
+        <span><span class="cell refpp">Ref++</span> keyword in title/abstract</span>
+        <span><span class="cell refp">Ref+</span> papers, no keyword hit</span>
+        <span><span class="cell refm">Ref−</span> no papers</span>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="badge">Filters</span> Key predicates</h2>
+      <div class="filters">
+        <div class="filter"><strong>RNAi_reagent</strong>FlyBase <code>transgenic_product_class_terms</code> contains RNAi_reagent.</div>
+        <div class="filter"><strong>AlleleOrInsertion</strong>Boss non-UAS shorthand: broad <code>RNAi</code> proxy is false.</div>
+        <div class="filter"><strong>Phenotype</strong>Any curated FlyBase phenotype (<code>PHENOTYPE_RELEVANCE_SCORE ≠ 0</code>).</div>
+        <div class="filter"><strong>Stock Center</strong>Orderable FBst-backed row (<code>custom_stock</code> false).</div>
+        <div class="filter"><strong>Non Stock Center</strong>Custom phenotype reagent without FBst record.</div>
+        <div class="filter"><strong>Ref++ / Ref+ / Ref−</strong>Publication evidence from <code>ALLELE_PAPER_RELEVANCE_SCORE</code>.</div>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="badge">Run</span> Workflow</h2>
+      <p class="section-note">Always refactor the aggregated workbook layout after <code>run</code>.</p>
+      <div class="cmd">python -m fl_ai_reagent_stocker run ./gene_lists \
+  --config data/config/stock_split_config_boss_priority_example.json
+
+python scripts/refactor_aggregated_workbook_layout.py \
+  ./gene_lists/Per\ Gene\ Set\ Runs/&lt;gene_set&gt;/Stocks/&lt;gene_set&gt;_aggregated.xlsx</div>
+    </section>
+
+    <footer>
+      Config JSON ·
+      <a href="stock_split_config_boss_priority_example.md">Markdown reference</a> ·
+      <a href="pipeline_usage.md#finding-phenotypic-stocks">Pipeline guide</a>
+    </footer>
+  </div>
+</body>
+</html>

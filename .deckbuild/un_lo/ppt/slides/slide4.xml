@@ -1,0 +1,2432 @@
+<?xml version="1.0" encoding="utf-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" xmlns:p15="http://schemas.microsoft.com/office/powerpoint/2012/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <p:cSld>
+    <p:bg>
+      <p:bgPr>
+        <a:solidFill>
+          <a:srgbClr val="F4F6F8"/>
+        </a:solidFill>
+      </p:bgPr>
+    </p:bg>
+    <p:spTree>
+      <p:nvGrpSpPr>
+                
+        <p:cNvPr id="1" name=""/>
+                
+        <p:cNvGrpSpPr/>
+                
+        <p:nvPr/>
+              
+      </p:nvGrpSpPr>
+            
+      <p:grpSpPr>
+                
+        <a:xfrm>
+                    
+          <a:off x="0" y="0"/>
+                    
+          <a:ext cx="0" cy="0"/>
+                    
+          <a:chOff x="0" y="0"/>
+                    
+          <a:chExt cx="0" cy="0"/>
+                  
+        </a:xfrm>
+              
+      </p:grpSpPr>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="137" name="Rectangle 1"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="0" y="0"/>
+            <a:ext cx="12191400" cy="1078560"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="15233B"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="138" name="Rectangle 2"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="0" y="1078920"/>
+            <a:ext cx="12191400" cy="54360"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="E0A13A"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="9720" rIns="90000" bIns="9720" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="139" name="TextBox 3"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="502920" y="164520"/>
+            <a:ext cx="10972440" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1100" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="8FCFCD"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>OUTPUT</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1100" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="140" name="TextBox 4"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="502920" y="402480"/>
+            <a:ext cx="11155320" cy="566640"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="2500" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="FFFFFF"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Georgia"/>
+              </a:rPr>
+              <a:t>Anatomy of every generated workbook</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="2500" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="141" name="Rectangle 5"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="502920" y="1371600"/>
+            <a:ext cx="5211720" cy="4571640"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="FFFFFF"/>
+          </a:solidFill>
+          <a:ln>
+            <a:solidFill>
+              <a:srgbClr val="E2E8F0"/>
+            </a:solidFill>
+            <a:round/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="142" name="TextBox 6"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="713160" y="1517760"/>
+            <a:ext cx="4754520" cy="365400"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1400" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="15233B"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>What each workbook contains</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1400" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="143" name="Rectangle 7"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="713160" y="2057400"/>
+            <a:ext cx="91080" cy="566640"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="0E7C7B"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="144" name="TextBox 8"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="896040" y="2011680"/>
+            <a:ext cx="4663080" cy="310680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1250" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Sheet 1 – 6</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1250" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="145" name="TextBox 9"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="896040" y="2304360"/>
+            <a:ext cx="4663080" cy="310680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1000" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>One per priority bucket (color-coded above)</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1000" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="146" name="Rectangle 10"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="713160" y="2807280"/>
+            <a:ext cx="91080" cy="566640"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="0E7C7B"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="147" name="TextBox 11"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="896040" y="2761560"/>
+            <a:ext cx="4663080" cy="310680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1250" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>References</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1250" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="148" name="TextBox 12"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="896040" y="3054240"/>
+            <a:ext cx="4663080" cy="310680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1000" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Supporting publications per stock / allele</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1000" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="149" name="Rectangle 13"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="713160" y="3557160"/>
+            <a:ext cx="91080" cy="566640"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="0E7C7B"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="150" name="TextBox 14"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="896040" y="3511440"/>
+            <a:ext cx="4663080" cy="310680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1250" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>All Phenotypic Stocks</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1250" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="151" name="TextBox 15"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="896040" y="3803760"/>
+            <a:ext cx="4663080" cy="310680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1000" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Full union of phenotype-backed stocks</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1000" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="152" name="Rectangle 16"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="713160" y="4306680"/>
+            <a:ext cx="91080" cy="566640"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="0E7C7B"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="153" name="TextBox 17"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="896040" y="4260960"/>
+            <a:ext cx="4663080" cy="310680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1250" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Contents</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1250" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="154" name="TextBox 18"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="896040" y="4553640"/>
+            <a:ext cx="4663080" cy="310680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1000" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Prioritization rules + per-sheet count breakdown</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1000" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="155" name="TextBox 19"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="713160" y="5212080"/>
+            <a:ext cx="4800240" cy="639720"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1050" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Priority rule: a stock is placed in the first bucket it qualifies for, so the six tables never double-count a stock.</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1050" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="156" name="Rectangle 20"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="5897880" y="1371600"/>
+            <a:ext cx="5806080" cy="4571640"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="FFFFFF"/>
+          </a:solidFill>
+          <a:ln>
+            <a:solidFill>
+              <a:srgbClr val="E2E8F0"/>
+            </a:solidFill>
+            <a:round/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="157" name="TextBox 21"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6108120" y="1517760"/>
+            <a:ext cx="5394600" cy="365400"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1400" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="15233B"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Key columns (approx. 59 total), grouped</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1400" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="158" name="Oval 22"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6108120" y="2030040"/>
+            <a:ext cx="145800" cy="145800"/>
+          </a:xfrm>
+          <a:prstGeom prst="ellipse">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="0E7C7B"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="159" name="TextBox 23"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="2011680"/>
+            <a:ext cx="5120280" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1200" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Identity</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="160" name="TextBox 24"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="2249280"/>
+            <a:ext cx="5211720" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>FBst, stock_number, collection, genotype</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="161" name="Oval 25"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6108120" y="2688480"/>
+            <a:ext cx="145800" cy="145800"/>
+          </a:xfrm>
+          <a:prstGeom prst="ellipse">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="1C6FB0"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="162" name="TextBox 26"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="2670120"/>
+            <a:ext cx="5120280" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1200" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Reagent type</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="163" name="TextBox 27"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="2907720"/>
+            <a:ext cx="5211720" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>RNAi, UAS, GAL4, mutant, sgRNA, custom_stock</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="164" name="Oval 28"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6108120" y="3346560"/>
+            <a:ext cx="145800" cy="145800"/>
+          </a:xfrm>
+          <a:prstGeom prst="ellipse">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="6B4FA0"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="165" name="TextBox 29"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="3328560"/>
+            <a:ext cx="5120280" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1200" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Gene / allele</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="166" name="TextBox 30"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="3566160"/>
+            <a:ext cx="5211720" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>gene_symbols, flybase_gene_ids, AlleleSymbol, class</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="167" name="Oval 31"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6108120" y="4005000"/>
+            <a:ext cx="145800" cy="145800"/>
+          </a:xfrm>
+          <a:prstGeom prst="ellipse">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="C2792B"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="168" name="TextBox 32"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="3986640"/>
+            <a:ext cx="5120280" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1200" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Construct parts</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="169" name="TextBox 33"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="4224600"/>
+            <a:ext cx="5211720" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>FBti / FBtp / FBal symbols + IDs, Balancers</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="170" name="Oval 34"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6108120" y="4663440"/>
+            <a:ext cx="145800" cy="145800"/>
+          </a:xfrm>
+          <a:prstGeom prst="ellipse">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="B2415A"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="171" name="TextBox 35"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="4645080"/>
+            <a:ext cx="5120280" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1200" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Literature</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="172" name="TextBox 36"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="4883040"/>
+            <a:ext cx="5211720" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>PMID, total_refs, sleep/circadian ref counts</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="173" name="Oval 37"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6108120" y="5321880"/>
+            <a:ext cx="145800" cy="145800"/>
+          </a:xfrm>
+          <a:prstGeom prst="ellipse">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="4F7A2E"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="174" name="TextBox 38"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="5303520"/>
+            <a:ext cx="5120280" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1200" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="1F2A37"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Phenotype + similarity</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="175" name="TextBox 39"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6355080" y="5541120"/>
+            <a:ext cx="5211720" cy="273960"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="667385"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>PHENOTYPE_RELEVANCE_SCORE, cosine similarities</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="950" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="176" name="Rectangle 40"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="0" y="6565320"/>
+            <a:ext cx="12191400" cy="292320"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:solidFill>
+            <a:srgbClr val="15233B"/>
+          </a:solidFill>
+          <a:ln>
+            <a:noFill/>
+          </a:ln>
+          <a:effectLst>
+            <a:outerShdw blurRad="39960" dir="5400000" dist="23040" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="1">
+            <a:schemeClr val="accent1"/>
+          </a:lnRef>
+          <a:fillRef idx="3">
+            <a:schemeClr val="accent1"/>
+          </a:fillRef>
+          <a:effectRef idx="2">
+            <a:schemeClr val="accent1"/>
+          </a:effectRef>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:p>
+            <a:endParaRPr lang="en-US" sz="1800" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="lt1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="177" name="TextBox 41"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="457200" y="6546960"/>
+            <a:ext cx="7314840" cy="292320"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="900" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="8FCFCD"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Allada Lab  ·  FlyBase Reagent Stocker</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="900" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="178" name="TextBox 42"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="10789920" y="6546960"/>
+            <a:ext cx="1096920" cy="292320"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:style>
+          <a:lnRef idx="0"/>
+          <a:fillRef idx="0"/>
+          <a:effectRef idx="0"/>
+          <a:fontRef idx="minor"/>
+        </p:style>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:spAutoFit/>
+          </a:bodyPr>
+          <a:p>
+            <a:pPr algn="r" defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="900" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="8FCFCD"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>4 / 16</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="900" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Arial"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+  <mc:AlternateContent>
+    <mc:Choice Requires="p14">
+      <p:transition spd="slow" p14:dur="2000"/>
+    </mc:Choice>
+    <mc:Fallback>
+      <p:transition spd="slow"/>
+    </mc:Fallback>
+  </mc:AlternateContent>
+</p:sld>

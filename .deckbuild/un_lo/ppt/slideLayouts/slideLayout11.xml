@@ -1,0 +1,805 @@
+<?xml version="1.0" encoding="utf-8"?>
+<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" xmlns:p15="http://schemas.microsoft.com/office/powerpoint/2012/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" type="blank" preserve="1">
+  <p:cSld name="Picture with Caption">
+    <p:bg>
+      <p:bgPr>
+        <a:solidFill>
+          <a:srgbClr val="FFFFFF"/>
+        </a:solidFill>
+      </p:bgPr>
+    </p:bg>
+    <p:spTree>
+      <p:nvGrpSpPr>
+                
+        <p:cNvPr id="1" name=""/>
+                
+        <p:cNvGrpSpPr/>
+                
+        <p:nvPr/>
+              
+      </p:nvGrpSpPr>
+            
+      <p:grpSpPr>
+                
+        <a:xfrm>
+                    
+          <a:off x="0" y="0"/>
+                    
+          <a:ext cx="0" cy="0"/>
+                    
+          <a:chOff x="0" y="0"/>
+                    
+          <a:chExt cx="0" cy="0"/>
+                  
+        </a:xfrm>
+              
+      </p:grpSpPr>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="55" name="PlaceHolder 1"/>
+          <p:cNvSpPr>
+            <a:spLocks noGrp="1"/>
+          </p:cNvSpPr>
+          <p:nvPr>
+            <p:ph type="title"/>
+          </p:nvPr>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="1792440" y="4800600"/>
+            <a:ext cx="5486040" cy="566280"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="b">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:lstStyle>
+            <a:lvl1pPr indent="0" algn="l" defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+              <a:buNone/>
+              <a:defRPr lang="en-US" sz="2000" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl1pPr>
+          </a:lstStyle>
+          <a:p>
+            <a:pPr indent="0" algn="l" defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+              <a:buNone/>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="2000" b="1" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Click to edit Master title style</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="2000" b="1" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="56" name="PlaceHolder 2"/>
+          <p:cNvSpPr>
+            <a:spLocks noGrp="1"/>
+          </p:cNvSpPr>
+          <p:nvPr>
+            <p:ph type="body"/>
+          </p:nvPr>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="1792440" y="612720"/>
+            <a:ext cx="5486040" cy="4114440"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr lIns="90000" tIns="45000" rIns="90000" bIns="45000" anchor="t">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:lstStyle>
+            <a:lvl1pPr algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="281"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buFont typeface="Arial"/>
+              <a:buChar char="•"/>
+              <a:tabLst>
+                <a:tab pos="0" algn="l"/>
+              </a:tabLst>
+              <a:defRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl1pPr>
+            <a:lvl2pPr lvl="1" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="561"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="75000"/>
+              <a:buFont typeface="Symbol" charset="2"/>
+              <a:buChar char=""/>
+              <a:defRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl2pPr>
+            <a:lvl3pPr lvl="2" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="479"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="45000"/>
+              <a:buFont typeface="Wingdings" charset="2"/>
+              <a:buChar char=""/>
+              <a:defRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl3pPr>
+            <a:lvl4pPr lvl="3" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="400"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="75000"/>
+              <a:buFont typeface="Symbol" charset="2"/>
+              <a:buChar char=""/>
+              <a:defRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl4pPr>
+            <a:lvl5pPr lvl="4" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="400"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="45000"/>
+              <a:buFont typeface="Wingdings" charset="2"/>
+              <a:buChar char=""/>
+              <a:defRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl5pPr>
+            <a:lvl6pPr lvl="5" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="283"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="45000"/>
+              <a:buFont typeface="Wingdings" charset="2"/>
+              <a:buChar char=""/>
+              <a:defRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl6pPr>
+            <a:lvl7pPr lvl="6" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="283"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="45000"/>
+              <a:buFont typeface="Wingdings" charset="2"/>
+              <a:buChar char=""/>
+              <a:defRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl7pPr>
+          </a:lstStyle>
+          <a:p>
+            <a:pPr algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="281"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buFont typeface="Arial"/>
+              <a:buChar char="•"/>
+              <a:tabLst>
+                <a:tab pos="0" algn="l"/>
+              </a:tabLst>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Click to edit the outline text format</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+          <a:p>
+            <a:pPr marL="457200" lvl="1" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="561"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="75000"/>
+              <a:buFont typeface="Symbol" charset="2"/>
+              <a:buChar char=""/>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Second Outline Level</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+          <a:p>
+            <a:pPr marL="914400" lvl="2" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="479"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="45000"/>
+              <a:buFont typeface="Wingdings" charset="2"/>
+              <a:buChar char=""/>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Third Outline Level</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+          <a:p>
+            <a:pPr marL="1371600" lvl="3" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="400"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="75000"/>
+              <a:buFont typeface="Symbol" charset="2"/>
+              <a:buChar char=""/>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Fourth Outline Level</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+          <a:p>
+            <a:pPr marL="1828800" lvl="4" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="400"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="45000"/>
+              <a:buFont typeface="Wingdings" charset="2"/>
+              <a:buChar char=""/>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Fifth Outline Level</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+          <a:p>
+            <a:pPr marL="2286000" lvl="5" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="283"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="45000"/>
+              <a:buFont typeface="Wingdings" charset="2"/>
+              <a:buChar char=""/>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Sixth Outline Level</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+          <a:p>
+            <a:pPr marL="2743200" lvl="6" algn="l" defTabSz="457200">
+              <a:spcBef>
+                <a:spcPts val="283"/>
+              </a:spcBef>
+              <a:buClr>
+                <a:srgbClr val="000000"/>
+              </a:buClr>
+              <a:buSzPct val="45000"/>
+              <a:buFont typeface="Wingdings" charset="2"/>
+              <a:buChar char=""/>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Seventh Outline Level</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="3200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="57" name="PlaceHolder 3"/>
+          <p:cNvSpPr>
+            <a:spLocks noGrp="1"/>
+          </p:cNvSpPr>
+          <p:nvPr>
+            <p:ph type="body"/>
+          </p:nvPr>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="1792440" y="5367240"/>
+            <a:ext cx="5486040" cy="804600"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="t">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:lstStyle>
+            <a:lvl1pPr indent="0" algn="l" defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+              <a:spcBef>
+                <a:spcPts val="281"/>
+              </a:spcBef>
+              <a:buNone/>
+              <a:tabLst>
+                <a:tab pos="0" algn="l"/>
+              </a:tabLst>
+              <a:defRPr lang="en-US" sz="1400" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl1pPr>
+          </a:lstStyle>
+          <a:p>
+            <a:pPr indent="0" algn="l" defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+              <a:spcBef>
+                <a:spcPts val="281"/>
+              </a:spcBef>
+              <a:buNone/>
+              <a:tabLst>
+                <a:tab pos="0" algn="l"/>
+              </a:tabLst>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1400" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>Click to edit Master text styles</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1400" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:schemeClr val="dk1"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Calibri"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="58" name="PlaceHolder 4"/>
+          <p:cNvSpPr>
+            <a:spLocks noGrp="1"/>
+          </p:cNvSpPr>
+          <p:nvPr>
+            <p:ph type="dt" idx="31"/>
+          </p:nvPr>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="457200" y="6356520"/>
+            <a:ext cx="2133360" cy="364680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:lstStyle>
+            <a:lvl1pPr indent="0" algn="l" defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+              <a:buNone/>
+              <a:defRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1">
+                    <a:tint val="75000"/>
+                  </a:schemeClr>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl1pPr>
+          </a:lstStyle>
+          <a:p>
+            <a:pPr indent="0" algn="l" defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+              <a:buNone/>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1">
+                    <a:tint val="75000"/>
+                  </a:schemeClr>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>&lt;date/time&gt;</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Times New Roman"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="59" name="PlaceHolder 5"/>
+          <p:cNvSpPr>
+            <a:spLocks noGrp="1"/>
+          </p:cNvSpPr>
+          <p:nvPr>
+            <p:ph type="ftr" idx="32"/>
+          </p:nvPr>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="3124080" y="6356520"/>
+            <a:ext cx="2895120" cy="364680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:lstStyle>
+            <a:lvl1pPr indent="0" algn="ctr">
+              <a:buNone/>
+              <a:defRPr lang="en-US" sz="1400" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="000000"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Times New Roman"/>
+              </a:defRPr>
+            </a:lvl1pPr>
+          </a:lstStyle>
+          <a:p>
+            <a:pPr indent="0" algn="ctr">
+              <a:buNone/>
+            </a:pPr>
+            <a:r>
+              <a:rPr lang="en-US" sz="1400" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:srgbClr val="000000"/>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Times New Roman"/>
+              </a:rPr>
+              <a:t>&lt;footer&gt;</a:t>
+            </a:r>
+            <a:endParaRPr lang="en-US" sz="1400" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Times New Roman"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="60" name="PlaceHolder 6"/>
+          <p:cNvSpPr>
+            <a:spLocks noGrp="1"/>
+          </p:cNvSpPr>
+          <p:nvPr>
+            <p:ph type="sldNum" idx="33"/>
+          </p:nvPr>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="6553080" y="6356520"/>
+            <a:ext cx="2133360" cy="364680"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect">
+            <a:avLst/>
+          </a:prstGeom>
+          <a:noFill/>
+          <a:ln w="0">
+            <a:noFill/>
+          </a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="ctr">
+            <a:noAutofit/>
+          </a:bodyPr>
+          <a:lstStyle>
+            <a:lvl1pPr indent="0" algn="r" defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+              <a:buNone/>
+              <a:defRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1">
+                    <a:tint val="75000"/>
+                  </a:schemeClr>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:defRPr>
+            </a:lvl1pPr>
+          </a:lstStyle>
+          <a:p>
+            <a:pPr indent="0" algn="r" defTabSz="457200">
+              <a:lnSpc>
+                <a:spcPct val="100000"/>
+              </a:lnSpc>
+              <a:buNone/>
+            </a:pPr>
+            <a:fld id="{57F0DE68-D863-46E1-9FC6-A8BF3CDF4F5F}" type="slidenum">
+              <a:rPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+                <a:solidFill>
+                  <a:schemeClr val="dk1">
+                    <a:tint val="75000"/>
+                  </a:schemeClr>
+                </a:solidFill>
+                <a:effectLst/>
+                <a:uFillTx/>
+                <a:latin typeface="Calibri"/>
+              </a:rPr>
+              <a:t>&lt;number&gt;</a:t>
+            </a:fld>
+            <a:endParaRPr lang="en-US" sz="1200" b="0" u="none" strike="noStrike">
+              <a:solidFill>
+                <a:srgbClr val="000000"/>
+              </a:solidFill>
+              <a:effectLst/>
+              <a:uFillTx/>
+              <a:latin typeface="Times New Roman"/>
+            </a:endParaRPr>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sldLayout>

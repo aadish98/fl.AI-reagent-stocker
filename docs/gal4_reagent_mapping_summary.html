@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GAL4 Reagent Mapping</title>
+  <style>
+    :root {
+      --ink: #24313d;
+      --muted: #617080;
+      --line: #cfd8e3;
+      --blue: #2f6690;
+      --green: #3a7d44;
+      --gold: #a66f00;
+      --bg: #f7f9fb;
+      --card: #ffffff;
+      --active: #e9f3fb;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.35;
+    }
+    main {
+      max-width: 1020px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    h1 {
+      font-size: 26px;
+      margin: 0 0 6px;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      margin: 0 0 18px;
+      max-width: 780px;
+    }
+    .pipeline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+    .pill {
+      background: #eef4f8;
+      border: 1px solid #d5e0ea;
+      border-radius: 999px;
+      color: #31495c;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 10px;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      gap: 12px;
+      align-items: stretch;
+      margin: 16px 0 12px;
+    }
+    .step {
+      appearance: none;
+      position: relative;
+      min-height: 138px;
+      width: 100%;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--blue);
+      border-radius: 8px;
+      color: inherit;
+      cursor: pointer;
+      font: inherit;
+      padding: 14px 12px;
+      text-align: left;
+      box-shadow: 0 1px 2px rgba(20, 31, 43, 0.05);
+      transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+    }
+    .step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 54px;
+      right: -17px;
+      width: 20px;
+      height: 20px;
+      border-top: 3px solid var(--line);
+      border-right: 3px solid var(--line);
+      transform: rotate(45deg);
+      background: transparent;
+      z-index: 2;
+    }
+    .step:nth-child(2) {
+      border-top-color: var(--gold);
+    }
+    .step:nth-child(3),
+    .step:nth-child(4) {
+      border-top-color: var(--green);
+    }
+    .step:hover,
+    .step:focus-visible {
+      box-shadow: 0 7px 18px rgba(36, 49, 61, 0.12);
+      outline: none;
+      transform: translateY(-2px);
+    }
+    .step.is-active {
+      background: var(--active);
+      border-color: #79a8c8;
+      box-shadow: 0 8px 20px rgba(47, 102, 144, 0.18);
+    }
+    .number {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .step h2,
+    .panel h2,
+    .detail h2 {
+      margin: 0;
+    }
+    .step h2 {
+      font-size: 15px;
+      margin-bottom: 6px;
+    }
+    p {
+      font-size: 13px;
+      margin: 0;
+    }
+    .detail {
+      display: grid;
+      grid-template-columns: 180px 1fr 150px;
+      gap: 14px;
+      align-items: center;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 0 0 16px;
+      padding: 14px 16px;
+      min-height: 92px;
+    }
+    .detail h2 {
+      color: var(--blue);
+      font-size: 16px;
+      margin-bottom: 3px;
+    }
+    .detail .detail-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    .detail .mini-output {
+      border-left: 3px solid var(--green);
+      color: #2f5133;
+      font-size: 13px;
+      font-weight: 700;
+      padding-left: 10px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .panel h2 {
+      font-size: 16px;
+      margin-bottom: 10px;
+    }
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .tag {
+      appearance: none;
+      border: 1px solid #b9c8d8;
+      border-radius: 999px;
+      color: #24313d;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      padding: 6px 10px;
+      background: #f8fbfd;
+      white-space: nowrap;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+    }
+    .tag:hover,
+    .tag:focus-visible,
+    .tag.is-active {
+      background: #e6f1e8;
+      border-color: #7aae82;
+      color: #244e2a;
+      outline: none;
+    }
+    .match-card {
+      margin-top: 12px;
+      border: 1px solid #dce6ee;
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 12px;
+    }
+    .match-card .example {
+      color: var(--gold);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+    .outputs {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .output {
+      display: grid;
+      grid-template-columns: 92px 1fr;
+      gap: 10px;
+      align-items: start;
+      border-top: 1px solid #e3e9f0;
+      padding-top: 8px;
+      font-size: 13px;
+    }
+    .label {
+      color: var(--blue);
+      font-weight: 700;
+    }
+    .note {
+      margin-top: 14px;
+      border-left: 4px solid var(--gold);
+      background: #fff8e9;
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+    strong {
+      font-weight: 700;
+    }
+    @media (max-width: 860px) {
+      main {
+        padding: 20px;
+      }
+      .flow,
+      .grid,
+      .detail {
+        grid-template-columns: 1fr;
+      }
+      .step:not(:last-child)::after {
+        display: none;
+      }
+      .step {
+        min-height: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>How the GAL4 Workbook Finds Reagents</h1>
+    <p class="subtitle">
+      The script takes GAL4 symbols from a CSV and turns them into stock-center
+      reagent rows, then adds phenotype and publication evidence when available.
+    </p>
+
+    <div class="pipeline" aria-label="Core data path">
+      <span class="pill">CSV symbols</span>
+      <span class="pill">FlyBase components</span>
+      <span class="pill">Orderable stocks</span>
+      <span class="pill">Phenotype records</span>
+      <span class="pill">Workbook sheets</span>
+    </div>
+
+    <section class="flow" aria-label="GAL4 reagent mapping workflow">
+      <button class="step is-active" type="button" data-step="input" aria-pressed="true">
+        <span class="number">1</span>
+        <h2>Input symbols</h2>
+        <p>Reads the <strong>GAL4 symbol</strong> column and removes blank or repeated names.</p>
+      </button>
+      <button class="step" type="button" data-step="match" aria-pressed="false">
+        <span class="number">2</span>
+        <h2>Name matching</h2>
+        <p>Searches naming variants and FlyBase construct aliases against stock components.</p>
+      </button>
+      <button class="step" type="button" data-step="stock" aria-pressed="false">
+        <span class="number">3</span>
+        <h2>Stock resolution</h2>
+        <p>Links matching components to orderable stocks, stock numbers, collections, and genotypes.</p>
+      </button>
+      <button class="step" type="button" data-step="evidence" aria-pressed="false">
+        <span class="number">4</span>
+        <h2>Evidence lookup</h2>
+        <p>Finds phenotype records that mention the matched FlyBase component identifiers.</p>
+      </button>
+      <button class="step" type="button" data-step="output" aria-pressed="false">
+        <span class="number">5</span>
+        <h2>Workbook output</h2>
+        <p>Groups unique reagents by stock collection and summarizes references separately.</p>
+      </button>
+    </section>
+
+    <section class="detail" aria-live="polite">
+      <div>
+        <div class="detail-label">Selected step</div>
+        <h2 id="detail-title">Input symbols</h2>
+      </div>
+      <p id="detail-copy">
+        A CSV supplies the starting GAL4 names. Empty cells and duplicate symbols are skipped before matching begins.
+      </p>
+      <div class="mini-output" id="detail-output">Clean symbol list</div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>What counts as a GAL4 match?</h2>
+        <p>
+          The script recognizes exact GAL4 labels and common alternate formats,
+          then follows FlyBase allele → construct → insertion links so the same
+          driver can resolve when publication and stock-center names differ.
+        </p>
+        <div class="tags" aria-label="Matched GAL4 naming patterns">
+          <button class="tag is-active" type="button" data-match="gal4">GAL4</button>
+          <button class="tag" type="button" data-match="gawb">GawB</button>
+          <button class="tag" type="button" data-match="construct">P{...GAL4...}</button>
+          <button class="tag" type="button" data-match="gmr">GMR / R-line aliases</button>
+          <button class="tag" type="button" data-match="short">driver shorthand</button>
+          <button class="tag" type="button" data-match="split">split-GAL4 when requested</button>
+        </div>
+        <div class="match-card" aria-live="polite">
+          <div class="example" id="match-example">Example</div>
+          <p id="match-copy">
+            Direct GAL4 text is treated as a driver signal and compared with stock-component names.
+          </p>
+        </div>
+        <div class="note">
+          If an exact published construct has no orderable stock, the script may
+          recommend the simplest current BDSC driver from the same promoter
+          family. These rows are explicitly labeled as candidate substitutions,
+          never exact matches. Every input remains visible on the Coverage sheet.
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>What appears in the workbook?</h2>
+        <div class="outputs">
+          <div class="output">
+            <div class="label">Reagent</div>
+            <div>Input GAL4 symbol, resolved driver genotype, stock genotype, stock center, stock number, and FBst ID.</div>
+          </div>
+          <div class="output">
+            <div class="label">Evidence</div>
+            <div>Phenotypes as <strong>{PMID/PMCID, phenotype}</strong> pairs, plus qualifiers, phenotype-record genotypes, titles, authors, journals, and years.</div>
+          </div>
+          <div class="output">
+            <div class="label">References</div>
+            <div>One row per publication, listing the associated GAL4 symbols, stocks, collections, and phenotypes.</div>
+          </div>
+          <div class="output">
+            <div class="label">Coverage</div>
+            <div>One row per input symbol with exact/alias, candidate-substitution, or unresolved status so missing drivers cannot disappear silently.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const stepDetails = {
+      input: {
+        title: "Input symbols",
+        copy: "A CSV supplies the starting GAL4 names. Empty cells and duplicate symbols are skipped before matching begins.",
+        output: "Clean symbol list"
+      },
+      match: {
+        title: "Name matching",
+        copy: "Each symbol is expanded into search keys and authoritative FlyBase construct aliases so common GAL4, GawB, GMR, R-line, shorthand, and publication-specific names can point to the same driver.",
+        output: "Candidate driver components"
+      },
+      stock: {
+        title: "Stock resolution",
+        copy: "Matched components are connected to FlyBase stock IDs, stock-center numbers, collections, full stock genotypes, and the resolved driver genotype.",
+        output: "Orderable reagent rows"
+      },
+      evidence: {
+        title: "Evidence lookup",
+        copy: "The resolved component identifiers are used to find FlyBase phenotype records and linked publication metadata.",
+        output: "Phenotype and reference evidence"
+      },
+      output: {
+        title: "Workbook output",
+        copy: "Rows are collapsed by unique stock, grouped by collection, and paired with a References sheet organized by publication.",
+        output: "Collection sheets plus References"
+      }
+    };
+
+    const matchDetails = {
+      gal4: "Direct GAL4 text is treated as a driver signal and compared with stock-component names.",
+      gawb: "GawB drivers are treated as GAL4 drivers, allowing classic lines such as P{GawB}elav[C155] to resolve.",
+      construct: "GAL4 text inside construct braces is extracted so stock names and FlyBase component names can still align.",
+      gmr: "GMR and R-line labels are normalized so related forms such as GMR23E10-GAL4 and R23E10 can match.",
+      short: "Common shorthand endings are expanded into likely GAL4 forms before searching stock components.",
+      split: "Split-GAL4 components are included when the input symbol itself indicates a split-GAL4 request."
+    };
+
+    document.querySelectorAll(".step").forEach((button) => {
+      button.addEventListener("click", () => {
+        const selected = button.dataset.step;
+        const detail = stepDetails[selected];
+        document.querySelectorAll(".step").forEach((step) => {
+          step.classList.toggle("is-active", step === button);
+          step.setAttribute("aria-pressed", step === button ? "true" : "false");
+        });
+        document.getElementById("detail-title").textContent = detail.title;
+        document.getElementById("detail-copy").textContent = detail.copy;
+        document.getElementById("detail-output").textContent = detail.output;
+      });
+    });
+
+    document.querySelectorAll(".tag").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".tag").forEach((tag) => {
+          tag.classList.toggle("is-active", tag === button);
+        });
+        document.getElementById("match-copy").textContent = matchDetails[button.dataset.match];
+      });
+    });
+  </script>
+</body>
+</html>

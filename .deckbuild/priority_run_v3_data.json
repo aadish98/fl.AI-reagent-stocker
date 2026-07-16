@@ -1,0 +1,548 @@
+{
+  "run": "priority_run_06-30-2026_v3",
+  "gene_sets": [
+    {
+      "short": "AD \u00b7 DIOPT Bellenguez/Lambert",
+      "title": "Alzheimer's DIOPT orthologs (n = 227)",
+      "kicker": "Gene set 1 \u00b7 GWAS orthologs",
+      "provenance": "AD GWAS genes \u2192 fly orthologs via DIOPT; Filter 2; Bellenguez/Lambert tables",
+      "schemaNote": "Human AD GWAS genes mapped to Drosophila orthologs (DIOPT) with ortholog confidence scores.",
+      "cols": [
+        [
+          "Human.Symbol",
+          "human AD GWAS gene"
+        ],
+        [
+          "ext_gene / primary_symbol",
+          "fly ortholog symbol"
+        ],
+        [
+          "flybase_gene_id",
+          "FBgn key for stock matching"
+        ],
+        [
+          "DIOPT scores / Rank",
+          "ortholog confidence"
+        ],
+        [
+          "Search.Term",
+          "DIOPT search context"
+        ]
+      ],
+      "foot": "Filename: AD_DIOPT Bellenguez Lambert - All tables filter 2_n=227genes.csv",
+      "gene_set": "AD_DIOPT Bellenguez Lambert - All tables filter 2_n=227genes",
+      "n_genes": 227,
+      "total": [
+        227,
+        737,
+        692,
+        488
+      ],
+      "buckets": [
+        [
+          "Bloomington >> RNAi_reagent >> Phenotype",
+          "82",
+          "82",
+          "56"
+        ],
+        [
+          "Vienna >> RNAi_reagent >> Phenotype",
+          "277",
+          "239",
+          "194"
+        ],
+        [
+          "Bloomington >> AlleleOrInsertion >> Phenotype",
+          "197",
+          "190",
+          "109"
+        ],
+        [
+          "Stock Center >> AlleleOrInsertion >> Phenotype",
+          "21",
+          "21",
+          "19"
+        ],
+        [
+          "Non Stock Center >> RNAi_reagent >> Phenotype",
+          "72",
+          "72",
+          "51"
+        ],
+        [
+          "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+          "88",
+          "88",
+          "59"
+        ]
+      ]
+    },
+    {
+      "short": "BPD \u00b7 GWAS DIOPT Filter 2",
+      "title": "BPD-GWAS DIOPT orthologs (n = 168)",
+      "kicker": "Gene set 2 \u00b7 GWAS orthologs",
+      "provenance": "Bipolar GWAS (Nature 2025 Table S31) \u2192 DIOPT fly orthologs, Filter 2",
+      "schemaNote": "Human bipolar-disorder GWAS genes mapped to fly orthologs via DIOPT with rank tiers.",
+      "cols": [
+        [
+          "Human_Symbol",
+          "human GWAS gene (Nature 2025 S31)"
+        ],
+        [
+          "ext_gene",
+          "fly ortholog symbol"
+        ],
+        [
+          "flybase_gene_id",
+          "FBgn key for stock matching"
+        ],
+        [
+          "DIOPT_Score / Weighted Score",
+          "ortholog confidence"
+        ],
+        [
+          "Rank",
+          "high / moderate / low"
+        ]
+      ],
+      "foot": "Filename: BPD_GWAS_nature2025TableS31_DIOPTOrthologs_Filter2_n=168genes.csv",
+      "gene_set": "BPD_GWAS_nature2025TableS31_DIOPTOrthologs_Filter2_n=168genes",
+      "n_genes": 168,
+      "total": [
+        168,
+        507,
+        468,
+        334
+      ],
+      "buckets": [
+        [
+          "Bloomington >> RNAi_reagent >> Phenotype",
+          "67",
+          "66",
+          "45"
+        ],
+        [
+          "Vienna >> RNAi_reagent >> Phenotype",
+          "190",
+          "167",
+          "134"
+        ],
+        [
+          "Bloomington >> AlleleOrInsertion >> Phenotype",
+          "153",
+          "138",
+          "82"
+        ],
+        [
+          "Stock Center >> AlleleOrInsertion >> Phenotype",
+          "9",
+          "9",
+          "9"
+        ],
+        [
+          "Non Stock Center >> RNAi_reagent >> Phenotype",
+          "36",
+          "36",
+          "24"
+        ],
+        [
+          "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+          "52",
+          "52",
+          "40"
+        ]
+      ]
+    },
+    {
+      "short": "GABA gene list",
+      "title": "GABA / vGAT gene list (n = 140)",
+      "kicker": "Gene set 3 \u00b7 Curated screen list",
+      "provenance": "Curated GABAergic gene list from bulk-seq vGAT screen hits",
+      "schemaNote": "Curated symbol list with FlyBase IDs and source-dataset tag.",
+      "cols": [
+        [
+          "Gene",
+          "submitted gene symbol"
+        ],
+        [
+          "primary_symbol",
+          "current FlyBase symbol"
+        ],
+        [
+          "flybase_gene_id",
+          "FBgn key for stock matching"
+        ],
+        [
+          "Data Set",
+          "source list (e.g. vGAT hits)"
+        ]
+      ],
+      "foot": "Filename: GABA gene list n=140genes.csv",
+      "gene_set": "GABA gene list n=140genes",
+      "n_genes": 140,
+      "total": [
+        140,
+        527,
+        498,
+        334
+      ],
+      "buckets": [
+        [
+          "Bloomington >> RNAi_reagent >> Phenotype",
+          "91",
+          "90",
+          "64"
+        ],
+        [
+          "Vienna >> RNAi_reagent >> Phenotype",
+          "180",
+          "161",
+          "120"
+        ],
+        [
+          "Bloomington >> AlleleOrInsertion >> Phenotype",
+          "153",
+          "140",
+          "76"
+        ],
+        [
+          "Stock Center >> AlleleOrInsertion >> Phenotype",
+          "18",
+          "22",
+          "16"
+        ],
+        [
+          "Non Stock Center >> RNAi_reagent >> Phenotype",
+          "16",
+          "16",
+          "14"
+        ],
+        [
+          "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+          "69",
+          "69",
+          "44"
+        ]
+      ]
+    },
+    {
+      "short": "Slumber \u00b7 Jordan VCM",
+      "title": "Jordan VCM candidates (n = 35)",
+      "kicker": "Gene set 4 \u00b7 Slumber curated",
+      "provenance": "Slumber project: Jordan VCM candidate genes (curated short list)",
+      "schemaNote": "Simple curated symbol-to-FBgn list for Slumber follow-up.",
+      "cols": [
+        [
+          "ext_gene",
+          "submitted gene symbol"
+        ],
+        [
+          "primary_symbol",
+          "current FlyBase symbol"
+        ],
+        [
+          "flybase_gene_id",
+          "FBgn key for stock matching"
+        ]
+      ],
+      "foot": "Filename: Slumber_Jordan_VCM_n=35genes.csv",
+      "gene_set": "Slumber_Jordan_VCM_n=35genes",
+      "n_genes": 35,
+      "total": [
+        35,
+        161,
+        149,
+        86
+      ],
+      "buckets": [
+        [
+          "Bloomington >> RNAi_reagent >> Phenotype",
+          "46",
+          "46",
+          "23"
+        ],
+        [
+          "Vienna >> RNAi_reagent >> Phenotype",
+          "52",
+          "47",
+          "31"
+        ],
+        [
+          "Bloomington >> AlleleOrInsertion >> Phenotype",
+          "55",
+          "48",
+          "26"
+        ],
+        [
+          "Stock Center >> AlleleOrInsertion >> Phenotype",
+          "0",
+          "0",
+          "0"
+        ],
+        [
+          "Non Stock Center >> RNAi_reagent >> Phenotype",
+          "1",
+          "1",
+          "1"
+        ],
+        [
+          "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+          "7",
+          "7",
+          "5"
+        ]
+      ]
+    },
+    {
+      "short": "Slumber \u00b7 neuropeptides",
+      "title": "Neuropeptides + transmitters (n = 33)",
+      "kicker": "Gene set 5 \u00b7 Slumber curated",
+      "provenance": "Slumber project: neuropeptide and neurotransmitter genes",
+      "schemaNote": "Curated neuropeptide / transmitter symbol-to-FBgn list.",
+      "cols": [
+        [
+          "ext_gene",
+          "submitted gene symbol"
+        ],
+        [
+          "primary_symbol",
+          "current FlyBase symbol"
+        ],
+        [
+          "flybase_gene_id",
+          "FBgn key for stock matching"
+        ]
+      ],
+      "foot": "Filename: Slumber_Neuropeps+transmitters_n=33genes.csv",
+      "gene_set": "Slumber_Neuropeps+transmitters_n=33genes",
+      "n_genes": 33,
+      "total": [
+        33,
+        138,
+        131,
+        84
+      ],
+      "buckets": [
+        [
+          "Bloomington >> RNAi_reagent >> Phenotype",
+          "36",
+          "36",
+          "21"
+        ],
+        [
+          "Vienna >> RNAi_reagent >> Phenotype",
+          "54",
+          "46",
+          "31"
+        ],
+        [
+          "Bloomington >> AlleleOrInsertion >> Phenotype",
+          "33",
+          "34",
+          "22"
+        ],
+        [
+          "Stock Center >> AlleleOrInsertion >> Phenotype",
+          "0",
+          "0",
+          "0"
+        ],
+        [
+          "Non Stock Center >> RNAi_reagent >> Phenotype",
+          "2",
+          "2",
+          "2"
+        ],
+        [
+          "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+          "13",
+          "13",
+          "8"
+        ]
+      ]
+    },
+    {
+      "short": "Slumber \u00b7 RNAi hits",
+      "title": "Slumber RNAi candidates (n = 16)",
+      "kicker": "Gene set 6 \u00b7 Slumber curated",
+      "provenance": "Slumber project: prioritized RNAi screen candidate genes",
+      "schemaNote": "Curated RNAi candidate symbol-to-FBgn list.",
+      "cols": [
+        [
+          "ext_gene",
+          "submitted gene symbol"
+        ],
+        [
+          "primary_symbol",
+          "current FlyBase symbol"
+        ],
+        [
+          "flybase_gene_id",
+          "FBgn key for stock matching"
+        ]
+      ],
+      "foot": "Filename: Slumber_RNAi_candidates_n=16genes.csv",
+      "gene_set": "Slumber_RNAi_candidates_n=16genes",
+      "n_genes": 16,
+      "total": [
+        16,
+        79,
+        66,
+        45
+      ],
+      "buckets": [
+        [
+          "Bloomington >> RNAi_reagent >> Phenotype",
+          "13",
+          "13",
+          "11"
+        ],
+        [
+          "Vienna >> RNAi_reagent >> Phenotype",
+          "22",
+          "19",
+          "14"
+        ],
+        [
+          "Bloomington >> AlleleOrInsertion >> Phenotype",
+          "39",
+          "29",
+          "16"
+        ],
+        [
+          "Stock Center >> AlleleOrInsertion >> Phenotype",
+          "1",
+          "1",
+          "1"
+        ],
+        [
+          "Non Stock Center >> RNAi_reagent >> Phenotype",
+          "1",
+          "1",
+          "1"
+        ],
+        [
+          "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+          "3",
+          "3",
+          "2"
+        ]
+      ]
+    },
+    {
+      "short": "Tx-Omics mechanistic (nsyb/elav)",
+      "title": "Mechanistic screen candidates (n = 19)",
+      "kicker": "Gene set 7 \u00b7 Tx-Omics",
+      "provenance": "Tx-Omics mechanistic candidates; nsyb/elav driver context (Rosensweig-Shah 2026)",
+      "schemaNote": "AI-annotated mechanistic screen list with Tx-Omics evidence and driver recommendations.",
+      "cols": [
+        [
+          "Gene / flybase_gene_id",
+          "fly gene + FBgn"
+        ],
+        [
+          "Mechanistic Category",
+          "proposed mechanism class"
+        ],
+        [
+          "Tx-Omics Evidence",
+          "Rosensweig-Shah 2026 support"
+        ],
+        [
+          "Recommended Drivers",
+          "e.g. nsyb, elav contexts"
+        ],
+        [
+          "fl.ai Category / Confidence",
+          "AI screen-priority call"
+        ]
+      ],
+      "foot": "Filename: Tx-Omics_Mechanistic_Screen_Candidates_nsyb_elav.csv",
+      "gene_set": "Tx-Omics_Mechanistic_Screen_Candidates_nsyb_elav",
+      "n_genes": 19,
+      "total": [
+        19,
+        60,
+        55,
+        40
+      ],
+      "buckets": [
+        [
+          "Bloomington >> RNAi_reagent >> Phenotype",
+          "8",
+          "8",
+          "7"
+        ],
+        [
+          "Vienna >> RNAi_reagent >> Phenotype",
+          "22",
+          "20",
+          "14"
+        ],
+        [
+          "Bloomington >> AlleleOrInsertion >> Phenotype",
+          "16",
+          "13",
+          "9"
+        ],
+        [
+          "Stock Center >> AlleleOrInsertion >> Phenotype",
+          "1",
+          "1",
+          "1"
+        ],
+        [
+          "Non Stock Center >> RNAi_reagent >> Phenotype",
+          "3",
+          "3",
+          "3"
+        ],
+        [
+          "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+          "10",
+          "10",
+          "6"
+        ]
+      ]
+    }
+  ],
+  "totals_by_combination": [
+    {
+      "combo_short": "Bloomington \u00b7 RNAi_reagent \u00b7 Phenotype",
+      "num_genes": 227,
+      "num_stocks": 343,
+      "num_alleles": 341
+    },
+    {
+      "combo_short": "Vienna \u00b7 RNAi_reagent \u00b7 Phenotype",
+      "num_genes": 538,
+      "num_stocks": 797,
+      "num_alleles": 699
+    },
+    {
+      "combo_short": "Bloomington \u00b7 Allele/Insertion \u00b7 Phenotype",
+      "num_genes": 340,
+      "num_stocks": 646,
+      "num_alleles": 592
+    },
+    {
+      "combo_short": "Stock Center \u00b7 Allele/Insertion \u00b7 Phenotype",
+      "num_genes": 46,
+      "num_stocks": 50,
+      "num_alleles": 54
+    },
+    {
+      "combo_short": "Non-Stock-Center \u00b7 RNAi_reagent \u00b7 Phenotype",
+      "num_genes": 96,
+      "num_stocks": 131,
+      "num_alleles": 131
+    },
+    {
+      "combo_short": "Non-Stock-Center \u00b7 Allele/Insertion \u00b7 Phenotype",
+      "num_genes": 164,
+      "num_stocks": 242,
+      "num_alleles": 242
+    }
+  ],
+  "grand_total_stocks": 2209
+}

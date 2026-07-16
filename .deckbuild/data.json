@@ -1,0 +1,494 @@
+{
+ "targeted": {
+  "vGAT \u2014 GABA gene list": {
+   "n_genes": 140,
+   "buckets": [
+    [
+     "Bloomington >> UAS >> Phenotype",
+     "220",
+     "153",
+     "73"
+    ],
+    [
+     "Vienna >> UAS >> Phenotype",
+     "182",
+     "163",
+     "120"
+    ],
+    [
+     "Bloomington >> AlleleOrInsertion >> Phenotype",
+     "568",
+     "253",
+     "79"
+    ],
+    [
+     "Stock Center >> AlleleOrInsertion >> Phenotype",
+     "173",
+     "92",
+     "40"
+    ],
+    [
+     "Non Stock Center >> UAS >> Phenotype",
+     "225",
+     "225",
+     "60"
+    ],
+    [
+     "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+     "680",
+     "680",
+     "88"
+    ]
+   ],
+   "total": [
+    "Total (unique stocks / alleles / genes across sheets)",
+    "2048",
+    "1497",
+    "135"
+   ]
+  },
+  "BPD-GWAS orthologs": {
+   "n_genes": 168,
+   "buckets": [
+    [
+     "Bloomington >> UAS >> Phenotype",
+     "145",
+     "133",
+     "53"
+    ],
+    [
+     "Vienna >> UAS >> Phenotype",
+     "195",
+     "170",
+     "136"
+    ],
+    [
+     "Bloomington >> AlleleOrInsertion >> Phenotype",
+     "306",
+     "240",
+     "86"
+    ],
+    [
+     "Stock Center >> AlleleOrInsertion >> Phenotype",
+     "54",
+     "46",
+     "25"
+    ],
+    [
+     "Non Stock Center >> UAS >> Phenotype",
+     "181",
+     "181",
+     "61"
+    ],
+    [
+     "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+     "752",
+     "752",
+     "79"
+    ]
+   ],
+   "total": [
+    "Total (unique stocks / alleles / genes across sheets)",
+    "1633",
+    "1485",
+    "155"
+   ]
+  },
+  "DIOPT Bellenguez/Lambert (AD)": {
+   "n_genes": 227,
+   "buckets": [
+    [
+     "Bloomington >> UAS >> Phenotype",
+     "429",
+     "177",
+     "73"
+    ],
+    [
+     "Vienna >> UAS >> Phenotype",
+     "284",
+     "243",
+     "194"
+    ],
+    [
+     "Bloomington >> AlleleOrInsertion >> Phenotype",
+     "712",
+     "299",
+     "115"
+    ],
+    [
+     "Stock Center >> AlleleOrInsertion >> Phenotype",
+     "162",
+     "66",
+     "33"
+    ],
+    [
+     "Non Stock Center >> UAS >> Phenotype",
+     "329",
+     "329",
+     "115"
+    ],
+    [
+     "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+     "704",
+     "704",
+     "109"
+    ]
+   ],
+   "total": [
+    "Total (unique stocks / alleles / genes across sheets)",
+    "2620",
+    "1767",
+    "217"
+   ]
+  },
+  "Jordan VCM": {
+   "n_genes": 35,
+   "buckets": [
+    [
+     "Bloomington >> UAS >> Phenotype",
+     "86",
+     "83",
+     "28"
+    ],
+    [
+     "Vienna >> UAS >> Phenotype",
+     "59",
+     "52",
+     "33"
+    ],
+    [
+     "Bloomington >> AlleleOrInsertion >> Phenotype",
+     "172",
+     "140",
+     "32"
+    ],
+    [
+     "Stock Center >> AlleleOrInsertion >> Phenotype",
+     "30",
+     "25",
+     "11"
+    ],
+    [
+     "Non Stock Center >> UAS >> Phenotype",
+     "116",
+     "116",
+     "24"
+    ],
+    [
+     "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+     "294",
+     "294",
+     "30"
+    ]
+   ],
+   "total": [
+    "Total (unique stocks / alleles / genes across sheets)",
+    "757",
+    "692",
+    "34"
+   ]
+  },
+  "Slumber Neuropeptides+transmitters": {
+   "n_genes": 33,
+   "buckets": [
+    [
+     "Bloomington >> UAS >> Phenotype",
+     "108",
+     "70",
+     "22"
+    ],
+    [
+     "Vienna >> UAS >> Phenotype",
+     "57",
+     "48",
+     "32"
+    ],
+    [
+     "Bloomington >> AlleleOrInsertion >> Phenotype",
+     "439",
+     "97",
+     "26"
+    ],
+    [
+     "Stock Center >> AlleleOrInsertion >> Phenotype",
+     "242",
+     "17",
+     "8"
+    ],
+    [
+     "Non Stock Center >> UAS >> Phenotype",
+     "64",
+     "64",
+     "17"
+    ],
+    [
+     "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+     "246",
+     "246",
+     "25"
+    ]
+   ],
+   "total": [
+    "Total (unique stocks / alleles / genes across sheets)",
+    "1156",
+    "523",
+    "32"
+   ]
+  },
+  "Slumber RNAi candidates": {
+   "n_genes": 16,
+   "buckets": [
+    [
+     "Bloomington >> UAS >> Phenotype",
+     "21",
+     "18",
+     "12"
+    ],
+    [
+     "Vienna >> UAS >> Phenotype",
+     "22",
+     "19",
+     "14"
+    ],
+    [
+     "Bloomington >> AlleleOrInsertion >> Phenotype",
+     "95",
+     "50",
+     "16"
+    ],
+    [
+     "Stock Center >> AlleleOrInsertion >> Phenotype",
+     "1",
+     "1",
+     "1"
+    ],
+    [
+     "Non Stock Center >> UAS >> Phenotype",
+     "46",
+     "46",
+     "16"
+    ],
+    [
+     "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+     "40",
+     "40",
+     "10"
+    ]
+   ],
+   "total": [
+    "Total (unique stocks / alleles / genes across sheets)",
+    "225",
+    "173",
+    "16"
+   ]
+  }
+ },
+ "tx_per_dataset": [
+  [
+   "CSW FC0.5",
+   7,
+   4025,
+   3788,
+   1629
+  ],
+  [
+   "CSW FC1",
+   4,
+   356,
+   330,
+   180
+  ],
+  [
+   "Homeostatic Genes",
+   1,
+   46,
+   35,
+   20
+  ],
+  [
+   "Overlapping SleepHistory<>SleepRebound Correlates",
+   2,
+   108,
+   72,
+   38
+  ],
+  [
+   "SleepHistory Correlates",
+   2,
+   1261,
+   658,
+   386
+  ]
+ ],
+ "tx_by_bucket": [
+  [
+   "Bloomington >> UAS >> Phenotype",
+   421,
+   378,
+   232
+  ],
+  [
+   "Vienna >> UAS >> Phenotype",
+   1148,
+   1026,
+   867
+  ],
+  [
+   "Bloomington >> AlleleOrInsertion >> Phenotype",
+   1247,
+   774,
+   395
+  ],
+  [
+   "Stock Center >> AlleleOrInsertion >> Phenotype",
+   468,
+   193,
+   114
+  ],
+  [
+   "Non Stock Center >> UAS >> Phenotype",
+   664,
+   664,
+   296
+  ],
+  [
+   "Non Stock Center >> AlleleOrInsertion >> Phenotype",
+   1848,
+   1848,
+   349
+  ]
+ ],
+ "tx_tiers": {
+  "CSW FC0.5": [
+   [
+    "FC0.5_Sleep_frequency_2_n=135genes",
+    135
+   ],
+   [
+    "FC0.5_Sleep_frequency_3_n=6genes",
+    6
+   ],
+   [
+    "FC0.5_Wake_frequency_2_n=353genes",
+    353
+   ],
+   [
+    "FC0.5_Wake_frequency_3_n=197genes",
+    197
+   ],
+   [
+    "FC0.5_Wake_frequency_4_n=82genes",
+    82
+   ],
+   [
+    "FC0.5_Wake_frequency_5_n=14genes",
+    14
+   ],
+   [
+    "FC0.5_Wake_frequency_6_n=1genes",
+    1
+   ]
+  ],
+  "CSW FC1": [
+   [
+    "FC1_Sleep_frequency_2_n=16genes",
+    16
+   ],
+   [
+    "FC1_Wake_frequency_2_n=77genes",
+    77
+   ],
+   [
+    "FC1_Wake_frequency_3_n=14genes",
+    14
+   ],
+   [
+    "FC1_Wake_frequency_4_n=7genes",
+    7
+   ]
+  ],
+  "Homeostatic Genes": [
+   [
+    "Tx-Omics_homeostatic_genes_n=6genes",
+    6
+   ]
+  ],
+  "Overlapping SleepHistory<>SleepRebound Correlates": [
+   [
+    "History(neg)_x_Rebound(pos)_overlap_n=5genes",
+    5
+   ],
+   [
+    "History(pos)_x_Rebound(neg)_overlap_n=15genes",
+    15
+   ]
+  ],
+  "SleepHistory Correlates": [
+   [
+    "History (neg correlates) Table_n=66genes",
+    66
+   ],
+   [
+    "History (pos correlates) Table_n=149genes",
+    149
+   ]
+  ]
+ },
+ "tx_total_stocks": 5796,
+ "examples": [
+  {
+   "label": "Bloomington \u00b7 UAS \u00b7 Phenotype",
+   "sheet": "Sheet1",
+   "rows": 220,
+   "id": "FBst0600261",
+   "collection": "Bloomington",
+   "gene": "Act5C; Gat",
+   "genotype": "y[1] w[1118]; P{w[+mC]=Act5C-GAL4}25FO1, P{w[+mC]=UAS-GFP.U}2/\u2026"
+  },
+  {
+   "label": "Vienna (VDRC) \u00b7 UAS \u00b7 Phenotype",
+   "sheet": "Sheet2",
+   "rows": 182,
+   "id": "FBst0479639",
+   "collection": "Vienna",
+   "gene": "ATPsynCF6",
+   "genotype": "P{KK108581}VIE-260B"
+  },
+  {
+   "label": "Bloomington \u00b7 Allele/Insertion \u00b7 Phenotype",
+   "sheet": "Sheet3",
+   "rows": 568,
+   "id": "FBst0003954",
+   "collection": "Bloomington",
+   "gene": "Act5C",
+   "genotype": "y[1] w[*]; P{w[+mC]=Act5C-GAL4}17bFO1/TM6B, Tb[1]"
+  },
+  {
+   "label": "Stock Center \u00b7 Allele/Insertion \u00b7 Phenotype",
+   "sheet": "Sheet4",
+   "rows": 173,
+   "id": "FBst0306375",
+   "collection": "Kyoto",
+   "gene": "Act5C",
+   "genotype": "y[1] w[*]; P{w[+mC]=Act5C-GAL4}25FO1/CyO, y[+]"
+  },
+  {
+   "label": "Non-Stock-Center \u00b7 UAS \u00b7 Phenotype",
+   "sheet": "Sheet5",
+   "rows": 225,
+   "id": "Scer\\GAL4[Act5C.PU]",
+   "collection": "Custom phenotype reagent",
+   "gene": "Act5C",
+   "genotype": "Hsap\\SOD1[UAS.cPa] Scer\\GAL4[Act5C.PU]; Mmus\\Prkaca[mC.UAS] Sc\u2026"
+  },
+  {
+   "label": "Non-Stock-Center \u00b7 Allele/Insertion \u00b7 Phenotype",
+   "sheet": "Sheet6",
+   "rows": 680,
+   "id": "Cep290[mecH]",
+   "collection": "Custom phenotype reagent",
+   "gene": "Cep290",
+   "genotype": "Cep290[mecH]"
+  }
+ ]
+}
