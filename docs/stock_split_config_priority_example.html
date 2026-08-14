@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Boss-Priority Stock Split Config</title>
+  <title>Priority Stock Split Config</title>
   <style>
     :root {
       --ink: #0f172a;
@@ -334,9 +334,9 @@
   <div class="wrap">
     <header>
       <div class="eyebrow">Phenotypic stocks · priority config</div>
-      <h1>Boss-Priority Stock Split</h1>
+      <h1>Priority Stock Split</h1>
       <p class="lede">
-        <code>data/config/stock_split_config_boss_priority_example.json</code>
+        <code>data/config/stock_split_config_priority_example.json</code>
         routes each reagent into one of <strong>18 priority-ordered sheets</strong>:
         six phenotype buckets first, then a Bloomington RNAi Ref matrix for everything else.
       </p>
@@ -467,7 +467,7 @@
       <h2><span class="badge">Filters</span> Key predicates</h2>
       <div class="filters">
         <div class="filter"><strong>RNAi_reagent</strong>FlyBase <code>transgenic_product_class_terms</code> contains RNAi_reagent.</div>
-        <div class="filter"><strong>AlleleOrInsertion</strong>Boss non-UAS shorthand: broad <code>RNAi</code> proxy is false.</div>
+        <div class="filter"><strong>AlleleOrInsertion</strong> Non-UAS shorthand: broad <code>RNAi</code> proxy is false.</div>
         <div class="filter"><strong>Phenotype</strong>Any curated FlyBase phenotype (<code>PHENOTYPE_RELEVANCE_SCORE ≠ 0</code>).</div>
         <div class="filter"><strong>Stock Center</strong>Orderable FBst-backed row (<code>custom_stock</code> false).</div>
         <div class="filter"><strong>Non Stock Center</strong>Custom phenotype reagent without FBst record.</div>
@@ -479,7 +479,7 @@
       <h2><span class="badge">Run</span> Workflow</h2>
       <p class="section-note">Always refactor the aggregated workbook layout after <code>run</code>.</p>
       <div class="cmd">python -m fl_ai_reagent_stocker run ./gene_lists \
-  --config data/config/stock_split_config_boss_priority_example.json
+  --config data/config/stock_split_config_priority_example.json
 
 python scripts/refactor_aggregated_workbook_layout.py \
   ./gene_lists/Per\ Gene\ Set\ Runs/&lt;gene_set&gt;/Stocks/&lt;gene_set&gt;_aggregated.xlsx</div>
@@ -487,7 +487,7 @@ python scripts/refactor_aggregated_workbook_layout.py \
 
     <footer>
       Config JSON ·
-      <a href="stock_split_config_boss_priority_example.md">Markdown reference</a> ·
+      <a href="stock_split_config_priority_example.md">Markdown reference</a> ·
       <a href="pipeline_usage.md#finding-phenotypic-stocks">Pipeline guide</a>
     </footer>
   </div>

@@ -107,6 +107,7 @@ class TestRecursiveDiscovery(unittest.TestCase):
             _write_csv(
                 root / "y_aggregated_similarity" / "plot.csv", cols
             )
+            _write_csv(root / "combination_counts_summary.csv", "combination,num_stocks")
             # Hidden file.
             _write_csv(root / ".hidden.csv", cols)
 

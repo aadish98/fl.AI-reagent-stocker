@@ -630,6 +630,9 @@ _GENERATED_DIR_NAMES = {
     "Organized Stock Sheets",
     "Uncategorized",
 }
+_GENERATED_CSV_NAMES = {
+    "combination_counts_summary.csv",
+}
 
 
 def _discover_input_csvs(input_dir: Path) -> List[Path]:
@@ -641,7 +644,7 @@ def _discover_input_csvs(input_dir: Path) -> List[Path]:
     """
     discovered: List[Path] = []
     for path in sorted(input_dir.rglob("*.csv")):
-        if path.name.startswith("."):
+        if path.name.startswith(".") or path.name in _GENERATED_CSV_NAMES:
             continue
         rel_parts = path.relative_to(input_dir).parts[:-1]
         if any(part in _GENERATED_DIR_NAMES for part in rel_parts):

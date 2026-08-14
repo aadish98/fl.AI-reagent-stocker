@@ -1,0 +1,5 @@
+ext_gene,flybase_gene_id,publication_section,publication_table,motif,publication_evidence,identity_status
+bigmax,FBgn0039509,Results,Table S1,CAGCTG E-box,HOMER identified the CAGCTG E-box motif upstream of wake-induced genes; the paper names this bHLH factor as a potential direct upstream regulator of wake-induced gene expression.,publication_named
+HLH3B,FBgn0011276,Results,Table S1,CAGCTG E-box,HOMER identified the CAGCTG E-box motif upstream of wake-induced genes; the paper names this bHLH factor as a potential direct upstream regulator of wake-induced gene expression.,publication_named
+E(spl)m3-HLH,FBgn0002609,Results,Table S1,CAGCTG E-box,HOMER identified the CAGCTG E-box motif upstream of wake-induced genes; the paper names this bHLH factor as a potential direct upstream regulator of wake-induced gene expression.,publication_named
+E(spl)mbeta-HLH,FBgn0002733,Results,Table S1,CAGCTG E-box,HOMER identified the CAGCTG E-box motif upstream of wake-induced genes; the paper names this bHLH factor as a potential direct upstream regulator of wake-induced gene expression.,publication_named

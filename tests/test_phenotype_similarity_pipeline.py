@@ -50,6 +50,15 @@ PHENOTYPE_CONFIG_PATH = (
 BASELINE_CONFIG_PATH = (
     REPO_ROOT / "data" / "config" / "stock_split_config_example.json"
 )
+PRIORITY_SIMPLE_CONFIG_PATH = (
+    REPO_ROOT / "data" / "config" / "stock_split_config_priority_example.json"
+)
+PRIORITY_ALL_PHENOTYPES_CONFIG_PATH = (
+    REPO_ROOT
+    / "data"
+    / "config"
+    / "stock_split_config_priority_all_phenotypes.json"
+)
 
 
 def _write_phenotype_data_tsv(path: Path, rows: list) -> None:
@@ -179,6 +188,68 @@ def _required_policy_settings(**overrides):
 
 
 class TestPhenotypeSimilarityPipeline(unittest.TestCase):
+
+    def test_configured_combination_names_stay_aligned_when_earlier_sheet_is_empty(self):
+        config = {
+            "settings": _required_policy_settings(
+                relevantSearchTerms=[],
+                maxStocksPerGene=None,
+                maxStocksPerAllele=None,
+            ),
+            "filters": {},
+            "combinations": [["empty"], ["kept"]],
+            "combination_names": ["Empty", "Kept"],
+        }
+        included_df = pd.DataFrame(
+            [
+                {
+                    "stock_number": "100",
+                    "collection": "Bloomington",
+                    "relevant_gene_symbols": "geneA",
+                    "AlleleSymbol": "alleleA",
+                }
+            ]
+        )
+        empty_df = included_df.iloc[0:0].copy()
+        combination_outputs = [
+            (
+                ["empty"],
+                empty_df,
+                {"Category": "empty", "# Stocks": 0, "# Alleles": 0, "# Genes": 0},
+            ),
+            (
+                ["kept"],
+                included_df,
+                {"Category": "kept", "# Stocks": 1, "# Alleles": 1, "# Genes": 1},
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "named_sheets.xlsx"
+            write_aggregated_excel(
+                output_path=output_path,
+                source_workbook_path=Path(tmp_dir) / "source.xlsx",
+                config=config,
+                combination_outputs=combination_outputs,
+                all_stocks_df=included_df,
+                references_df=None,
+                verbose=False,
+                all_input_genes={"geneA"},
+                csv_input_genes={"geneA"},
+                n_input_genes=1,
+            )
+            with pd.ExcelFile(output_path) as excel:
+                self.assertIn("1_Kept", excel.sheet_names)
+                self.assertNotIn("1_Empty", excel.sheet_names)
+                self.assertNotIn("Sheet1", excel.sheet_names)
+            contents_df = pd.read_excel(output_path, sheet_name="Contents", header=None)
+
+        contents_text = "\n".join(
+            contents_df.fillna("").astype(str).agg(" ".join, axis=1).tolist()
+        )
+        self.assertIn("empty 0 0 0 -", contents_text)
+        self.assertIn("kept 1 1 1 1_Kept", contents_text)
+        self.assertIn("1_Kept (1 stocks, 1 unique genes): kept", contents_text)
 
     def test_contents_sheet_is_researcher_facing(self):
         config = {
@@ -330,16 +401,17 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
             return next(i for i, value in enumerate(first_col) if value == label)
 
         section_order = [
+            "Prioritized sheet breakdown",
             "What this workbook is",
             "How sheets were selected",
             "What each filter means",
-            "Prioritized sheet breakdown",
             "Genes that need follow-up",
             "Per-sheet gene rosters",
             "References and Stock Sheet by Gene definitions",
         ]
         section_indices = [row_index(label) for label in section_order]
         self.assertEqual(section_indices, sorted(section_indices))
+        self.assertEqual(row_index("Prioritized sheet breakdown"), 0)
 
         self.assertIn("A stock appears in only one sheet", contents_text)
         self.assertIn("Sheet criteria", contents_text)
@@ -1482,6 +1554,120 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
 
 
 class TestPhenotypeRelevanceFilters(unittest.TestCase):
+
+    def test_priority_combination_names_validate_and_simple_order_is_unchanged(self):
+        simple = load_split_config(PRIORITY_SIMPLE_CONFIG_PATH)
+        self.assertEqual(
+            simple["combination_names"],
+            [
+                "BDSC·RNAi·Pheno",
+                "VDRC·RNAi·Pheno",
+                "BDSC·Allele·Pheno",
+                "OtherSC·Allele·Pheno",
+                "Custom·RNAi·Pheno",
+                "Custom·Allele·Pheno",
+            ],
+        )
+        self.assertEqual(len(simple["combination_names"]), len(simple["combinations"]))
+
+    def test_combination_names_reject_invalid_excel_names(self):
+        payload = json.loads(PRIORITY_SIMPLE_CONFIG_PATH.read_text(encoding="utf-8"))
+        invalid_cases = [
+            (["only one"], "exactly one name"),
+            (["duplicate"] * len(payload["combinations"]), "duplicates another"),
+            (["Contents", *payload["combination_names"][1:]], "reserved"),
+            (["bad/name", *payload["combination_names"][1:]], "invalid Excel"),
+            (["x" * 32, *payload["combination_names"][1:]], "31-character"),
+        ]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            for names, message in invalid_cases:
+                with self.subTest(message=message):
+                    case_payload = dict(payload)
+                    case_payload["combination_names"] = names
+                    config_path.write_text(json.dumps(case_payload), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, message):
+                        load_split_config(config_path)
+
+    def test_all_phenotypes_config_has_rnai_uas_allele_priority_and_audit(self):
+        config = load_split_config(PRIORITY_ALL_PHENOTYPES_CONFIG_PATH)
+        self.assertFalse(config["settings"]["validation"]["enabled"])
+        self.assertEqual(config["settings"]["validation"]["maxGptCallsPerStock"], 0)
+        self.assertTrue(config["settings"]["embeddings"]["enabled"])
+        self.assertEqual(config["settings"]["maxStocksPerGene"], 99999999999)
+        self.assertEqual(config["settings"]["maxStocksPerAllele"], 999999999999)
+
+        expected_names = [
+            "BDSC·RNAi·Pheno",
+            "VDRC·RNAi·Pheno",
+            "OtherSC·RNAi·Pheno",
+            "Custom·RNAi·Pheno",
+            "BDSC·UAS·Pheno",
+            "VDRC·UAS·Pheno",
+            "OtherSC·UAS·Pheno",
+            "Custom·UAS·Pheno",
+            "BDSC·Allele·Pheno",
+            "VDRC·Allele·Pheno",
+            "OtherSC·Allele·Pheno",
+            "Custom·Allele·Pheno",
+            "Pheno·Audit",
+        ]
+        self.assertEqual(config["combination_names"], expected_names)
+
+        rows = []
+        stock_number = 100
+        for reagent_kind in ("RNAi", "UAS", "Allele"):
+            for source, collection, custom_stock in (
+                ("BDSC", "Bloomington", False),
+                ("VDRC", "Vienna", False),
+                ("OtherSC", "Kyoto", False),
+                ("Custom", "No-stock phenotype reagent", True),
+            ):
+                stock_number += 1
+                rows.append(
+                    {
+                        "stock_number": str(stock_number),
+                        "collection": collection,
+                        "custom_stock": custom_stock,
+                        "RNAi": reagent_kind != "Allele",
+                        "transgenic_product_class_terms": (
+                            "RNAi_reagent" if reagent_kind == "RNAi" else "effector"
+                        ),
+                        PHENOTYPE_RELEVANCE_SCORE_COLUMN: 1,
+                        "relevant_gene_symbols": f"gene{stock_number}",
+                        "AlleleSymbol": f"allele{stock_number}",
+                        "expected_name": f"{source}·{reagent_kind}",
+                    }
+                )
+        rows.append(
+            {
+                "stock_number": "999",
+                "collection": "Unknown",
+                "custom_stock": None,
+                "RNAi": None,
+                "transgenic_product_class_terms": "",
+                PHENOTYPE_RELEVANCE_SCORE_COLUMN: 1,
+                "relevant_gene_symbols": "auditGene",
+                "AlleleSymbol": "auditAllele",
+                "expected_name": "Audit",
+            }
+        )
+        stocks_df = pd.DataFrame(rows)
+
+        outputs = _assign_combination_buckets(stocks_df, config)
+        placements = {}
+        for idx, (_combo, limited_df) in enumerate(outputs):
+            for stock in limited_df["stock_number"].tolist():
+                placements.setdefault(stock, []).append(config["combination_names"][idx])
+
+        self.assertEqual(set(placements), set(stocks_df["stock_number"]))
+        self.assertTrue(all(len(names) == 1 for names in placements.values()), placements)
+        self.assertEqual(placements["999"], ["Pheno·Audit"])
+        for row in rows[:-1]:
+            assigned = placements[row["stock_number"]][0]
+            source, reagent_kind = row["expected_name"].split("·")
+            self.assertIn(source, assigned)
+            self.assertIn(reagent_kind, assigned)
     """Phenotype relevance score + priority bucketing invariants."""
 
     # Synthetic stock columns the phenotype/ref filter prefixes reference.

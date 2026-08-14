@@ -1,13 +1,13 @@
 
-# Boss-Priority Stock-Splitting Configuration Reference
+# Priority Stock-Splitting Configuration Reference
 
-**Visual overview:** [stock_split_config_boss_priority_example.html](stock_split_config_boss_priority_example.html)
+**Visual overview:** [stock_split_config_priority_example.html](stock_split_config_priority_example.html)
 
-**File under review:** `data/config/stock_split_config_boss_priority_example.json`
+**File under review:** `data/config/stock_split_config_priority_example.json`
 
-**Purpose:** standard config for finding phenotypic stocks. Six phenotype-priority
-buckets run first; remaining Bloomington `RNAi_reagent` stocks fall through to a
-twelve-sheet Ref matrix. **18 output sheets** total.
+**Purpose:** simple config for finding phenotypic stocks. It defines six named,
+priority-ordered phenotype buckets. For exhaustive RNAi → UAS → allele coverage,
+use `data/config/stock_split_config_priority_all_phenotypes.json`.
 
 **Related:** [stock_split_config_example.md](stock_split_config_example.md) (shared
 Ref-tier filter glossary) · [pipeline_usage.md § Finding phenotypic stocks](pipeline_usage.md#finding-phenotypic-stocks)
@@ -22,7 +22,6 @@ lands in only the **first** matching sheet.
 | Tier | Sheets | What it captures |
 |---|---|---|
 | Phenotype buckets | 1–6 | Any curated FlyBase phenotype, by collection/reagent class |
-| Bloomington Ref matrix | 7–18 | Remaining Bloomington `RNAi_reagent` stocks (non-CRISPR), tiered by balancer, insertion count, and Ref evidence |
 
 ---
 
@@ -41,22 +40,6 @@ All entries require `Phenotype` (`PHENOTYPE_RELEVANCE_SCORE ≠ 0`).
 
 ---
 
-## Tier 2 — Bloomington Ref matrix (sheets 7–18)
-
-Base: `Bloomington` + `RNAi_reagent` + `No sgRNA`.
-
-| Insertion | Balancers | Ref++ | Ref+ | Ref− |
-|---|---|---|---|---|
-| Single | No | 7 | 9 | 11 |
-| Single | Has | 8 | 10 | 12 |
-| Multiple | No | 13 | 15 | 17 |
-| Multiple | Has | 14 | 16 | 18 |
-
-Ref tiers come from `ALLELE_PAPER_RELEVANCE_SCORE` and keywords
-`sleep`, `circadian`, `rhythm`, `locomotor`.
-
----
-
 ## Settings highlights
 
 | Setting | Value |
@@ -64,7 +47,12 @@ Ref tiers come from `ALLELE_PAPER_RELEVANCE_SCORE` and keywords
 | `embeddings.enabled` | `true` |
 | `validation.enabled` | `false` |
 | `input.skipFbgnidConversion` | `true` |
-| `maxStocksPerGene` / `maxStocksPerAllele` | effectively unlimited |
+| `maxStocksPerGene` / `maxStocksPerAllele` | `5` / `3` |
+
+The exhaustive `stock_split_config_priority_all_phenotypes.json` variant
+sets these limits effectively unlimited, disables functional validation, keeps
+embeddings enabled, and adds a final `Pheno·Audit` coverage bucket. Visible tab
+numbers are assigned sequentially only to populated categories.
 
 ---
 
@@ -72,7 +60,7 @@ Ref tiers come from `ALLELE_PAPER_RELEVANCE_SCORE` and keywords
 
 ```bash
 python -m fl_ai_reagent_stocker run ./gene_lists \
-  --config data/config/stock_split_config_boss_priority_example.json
+  --config data/config/stock_split_config_priority_example.json
 
 python scripts/refactor_aggregated_workbook_layout.py \
   ./gene_lists/Per\ Gene\ Set\ Runs/<gene_set>/Stocks/<gene_set>_aggregated.xlsx

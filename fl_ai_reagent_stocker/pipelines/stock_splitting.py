@@ -82,6 +82,14 @@ PHENOTYPE_SIMILARITY_EMBEDDING_MODEL = "text-embedding-3-large"
 SIMILARITY_TIER_BIN_WIDTH = 0.05
 SIMILARITY_TIER_SHEET_COUNT = int(round(1.0 / SIMILARITY_TIER_BIN_WIDTH))
 DEFAULT_CONTENTS_SEPARATOR_EVERY = 3
+EXCEL_WORKSHEET_NAME_MAX_LENGTH = 31
+EXCEL_WORKSHEET_NAME_INVALID_CHARS = set("[]:*?/\\")
+RESERVED_AGGREGATED_WORKSHEET_NAMES = {
+    "Contents",
+    "References",
+    "Stock Sheet by Gene",
+    "All Phenotypic Stocks Sheet",
+}
 SOURCE_STOCK_COLUMN = "Source/ Stock #"
 SOURCE_COLUMN = "Source"
 STOCK_NUMBER_COLUMN = "Stock #"
@@ -353,6 +361,60 @@ def load_split_config(config_path: Path) -> Dict[str, Any]:
             raise ValueError(
                 f"Combination #{idx} references undefined filter(s): {', '.join(undefined)}"
             )
+
+    combination_names = config.get("combination_names")
+    if combination_names is not None:
+        if not isinstance(combination_names, list):
+            raise ValueError("Config 'combination_names' must be a list when provided")
+        if len(combination_names) != len(combinations):
+            raise ValueError(
+                "Config 'combination_names' must contain exactly one name for each "
+                f"combination ({len(combinations)} expected, {len(combination_names)} found)"
+            )
+
+        normalized_names: List[str] = []
+        seen_names: Set[str] = set()
+        reserved_names = {
+            name.casefold() for name in RESERVED_AGGREGATED_WORKSHEET_NAMES
+        }
+        for idx, raw_name in enumerate(combination_names, start=1):
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                raise ValueError(
+                    f"Config combination_names entry #{idx} must be a non-empty string"
+                )
+            name = raw_name.strip()
+            max_numbered_length = len(str(len(combinations))) + 1 + len(name)
+            if max_numbered_length > EXCEL_WORKSHEET_NAME_MAX_LENGTH:
+                raise ValueError(
+                    f"Config combination_names entry #{idx} would exceed Excel's "
+                    f"{EXCEL_WORKSHEET_NAME_MAX_LENGTH}-character worksheet-name limit "
+                    f"after automatic numbering: {name!r}"
+                )
+            invalid = sorted(set(name) & EXCEL_WORKSHEET_NAME_INVALID_CHARS)
+            if invalid:
+                raise ValueError(
+                    f"Config combination_names entry #{idx} contains invalid Excel "
+                    f"worksheet-name character(s) {''.join(invalid)!r}: {name!r}"
+                )
+            if name.startswith("'") or name.endswith("'"):
+                raise ValueError(
+                    f"Config combination_names entry #{idx} cannot start or end with "
+                    f"an apostrophe: {name!r}"
+                )
+            folded = name.casefold()
+            if folded in reserved_names:
+                raise ValueError(
+                    f"Config combination_names entry #{idx} collides with a reserved "
+                    f"workbook sheet name: {name!r}"
+                )
+            if folded in seen_names:
+                raise ValueError(
+                    f"Config combination_names entry #{idx} duplicates another name "
+                    f"(case-insensitive): {name!r}"
+                )
+            seen_names.add(folded)
+            normalized_names.append(name)
+        config["combination_names"] = normalized_names
     
     return config
 
@@ -5107,7 +5169,7 @@ def _build_stock_sheet_by_gene(
     Build a grouped sheet with unique (stock, PMID) keyword-hit rows.
     
     Inclusion rules:
-    - Stocks must come from defined output categories (Sheet1..N dataframes).
+    - Stocks must come from defined combination-output category dataframes.
     - Stocks must be Ref++ (>=1 keyword-hit title/abstract reference).
     - Rows are unique (stock, PMID) pairs for keyword-hit PMIDs only.
     """
@@ -5334,6 +5396,33 @@ def _build_stock_sheet_by_gene(
     return out_df[ordered_cols]
 
 
+def _resolve_combination_output_sheet_names(
+    config: Dict[str, Any],
+    combination_outputs: List[Tuple[List[str], pd.DataFrame, Dict]],
+) -> List[Optional[str]]:
+    """Resolve actual workbook tabs while preserving legacy non-empty numbering."""
+    configured_names = config.get("combination_names")
+    if configured_names is not None and len(configured_names) != len(combination_outputs):
+        raise ValueError(
+            "Config 'combination_names' must align one-to-one with combination outputs "
+            f"({len(combination_outputs)} expected, {len(configured_names)} found)"
+        )
+
+    resolved: List[Optional[str]] = []
+    populated_sheet_index = 0
+    for idx, (_combo, limited_df, _summary) in enumerate(combination_outputs):
+        has_stocks = limited_df is not None and len(limited_df) > 0
+        if not has_stocks:
+            resolved.append(None)
+            continue
+        populated_sheet_index += 1
+        if configured_names is not None:
+            resolved.append(f"{populated_sheet_index}_{configured_names[idx]}")
+        else:
+            resolved.append(f"Sheet{populated_sheet_index}")
+    return resolved
+
+
 def write_aggregated_excel(
     output_path: Path,
     source_workbook_path: Path,
@@ -5360,7 +5449,7 @@ def write_aggregated_excel(
     reagent_index_df: Optional[pd.DataFrame] = None,
 ) -> None:
     """
-    Write aggregated Excel file with Contents, Sheet1..N, References.
+    Write an aggregated Excel file with Contents, combination, and References sheets.
     
     Args:
         output_path: Path to output Excel file
@@ -5395,16 +5484,16 @@ def write_aggregated_excel(
         settings.get('contentsSeparatorEvery', DEFAULT_CONTENTS_SEPARATOR_EVERY)
     )
     
-    # Build summary data, assigning sheet names based on stock presence
+    output_sheet_names = _resolve_combination_output_sheet_names(
+        config, combination_outputs
+    )
+
+    # Build summary data, assigning sheet names based on stock presence.
     summary_rows = []
-    sheet_name_idx = 0
-    for combo, limited_df, summary_dict in combination_outputs:
-        has_stocks = len(limited_df) > 0 if limited_df is not None else False
-        if has_stocks:
-            sheet_name_idx += 1
-            summary_dict["Sheet Name"] = f"Sheet{sheet_name_idx}"
-        else:
-            summary_dict["Sheet Name"] = "-"
+    for (_combo, _limited_df, summary_dict), output_sheet_name in zip(
+        combination_outputs, output_sheet_names
+    ):
+        summary_dict["Sheet Name"] = output_sheet_name or "-"
         summary_rows.append(summary_dict)
     summary_df = pd.DataFrame(summary_rows)
     if "Category" in summary_df.columns:
@@ -5621,64 +5710,17 @@ def write_aggregated_excel(
             summary_by_combo_label = {
                 str(r["Sheet criteria"]): r for _, r in summary_df.iterrows()
             }
-        
-        # Section A: Orientation
-        write_cell(row, 0, "What this workbook is", fmt_13_bold)
-        row += 1
-        write_cell(
-            row,
-            0,
-            "This workbook organizes FlyBase stocks into a prioritized series of output sheets "
-            "(Sheet1, Sheet2, etc.). Each sheet contains stocks that match a specific combination "
-            "of filters, and the order of those sheets is important.",
-            fmt_13_wrap,
-            skip_width=True,
-        )
-        row += 2
-        
-        # Section B: Selection logic
-        write_cell(row, 0, "How sheets were selected", fmt_13_bold)
-        row += 1
-        selection_logic_rows = [
-            "1. Each sheet keeps only stocks that match all of its listed filters.",
-            "2. A stock appears in only one sheet: the first sheet, from top to bottom, that it qualifies for. Earlier sheets have priority over later sheets.",
-            "3. Per-gene and per-allele limits are applied in that same order after each sheet's filters. Once a gene or allele reaches its limit, later matching stocks are skipped.",
-            f"4. Search terms used for Ref++ / Ref+ / Ref- tiering: {keywords_text}. Matching is case-insensitive against publication titles and abstracts.",
-            f"5. {limits_str}.",
-        ]
-        for text in selection_logic_rows:
-            write_cell(row, 0, text, fmt_13_wrap, skip_width=True)
-            row += 1
-        row += 1
-        
-        # Section C: Filter definitions
-        write_cell(row, 0, "What each filter means", fmt_13_bold)
-        row += 1
-        
-        if len(filter_def_rows) > 0:
-            write_row(row, 0, ["Filter / Meaning"], bold_bottom)
-            row += 1
-            for name, meaning in filter_def_rows:
-                combined_text = f"{name}: {meaning}"
-                contents_ws.write_rich_string(
-                    row, 0,
-                    fmt_13_bold, name,
-                    fmt_13, f": {meaning}",
-                )
-                col_widths[0] = max(col_widths[0], len(combined_text))
-                row += 1
-        row += 2
-        
-        # Section D: Counts table
+
+        # Section A: Counts table (kept first for quick review)
         write_cell(row, 0, "Prioritized sheet breakdown", fmt_13_bold)
         row += 1
         write_cell(row, 0, counts_str, fmt_13_wrap, skip_width=True)
         row += 1
-        
+
         if keywords_list:
             write_cell(row, 0, f"Search terms (for Ref++ status, case-insensitive): {', '.join(keywords_list)}")
             row += 1
-        
+
         if len(summary_df) > 0:
             write_row(row, 0, summary_df.columns.tolist(), bold_bottom)
             row += 1
@@ -5690,7 +5732,7 @@ def write_aggregated_excel(
                 )
                 write_row(row, 0, ["" if pd.isna(x) else x for x in r.tolist()], row_fmt)
                 row += 1
-            
+
             # Total row with unique counts across all combinations
             all_stock_ids = set()
             all_gene_ids = set()
@@ -5751,7 +5793,56 @@ def write_aggregated_excel(
             write_row(row, 0, total_row, fmt_total)
             row += 1
         row += 2
+
+        # Section B: Orientation
+        write_cell(row, 0, "What this workbook is", fmt_13_bold)
+        row += 1
+        write_cell(
+            row,
+            0,
+            "This workbook organizes FlyBase stocks into a prioritized series of named output "
+            "sheets. Each sheet contains stocks that match a specific combination of filters, "
+            "and the order of those sheets is important. Configured category labels receive "
+            "sequential numeric prefixes based only on populated sheets. Legacy configurations "
+            "without combination_names use Sheet1, Sheet2, and so on.",
+            fmt_13_wrap,
+            skip_width=True,
+        )
+        row += 2
         
+        # Section C: Selection logic
+        write_cell(row, 0, "How sheets were selected", fmt_13_bold)
+        row += 1
+        selection_logic_rows = [
+            "1. Each sheet keeps only stocks that match all of its listed filters.",
+            "2. A stock appears in only one sheet: the first sheet, from top to bottom, that it qualifies for. Earlier sheets have priority over later sheets.",
+            "3. Per-gene and per-allele limits are applied in that same order after each sheet's filters. Once a gene or allele reaches its limit, later matching stocks are skipped.",
+            f"4. Search terms used for Ref++ / Ref+ / Ref- tiering: {keywords_text}. Matching is case-insensitive against publication titles and abstracts.",
+            f"5. {limits_str}.",
+        ]
+        for text in selection_logic_rows:
+            write_cell(row, 0, text, fmt_13_wrap, skip_width=True)
+            row += 1
+        row += 1
+
+        # Section D: Filter definitions
+        write_cell(row, 0, "What each filter means", fmt_13_bold)
+        row += 1
+
+        if len(filter_def_rows) > 0:
+            write_row(row, 0, ["Filter / Meaning"], bold_bottom)
+            row += 1
+            for name, meaning in filter_def_rows:
+                combined_text = f"{name}: {meaning}"
+                contents_ws.write_rich_string(
+                    row, 0,
+                    fmt_13_bold, name,
+                    fmt_13, f": {meaning}",
+                )
+                col_widths[0] = max(col_widths[0], len(combined_text))
+                row += 1
+        row += 2
+
         # Section E: Follow-up gene lists
         write_cell(row, 0, "Genes that need follow-up", fmt_13_bold)
         row += 1
@@ -5825,18 +5916,18 @@ def write_aggregated_excel(
         write_cell(row, 0, "Per-sheet gene rosters", fmt_13_bold)
         row += 1
         
-        sheet_index = 0
         wrote_any_sheet = False
-        for combo, limited_df, has_stocks in combo_has_stocks:
+        for (combo, limited_df, has_stocks), output_sheet_name in zip(
+            combo_has_stocks, output_sheet_names
+        ):
             if not has_stocks or limited_df is None or len(limited_df) == 0:
                 continue
             
             combo_label = " >> ".join(combo)
-            sheet_index += 1
             summary_row = summary_by_combo_label.get(combo_label)
             stock_count = int(summary_row["# Stocks"]) if summary_row is not None and "# Stocks" in summary_row else len(limited_df)
             gene_count = int(summary_row["# Genes"]) if summary_row is not None and "# Genes" in summary_row else 0
-            label = f"Sheet{sheet_index} ({stock_count} stocks, {gene_count} unique genes): {combo_label}"
+            label = f"{output_sheet_name} ({stock_count} stocks, {gene_count} unique genes): {combo_label}"
             
             write_cell(row, 0, label, fmt_13_bold)
             row += 1
@@ -5886,7 +5977,8 @@ def write_aggregated_excel(
         write_cell(
             row,
             0,
-            "References sheet includes PMIDs cited by stocks that are present in output sheets (Sheet1..N).",
+            "References sheet includes PMIDs cited by stocks that are present in the named "
+            "combination output sheets.",
             fmt_13_wrap,
             skip_width=True,
         )
@@ -5895,7 +5987,12 @@ def write_aggregated_excel(
             write_cell(
                 row,
                 0,
-                "All Phenotypic Stocks Sheet is full-scope for the input gene set and is not limited to the JSON combination sheets. It includes curated phenotype evidence for input-gene reagents even when a stock or reagent was not assigned to Sheet1, Sheet2, or later prioritized output sheets. Each row links a stock or reagent to the relevant input gene, stock source, genotype, phenotype, supporting reference, reagent category, and any available phenotype similarity scores.",
+                "All Phenotypic Stocks Sheet is full-scope for the input gene set and is not "
+                "limited to the JSON combination sheets. It includes curated phenotype evidence "
+                "for input-gene reagents even when a stock or reagent was not assigned to a "
+                "prioritized combination output sheet. Each row links a stock or reagent to the "
+                "relevant input gene, stock source, genotype, phenotype, supporting reference, "
+                "reagent category, and any available phenotype similarity scores.",
                 fmt_13_wrap,
                 skip_width=True,
             )
@@ -5947,12 +6044,11 @@ def write_aggregated_excel(
         if soft_run and len(stock_phenotype_sheet_df) > 0:
             contents_ws.set_column(1, 1, 96)
         
-        # Data sheets (Sheet1, Sheet2, ...)
-        sheet_index = 0
-        for combo, limited_df, has_stocks in combo_has_stocks:
+        # Named combination data sheets (or legacy Sheet1, Sheet2, ...).
+        for (combo, limited_df, has_stocks), sheet_name in zip(
+            combo_has_stocks, output_sheet_names
+        ):
             if has_stocks and limited_df is not None and len(limited_df) > 0:
-                sheet_index += 1
-                sheet_name = f"Sheet{sheet_index}"
                 # Prefix GPT-derived column headers with [EXPERIMENTAL]
                 cleaned_df = _normalize_stock_sheet_columns(limited_df)
                 if (
@@ -6079,7 +6175,7 @@ class StockSplittingPipeline:
     
     This is Pipeline 2 in the fly-stocker workflow:
     Input: Excel files from Stage 1 (`find-stocks`) output
-    Output: Aggregated Excel file with Contents, Sheet1..N, References sheets
+    Output: Aggregated Excel file with Contents, combination, and References sheets
     """
     
     def __init__(self, settings: Optional[Settings] = None):

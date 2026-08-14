@@ -12,6 +12,7 @@ OpenAI validation and phenotype-embedding analysis.
 - Agent guidance: `docs/AGENTS.md`
 - Citing data sources, APIs, and models: `docs/citations.md`
 - Config reference: `docs/stock_split_config_example.md`
+- Phenotypic-stock priority configs: `docs/stock_split_config_priority_example.md`
 
 ## What The Pipeline Produces
 
@@ -66,8 +67,11 @@ and `phenotype-sheet` sidecar artifacts when embeddings are enabled in config.
 ## Configuration
 
 Output sheets come from ordered `combinations` of named `filters`; each reagent
-(`stock_id`, `collection`) lands in only the first combination it matches. Two
-computed score columns back the standard tiers:
+(`stock_id`, `collection`) lands in only the first combination it matches. An
+optional `combination_names` list assigns corresponding Excel tab names
+one-to-one. Populated categories are automatically prefixed `1_`, `2_`, and so
+on; without names, they use legacy `Sheet1..N` names.
+Two computed score columns back the standard tiers:
 
 - `settings.input` — required input column and FBgn-conversion policy.
 - `settings.pubmed` — required PubMed/full-text batch policy.
@@ -90,13 +94,17 @@ Config fields: `settings.relevantSearchTerms`,
 `settings.maxStocksPerAllele`, `settings.input`, `settings.pubmed`,
 `settings.embeddings`, `settings.output`, `settings.validation`,
 `settings.contentsSeparatorEvery`, `filters`, `combinations`,
-`filterDescriptions`.
+`combination_names`, `filterDescriptions`.
 
 Example configs:
 
 - `data/config/stock_split_config_example.json` — publication-evidence tiers
 - `data/config/stock_split_config_phenotype_example.json` — adds `Phenotype++`
   and `Phenotype+` sheets above each `Ref` group
+- `data/config/stock_split_config_priority_example.json` — six named phenotype
+  buckets; see `docs/stock_split_config_priority_example.md`
+- `data/config/stock_split_config_priority_all_phenotypes.json` — exhaustive
+  RNAi → UAS → allele coverage plus a phenotype audit bucket
 
 See `docs/stock_split_config_example.md` for the full config reference.
 

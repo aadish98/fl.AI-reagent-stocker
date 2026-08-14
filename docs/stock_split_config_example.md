@@ -11,7 +11,7 @@
 written in JSON. This document summarizes the configuration choices
 (keywords, filters, and output sheets) in a reviewable format.
 
-**Two example configs ship with the pipeline:**
+**Example configs that ship with the pipeline:**
 
 - `data/config/stock_split_config_example.json` — the baseline covered by this
   reference. It tiers stocks by publication evidence (`Ref++` / `Ref+` /
@@ -19,6 +19,11 @@ written in JSON. This document summarizes the configuration choices
 - `data/config/stock_split_config_phenotype_example.json` — the same config plus
   curated-phenotype tiers. It adds `Phenotype++` and `Phenotype+` filters and
   inserts matching sheets above each `Ref` group (see section 4i).
+- `data/config/stock_split_config_priority_example.json` — six named phenotype
+  buckets for finding phenotypic stocks. See
+  [stock_split_config_priority_example.md](stock_split_config_priority_example.md).
+- `data/config/stock_split_config_priority_all_phenotypes.json` — exhaustive
+  RNAi → UAS → allele coverage plus a phenotype audit bucket.
 
 A short list of review questions appears at the end.
 
@@ -218,9 +223,19 @@ below them. (No `Phenotype-` tier is defined.)
 
 ## 5. Output sheets (`combinations`)
 
-Each entry in `combinations` produces one Excel sheet. All filters listed
-in an entry are **AND-ed together** — a stock has to pass every one of
-them to land in that sheet.
+Each entry in `combinations` produces one Excel sheet when it has matching
+stocks. All filters listed in an entry are **AND-ed together** — a stock has to
+pass every one of them to land in that sheet.
+
+An optional top-level `combination_names` list provides the actual Excel tab
+names, aligned one-to-one with `combinations`. Names must be non-empty, unique
+case-insensitively, and valid under Excel worksheet-name rules. Store labels
+without numeric prefixes: only populated combinations are numbered, receiving
+sequential `1_`, `2_`, ... prefixes, and the final rendered name must fit
+Excel's 31-character limit. A combination with no stocks remains in the
+Contents count table with `-` as its sheet name and creates no tab. Configs
+without `combination_names` retain legacy `Sheet1..N` names for populated
+combinations.
 
 This config produces **13 sheets**. Twelve of them are a Bloomington-only,
 non-CRISPR RNAi matrix; the thirteenth is an all-sources catch-all.

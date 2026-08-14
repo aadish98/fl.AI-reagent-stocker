@@ -69,7 +69,7 @@ Options:
 `run` produces a clean, summary-ready tree under the input folder:
 
 - Per gene set: `./gene_lists/Per Gene Set Runs/<relative path>/<gene set>/Stocks/<gene set>_aggregated.xlsx`
-  (`Contents`, `Sheet1..N`, `References`, `Stock Sheet by Gene`, plus Ref++
+  (`Contents`, configured combination tabs or legacy `Sheet1..N`, `References`, `Stock Sheet by Gene`, plus Ref++
   validation columns when enabled, plus embedding cosine columns when enabled).
 - Combined summary at the input root: `combination_counts_summary.xlsx` and
   `combination_counts_summary.csv` (one row per gene set and config
@@ -119,6 +119,12 @@ Key fields:
   rows in the `Contents` sheet breakdown table (default: `3`).
 - `filters` — reusable column predicates.
 - `combinations` — ordered sheet definitions.
+- `combination_names` — optional Excel tab names aligned one-to-one with
+  `combinations`. Names must be unique, valid Excel worksheet names of at most
+  31 characters after numbering. Store unnumbered labels: populated categories
+  are automatically prefixed `1_`, `2_`, and so on in output order. Empty
+  combinations show `-` in Contents and create no tab; without this field,
+  populated combinations use `Sheet1..N`.
 - `filterDescriptions` — text shown in the `Contents` sheet.
 
 ### Evidence tiers
@@ -144,6 +150,27 @@ sheets stay reagent-level over `(stock_id, collection)`.
 - `data/config/stock_split_config_phenotype_example.json` — adds `Phenotype++`
   and `Phenotype+` sheets above each `Ref` group, so phenotype-backed reagents
   are claimed before the publication-only tiers.
+- `data/config/stock_split_config_priority_example.json` — six named,
+  priority-ordered phenotype buckets. See
+  [stock_split_config_priority_example.md](stock_split_config_priority_example.md).
+- `data/config/stock_split_config_priority_all_phenotypes.json` — exhaustive
+  RNAi → residual UAS → allele/insertion coverage, plus a final phenotype
+  audit bucket.
+
+## Finding phenotypic stocks
+
+Use the priority configs when the goal is phenotype-backed reagents rather
+than the publication-evidence Ref matrix. Combinations are evaluated top to
+bottom; each `(stock_id, collection)` reagent lands in only the first matching
+sheet.
+
+```bash
+python -m fl_ai_reagent_stocker run ./gene_lists \
+  --config data/config/stock_split_config_priority_example.json
+```
+
+For exhaustive RNAi → UAS → allele coverage, use
+`data/config/stock_split_config_priority_all_phenotypes.json`.
 
 ## Advanced: per-stage entry points
 

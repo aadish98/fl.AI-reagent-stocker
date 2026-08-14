@@ -145,7 +145,9 @@ Stage 1 always writes a `Gene Reagent Index` sheet alongside `Stocks` /
 
 The JSON files in `data/config/` are canonical. The default is
 `stock_split_config_example.json`; `stock_split_config_phenotype_example.json`
-is the phenotype-aware variant.
+is the phenotype-aware variant. `stock_split_config_priority_example.json` and
+`stock_split_config_priority_all_phenotypes.json` are the phenotype-bucket
+priority configs (see `docs/stock_split_config_priority_example.md`).
 
 - `settings.relevantSearchTerms` defines keyword relevance, backing
   `ALLELE_PAPER_RELEVANCE_SCORE` and the `Ref++` / `Ref+` / `Ref-` tiers
@@ -169,6 +171,10 @@ is the phenotype-aware variant.
 - `filters` defines reusable column predicates
 - `combinations` defines ordered sheet partitions; each `(stock_id, collection)`
   reagent is placed in only the first combination it matches
+- optional `combination_names` defines Excel tab names aligned one-to-one with
+  `combinations`; configured labels are stored without numbers and populated
+  sheets receive sequential `1_`, `2_`, ... prefixes. Absent names preserve
+  legacy non-empty `Sheet1..N` numbering
 - `filterDescriptions` defines user-facing sheet descriptions
 
 Computed score columns available to filters:

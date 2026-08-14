@@ -366,7 +366,7 @@ display: none;
 stock organization is written in JSON. This document summarizes the
 configuration choices (keywords, filters, and output sheets) in a
 reviewable format.</p>
-<p><strong>Two example configs ship with the pipeline:</strong></p>
+<p><strong>Example configs that ship with the pipeline:</strong></p>
 <ul>
 <li><code>data/config/stock_split_config_example.json</code> — the
 baseline covered by this reference. It tiers stocks by publication
@@ -376,6 +376,12 @@ evidence (<code>Ref++</code> / <code>Ref+</code> /
 the same config plus curated-phenotype tiers. It adds
 <code>Phenotype++</code> and <code>Phenotype+</code> filters and inserts
 matching sheets above each <code>Ref</code> group (see section 4i).</li>
+<li><code>data/config/stock_split_config_priority_example.json</code> —
+six named phenotype buckets for finding phenotypic stocks. See
+<a href="stock_split_config_priority_example.md">stock_split_config_priority_example.md</a>.</li>
+<li><code>data/config/stock_split_config_priority_all_phenotypes.json</code>
+— exhaustive RNAi → UAS → allele coverage plus a phenotype audit
+bucket.</li>
 </ul>
 <p>A short list of review questions appears at the end.</p>
 <hr />

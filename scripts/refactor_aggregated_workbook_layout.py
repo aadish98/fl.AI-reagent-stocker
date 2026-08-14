@@ -83,6 +83,35 @@ def _is_data_sheet(name: str) -> bool:
     return any(name.startswith(prefix) for prefix in DATA_SHEET_PREFIXES)
 
 
+def _combination_sheet_names_from_contents(wb) -> set[str]:
+    """Read configured combination-tab names from the Contents breakdown table."""
+    if "Contents" not in wb.sheetnames:
+        return set()
+    ws = wb["Contents"]
+    header_row = None
+    sheet_name_col = None
+    criteria_col = None
+    for row in ws.iter_rows():
+        values = [str(cell.value or "").strip() for cell in row]
+        if "Sheet Name" in values and "Sheet criteria" in values:
+            header_row = row[0].row
+            sheet_name_col = values.index("Sheet Name") + 1
+            criteria_col = values.index("Sheet criteria") + 1
+            break
+    if header_row is None or sheet_name_col is None or criteria_col is None:
+        return set()
+
+    names: set[str] = set()
+    for row_idx in range(header_row + 1, ws.max_row + 1):
+        criteria = str(ws.cell(row_idx, criteria_col).value or "").strip()
+        if criteria.startswith("Total"):
+            break
+        name = str(ws.cell(row_idx, sheet_name_col).value or "").strip()
+        if name and name != "-":
+            names.add(name)
+    return names
+
+
 def _width_bounds(header: str) -> tuple[float, float]:
     lower = header.lower()
     for pattern in NARROW_PATTERNS:
@@ -241,11 +270,12 @@ def _workbook_values_snapshot(path: Path) -> list[tuple[str, int, int, object]]:
 def refactor_workbook_layout(path: Path) -> None:
     before = _workbook_values_snapshot(path)
     wb = load_workbook(path)
+    configured_data_sheets = _combination_sheet_names_from_contents(wb)
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         if sheet_name == "Contents":
             _format_contents_sheet(ws)
-        elif _is_data_sheet(sheet_name):
+        elif sheet_name in configured_data_sheets or _is_data_sheet(sheet_name):
             _format_data_sheet(ws)
     wb.save(path)
     wb.close()

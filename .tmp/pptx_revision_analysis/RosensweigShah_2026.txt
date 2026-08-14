@@ -1,0 +1,1997 @@
+        bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+      (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                     available under a CC-BY 4.0 International license.
+
+
+
+
+     Shared Transcriptomic Responses to Distinct Sleep-Wake Manipulations
+
+                       Reveals Multiple Homeostatic Pathways in Drosophila
+
+
+Clark Rosensweig1,2*, Aadish Shah1*, Shiju Sisobhan1, Tomas Andreani2#, and Ravi Allada1
+
+
+
+Affiliations:
+
+1
+ Michigan Neuroscience Institute, Department of Anesthesiology, University of Michigan Medical School, Ann
+
+
+Arbor, MI, USA 48109
+
+2
+ Department of Neurobiology, Northwestern University, Evanston, IL 60208
+
+
+*These authors contributed equally to this work
+#
+    Current Affiliation: GeneData, Lexington, MA 02421
+
+Corresponding author and lead contact:
+
+Ravi Allada, rallada@med.umich.edu
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Abstract
+
+Sleep is governed by two processes: a circadian process that times sleep and wake and a homeostatic process
+
+that drives sleep as a function of prior wake history. Discovered in the fruit fly Drosophila, the period (per) gene
+
+is a “universal” cornerstone of the circadian clock, robustly oscillating at the transcript level, in all organs and
+
+tissues and in essentially all animals. We hypothesized that there may be a comparable factor (we term “slee-
+
+per”) for sleep homeostasis. To identify sleeper genes, we performed a wide-ranging transcriptomic analysis to
+
+identify genes whose expression tracks sleep-wake history in the Drosophila brain. We analyzed a variety of
+
+methods to manipulate sleep-wake and subsequent rebound including mechanical, thermogenetic, optogenetic,
+
+pharmacological and baseline sleep across 7 datasets. Using a log2 fold change threshold of 1, we did not
+
+identify any gene that was sleep-wake dependent across all datasets, raising the possibility that genes identified
+
+with a single method of sleep manipulation are related to the nature of the manipulation and not necessarily to
+
+sleep. Nonetheless, we did identify genes whose expression changed with sleep-wake in a consistent direction
+
+across at least 2 datasets. These analyses highlight previous processes implicated in sleep homeostasis such
+
+as mitochondrial oxidative phosphorylation as well as provide potentially novel pathways such as ribosome
+
+biogenesis. In addition, we also examined genes whose expression correlates with prior sleep-wake history
+
+and/or predicted subsequent sleep rebound across these datasets. Among significantly correlated genes we
+
+observed some that were correlated with recent (<3h) sleep history while others were correlated with much
+
+longer (>6h) time frames suggesting temporally distinct pathways for integrating waking experience. This
+
+analysis also highlights specific GO pathways for sleep/wake/rebound. Applying a novel GPT based paper
+
+search algorithm, we call fl.ai, we identified several sleep-wake regulated genes with demonstrated function in
+
+sleep regulation consistent with an in vivo homeostatic function. These include those involved in immunity,
+
+neuropeptide signaling, glucose transport, and neuronal excitability. Collectively, these studies suggest that
+
+sleep homeostasis is a much more molecularly distributed process than the core circadian clock.
+        bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+      (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                     available under a CC-BY 4.0 International license.
+
+
+
+
+Introduction
+
+Fundamental to an understanding of why we sleep is the homeostatic regulation of sleep. Loss of a night of
+
+sleep is followed by a sleep rebound, i.e., an increase in sleep duration or intensity, to recover lost sleep and
+
+return to its homeostatic set point. Homeostatic processes are classically modeled as closed loop negative
+
+feedback control systems. In the case of sleep, wakefulness is thought to result in the production of factors that
+
+steadily accumulate until they hit a threshold when sleep is triggered and the factors return to their set point
+
+levels. The circadian clock is thought to time the sleep-wake cycle by altering this homeostatic set point,
+
+ensuring consolidated sleep and wake times1-3. Yet our molecular understanding of this process is limited,
+
+especially related to other fundamental homeostatic processes. Synaptic strength4, 5, protein phosphorylation6-
+10
+     , and metabolic processes such as mitochondrial oxidative phosphorylation11, 12 and adenosine production13,
+
+are among the processes that have been proposed as key sleep homeostatic mechanisms.
+
+           To address this question, we have been leveraging the fruit fly Drosophila. The fly exhibits many of the
+
+cardinal properties of sleep including behavioral quiescence, elevated arousal threshold, and homeostatic
+
+regulation(reviewed in14, 15). Drosophila sleep is also important for long term memory consolidation16.
+
+Moreover, it exhibits electrical correlates and is similarly affected by drugs that also alter sleep in humans,
+
+such as the GABA-A agonist gaboxadol (4,5,6,7-tetrahydroisoxazolo-[5,4-c]pyridin-3-ol; THIP)17.
+
+           Sleep is also governed by a circadian clock. Molecular genetics in Drosophila has been pivotal to
+
+revealing the “universal” transcriptional feedback loops at the core of circadian timing18. CLOCK(CLK) along
+
+with its heterodimeric partner CYCLE activates the transcription of period (per) and timeless (tim). PER
+
+dimerizes with TIM and feeds back to repress CLK transcriptional activation. This results in high amplitude
+
+transcript rhythms of per and tim, among other core clock genes. These feedback loops are evident and largely
+
+synchronous across tissues and cell-types including in the brain, such that they are evident even in mixtures of
+
+bulk tissues, e.g., the Drosophila head19-27 or brain28. Many of the molecular components and the feedback
+
+logic are conserved across essentially all animals.
+
+           Inspired by the circadian clock, we reasoned that sleep homeostasis is similarly encoded at the
+
+transcriptional level and that it would be evident in whole brains. Many studies have used various methods to
+
+deprive sleep and assess the transcriptomic impact29-39. Yet these studies do not necessarily distinguish gene
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+expression changes related to the specific method of deprivation from those related to sleep loss. Thus, we
+
+reasoned that identifying genes whose expression changes across independent sleep deprivation (SD)
+
+methods would allow the discovery of “true” core sleep homeostatic factors. Here we find that overlap between
+
+sleep-wake regulated genes using diverse SD methods, while not uniform, is significantly greater than by
+
+chance and identifies both established and novel pathways implicated in sleep homeostasis. Moreover, many
+
+of these genes have established in vivo sleep functions consistent with a bona fide role in sleep homeostasis.
+
+This work highlights not a single dedicated pathway, as in the core circadian clock, but multiple diverse
+
+molecular pathways that each appear to contribute to the homeostatic regulation of sleep.
+
+
+
+
+Results
+
+To identify key mediators of sleep homeostasis, we reasoned that such factors should be evident independent
+
+of the method used to manipulate the sleep-wake cycle. Here we examine flies under baseline sleep-wake
+
+conditions (Zeitgeber Time 0,4,8,12,16,20 where ZT0 is lights-on and ZT12 is lights-off), after mechanical SD
+
+and after thermogenetically induced sleep and wakefulness (Fig. 1). We applied mechanical SD for 3, 6, and
+
+12 hours ending at ZT0 and each showed significant sleep loss and rebound (Fig. 1C,D). In addition, we
+
+induced sleep thermogenetically using R85C10-GAL4 in combination with TrpA1, a temperature-activated
+
+cation channel. We observed significant sleep promotion after 12h of daytime activation (29°C) and significant
+
+subsequent anti-rebound, consistent with the idea that sleep drive was dissipated (Fig. 2). Whole brains were
+
+dissected after each manipulation and then subjected to transcriptomic analysis using RNA-seq. In addition to
+
+the datasets we collected, we also analyzed published RNA-seq datasets collected from fly brains after sleep
+
+induction via optogenetic activation of dorsal fan shaped body and ventral nerve cord “Bowtie” neurons
+
+(R23E1040) using the red light-activated ion channel ChRimson (ChR) or chemical induction using THIP41. To
+
+assess the validity of our technique, we examined the expression of canonical clock genes (per, tim, and Clk)
+
+and observed high amplitude oscillations ranging from 3-10 fold in magnitude (Fig. 3) with the expected
+
+phase28, 33, 42, 43. Importantly, these data demonstrate that we can observe high amplitude transcript oscillations
+
+using whole brain samples.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Identification of Consistent Differentially Expressed Sleep and Wake Genes Across Datasets
+
+To identify comparable high amplitude, sleep homeostatic genes, we identified differentially expressed genes
+
+in each dataset with a log2 fold-change threshold of >1, which is still below that observed for whole brain core
+
+circadian gene oscillations (Fig. 3). Interestingly, we also note that the number of differentially expressed
+
+genes for mechanical SD peaked at 6h of sleep deprivation (for log2FC1, 321 genes v. 57 for MechSD3 and 39
+
+for MechSD12). We hypothesize that after 6h of SD, homeostatic set point thresholds may be triggered
+
+reversing these transcriptional changes resulting in fewer differentially expressed genes after 12h of SD. This
+
+is consistent with predicted homeostatic kinetics44. Thus, a cleaner molecular assessment may be best
+
+visualized using shorter SD stimuli45.
+
+        To identify genes that respond to sleep-wake manipulations across datasets, we selected genes that
+
+both change in at least 2 datasets and exhibit changes that are consistent with respect to sleep-wake state,
+
+i.e., if a transcript rises with wake in one condition, it also rises with wake (or falls with sleep) in a second
+
+dataset. Overall, we identify 98 consistent wake genes, i.e., up regulated in wake, and 16 consistent sleep
+
+genes, i.e., up regulated in sleep (Table S1). While most differentially expressed genes are non-overlapping
+
+between two datasets, we found that the overlap between many different datasets was greater than by chance.
+
+This suggests sleep- rather than method-related signal (Fig. 4A). We find that significant overlaps were
+
+evident using similar methods of sleep deprivation suggesting that the transcriptomic response may be related
+
+in part to the method rather than the sleep deprivation. For example, for wake genes for which there are
+
+significant numbers, the pairwise overlaps between the three mechanical sleep deprivation (MechSD3, 6, 12h)
+
+conditions ranges from 79-267x more than by chance.
+
+        Nonetheless, we also observed examples where distinct methods of sleep manipulation exhibited
+
+significant overlap suggesting the presence of sleep-related biological signals, i.e., homeostatic genes
+
+independent of method. For example, we observe significant overlap (11x) in regulated genes between
+
+mechanical sleep deprivation (3h) and THIP treatment for genes up regulated during wake. In addition, we
+
+found overlap for sleep up regulated genes between mechanical SD 6h and both thermogenetic
+
+(R85C10/TrpA1; 15x) and optogenetic (R23E10/ChR +ATR; 18x) activation (Fig. 4A). Notably, we also find
+
+substantial overlap between baseline sleep and both mechanical SD (12-20x), on the one hand, and
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+thermogenetic sleep promotion (R85C10/TrpA1; 14x) on the other, underscoring the notion that homeostatic
+
+mechanisms operate under baseline conditions (Fig. 4A). We also examined dataset overlap using UpSet
+
+plots, further underscoring the presence of genes that are not only consistent across datasets, including those
+
+within the mechanical SD datasets, but also the overlap between mechanical and other sleep-wake
+
+manipulations (Fig. 4B). Using these criteria, we find that these consistent sleep-wake genes are at most
+
+evident in just 4 datasets (out of 7 examined) indicating that there do not appear to be universal high amplitude
+
+transcriptomic markers of sleep homeostasis evident in the whole brain.
+
+        Using DAVID, we identified gene ontology categories enriched in these datasets (Fig. 5; Table S2).
+
+Among the GO categories enriched among wake genes were mitochondrially related GO terms (e.g.,
+
+mitochondrial inner membrane) consistent with those observed in the sleep homeostatic neurons, the dorsal
+
+fan shaped body (dFB)12. In fact, among the 13 such genes, 3 overlap with the 21 mitochondrial inner
+
+membrane genes identified from the dFB dataset. This result suggests that the dFB changes are evident in
+
+whole brains and may also extend beyond the dFB and is consistent with sleep-wake dependence of oxidative
+
+stress more broadly in the brain and even outside the brain46-48. We also identified novel pathways including
+
+those involved in protein translation and immune/defense response. Immune regulation has been functionally
+
+linked to sleep in Drosophila49-51. We did not identify any significantly enriched GO categories from the sleep
+
+up regulated genes.
+
+        To determine if these candidate homeostatic markers play an in vivo functional role in sleep wake
+
+regulation, we developed a GPT based method we term fl.ai (pronounced “fly”), to mine the literature for links
+
+between sleep-wake candidate genes and in vivo sleep-wake effects (see Methods). This approach
+
+aggregates references (Flybase, PubMed, and Europe PMC) and then scrapes full paper text (PubMed Central
+
+Open Access, Europe PMC, Unpaywall, OpenAlex, Crossref, and DOI.org Resolver). We then apply GPT5-
+
+Nano to generate reference summaries from the text and then GPT5-mini to aggregate the reference
+
+summaries and categorize the gene as circadian or sleep related. GPT provides a confidence score based on
+
+the level of evidence in support. 21 genes show a circadian association, 8 show a sleep association, and 7
+
+associate with both (see Table S3). For example, the immune-induced secreted Bomanin peptide gene
+
+BomBc2 displays robust up regulation by 3, 6, and 12 h of mechanical sleep deprivation (Table S1). Glial
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+knockdown of BomBc2 significantly reduces nighttime sleep consistent with an in vivo sleep function32,
+
+suggesting that wake associated increases in BomBc2 observed here may subsequently promote sleep,
+
+forming a functional homeostatic feedback loop.
+
+        As we did not identify any sleep-wake genes that are evident across all datasets, we opted to lower our
+
+fold-change threshold to log2(0.5) but maintain our rigorous statistical threshold (q<0.05) to see if such genes
+
+became evident. Following the pipeline, we identified 647 consistent wake and 141 consistent sleep genes
+
+(Table S1). Consistent with the idea that we are capturing more signal versus noise at the lower threshold, we
+
+observe many more datasets exhibiting significant overlap between consistent sleep/wake genes (Fig. 6A). We
+
+now observe uniform overlap among all three mechanical SD datasets for both sleep and wake genes (36x-
+
+286x more than by chance). In addition, we again observe overlap between baseline and mechanical SD
+
+datasets (4-7x for wake genes) consistent with shared transcriptomic responses and molecular mechanisms.
+
+Most remarkably, we now observe significant and uniform overlap of wake associated genes between baseline
+
+(2-7x), ChR (3-8x) and THIP (2-10x) datasets and all of the other datasets, highlighting potential responses
+
+independent of the method of sleep-wake manipulation. UpSet plots now show that one gene encoding the
+
+ribosomal protein subunit RpL23 is evident in 6 out of the 7 datasets (Fig. 6C). Wake GO analysis (Fig. 7A;
+
+Table S2) revealed a much larger list of enriched categories but continued to include KEGG pathways for
+
+Ribosome and Oxidative Phosphorylation as in the log2FC1 dataset, including several genes encompassing
+
+the Mitochondrial Inner Membrane GO category (Fig. 7B). Among the sleep genes (Fig. 7C), plasma
+
+membrane (cellular compartment), ATP binding (molecular function) and calcium ion binding (molecular
+
+function) are among the enriched pathways.
+
+        To identify potential upstream regulators that may orchestrate sleep-wake dependent gene regulation,
+
+we used the HOMER algorithm52 to identify sequences enriched in genomic regions up to 1kb upstream of
+
+their transcription start sites (Fig. S1). Among the most significant hits among wake induced genes includes the
+
+palindromic E box sequence CAGCTG, a classical binding site for basic helix-loop-helix transcription factors.
+
+We identified four such factors among our wake-induced genes including bigmax, HLH3B, E(spl)m3-HLH, and
+
+E(spl)mbeta-HLH (Table S1), suggesting these factors may be direct upstream regulators of wake-induced
+
+gene expression.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+        When we ran fl.ai, we found that 170 of the wake genes had a circadian (110), sleep (39) or both (21)
+
+association and 46 of the sleep genes (23 circadian, 7 sleep, 16 both). Notable are neuropeptide genes such
+
+as Pigment Dispersing Factor (PDF) and SIFamide (SIFa) as well as a host of mitochondrially encoded genes.
+
+PDF and SIFa were both induced after 3 and 6h of mechanical sleep deprivation. In addition to its role in
+
+coordinating circadian rhythms, PDF promotes wakefulness53-55, suggesting the transcriptional response
+
+further sustains wakefulness. On the other hand, SIFa promotes sleep56, 57 suggesting that the transcriptional
+
+response supports homeostasis, i.e., wake-induced up regulation of SIFa transcript in turn will drive sleep.
+
+Several other neuropeptide genes are also wake-induced and neuropeptide hormone activity is an enriched
+
+wake pathway (Table S2). Notably, among the sleep up regulated genes are three members of the NARROW
+
+ABDOMEN (NA) cation leak channel complex including na itself as well as regulatory subunits unc79 and
+
+unc80, each of which exhibit time-dependent oscillation peaking at the end of the sleep period while both are
+
+down regulated in MechSD6 (Table S1). As is the case for PDF, the NA/UNC79/UNC80 channel complex is
+
+important for circadian rhythms of neuronal activity in clock neurons as well as circadian behavior58-60. In
+
+addition, unc79 knockdown results in elevated sleep, even under wake-inducing starvation conditions61. Thus,
+
+the coordinated expression of sleep induced expression of unc79, as well as na and unc80, may result in
+
+subsequent wakefulness, consistent with a homeostatic feedback role. In contrast, vGlut is induced by sleep,
+
+yet may play a non-homeostatic role in sleep maintenance. Knockdown of vGlut in a subset of sleep-promoting
+
+dFB neurons significantly reduces sleep62. Taken together, these findings suggest a complex interplay
+
+between homeostatic forces and state-sustaining forces. Moreover, our analysis has identified several
+
+transcript markers of sleep-wake history consistent across at least 2 datasets which have been validated with
+
+an in vivo sleep-wake role consistent with a homeostatic function.
+
+
+
+Identification of Transcripts Correlated with Sleep-Wake History and/or Rebound
+
+Given that our preliminary analysis did not identify a candidate sleep-wake or homeostatic marker across all
+
+datasets, we complemented this approach to see if there were markers that correlate with sleep-wake and/or
+
+sleep rebound integrating data across all of our datasets. Here we also include four TrpA1 lines whose
+
+controls showed acute temperature dependent effects on sleep and TrpA1 dependent sleep rebound effects.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Previous studies have demonstrated that wakefulness can be thermogenetically induced via activation of
+
+TrpA1; however, not all wake-promoting driver lines can induce a subsequent rebound63. We identified four
+
+lines, collectively referred to as WakeGAL4s, that showed significant wake promotion after 12 h activation (Fig.
+
+S2). Here we used briefer 3h activation to identify acute activation effects and observed significant rebound
+
+with HC-GAL464, but not with three other lines (R21H11-GAL4, R60F09-GAL4, R65H02-GAL4; Fig. S3A-D). A
+
+closer analysis of the HC-GAL4 line suggests that it drives expression in previously described wake-promoting
+
+pickpocket peripheral neurons65 and wake and rebound effects observed during thermogenetic activation of
+
+HC-GAL4 neurons could be blocked by GAL80 expression in pickpocket neurons (Fig. S4). As we observed
+
+acute thermal effects even in non-TrpA1 controls, we could not observe significant wake effects in TrpA1-
+
+expressing flies during this briefer activation relative to 29°C controls (Fig. S4). As a result, we did not include
+
+these datasets in our initial differential gene expression analysis but did include them in our correlation
+
+analyses here. We also removed two published datasets, optogenetic and THIP41, for which we did not have
+
+direct sleep data to perform correlations. We then asked if there were genes whose expression correlated with
+
+sleep-wake history prior to sampling and/or sleep rebound after sampling across these 9 datasets. We also
+
+considered the possibility that gene expression may integrate sleep-wake experience over different time
+
+scales. Thus, we also considered correlations over distinct bins of sleep wake history from 0-1h prior to 0-12h
+
+prior or sleep rebound 0-1h after to 0-12h after. We used Pearson correlation to identify linear correlations
+
+between sleep/sleep rebound amount and log2 normalized gene expression (transcripts per million reads). We
+
+also corrected for false discovery and selected genes using a stringent q<0.05 threshold.
+
+        Using this approach, we identified 149 genes that positively correlate with sleep history (i.e. genes that
+
+may be up regulated by sleep) and 66 genes that negatively correlate with sleep history (i.e., genes that may
+
+be up regulated by wake: Table S4). To better visualize the data, we created an expression heat map and
+
+clustered genes and samples by similarity (Fig. 8). Using this approach, we find that samples show clear
+
+clustering based on temperature with 21°C, 25°C, and 29°C samples clustering together irrespective of sleep-
+
+wake condition. Nonetheless, we observe clustering of mechanical sleep deprivation samples whether 3, 6 or
+
+12h taken at ZT0 separately from baseline ZT0 samples. Within the 29°C cluster, we observe separation of
+
+GAL4/TrpA1 from GAL4/+ consistent with activation-dependent gene expression. Notably, the sleep promoting
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+R85C10/TrpA1 at 29°C clearly separates from all other 29°C samples including other wake GAL4/TrpA1 lines,
+
+indicating a transcriptomic response in this sleep promoting line distinct from controls and other 29°C samples
+
+(both GAL4/TrpA1 and GAL4/+). Interestingly, R85C10/TrpA1 clusters with other 21°C samples, suggesting
+
+that activation may mimic the sleep-inducing effects of cooler temperatures66, 67 at the transcriptome level.
+
+Thus, the correlation approach appears to identify sleep-wake relevant transcriptomic responses.
+
+        To identify genes that are similarly regulated by cooler ambient temperature (21°C) and by R85C10
+
+neuronal activation (29°C), we first defined putative thermally regulated genes as those differentially expressed
+
+between WakeGAL4/+ 29°C control and WakeGAL4>TrpA1 21°C (Table S5). In addition, we examined
+
+R85C10/TrpA1 29°C versus R85C10/+ 29°C to examine R85C10 activity dependent gene expression. We
+
+then selected overlapping genes between those two sets as putative candidates for R85C10 activation gene
+
+regulation that mimic cooler temperature. We then overlaid this list with our sleep correlated gene list.
+
+Notably, we find two neuropeptide receptor genes AstA-R2 and AstC-R1 that correlate with sleep history
+
+and/or rebound and are either up or down regulated under cooler temperatures and R85C10 activation (Table
+
+S5). Allatostatin-A and -C (AstA and AstC) are neuropeptides that play important roles in both thermal and
+
+sleep responses in part as key neuropeptides for the thermosensory lateral posterior neurons (LPNs) 68-72 and
+
+circadian clock dorsal neurons 3 (DN3s73).
+
+        Plotting the correlations across time bins from 0-1 to 0-12h for both positively and negatively correlated
+
+genes, we find gene subsets which display stronger correlations over shorter bins while others display stronger
+
+correlations over longer bins (Fig. 9). We hypothesize that the expression of the former integrates sleep-wake
+
+experience over shorter time scales while the latter integrates over longer time scales. Gene ontology
+
+analyses of genes upregulated after wake (Table S6) showed genes involved in immune defense (Fig. 10A).
+
+Genes upregulated after sleep (Fig. 10B) counterintuitively revealed a dominant role for mitochondrial
+
+pathways, including those associated with the mitochondrial inner membrane. Our prior analysis (Fig. 7B) and
+
+published work12 suggested that these genes linked to the mitochondrial inner membrane are up regulated
+
+after wake, while this correlation analysis shows they are up regulated after sleep. To resolve this potential
+
+discrepancy, we compared the gene lists and found that they were entirely non-overlapping suggesting sleep
+
+and wake target the mitochondrial inner membrane in discrete ways. Another enriched GO term is
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+solute:sodium transporters (Fig. 10) consisting of the SLC5A transporters rumpel, bumpel, and kumpel. These
+
+transporters are expressed in ensheathing glia and are thought to transport glucose to neurons to drive ATP
+
+production74. Notably, mutants of rumpel display reduced daytime sleep74. Thus, wake dependent increases in
+
+these transporters may function to promote sleep closing a homeostatic loop.
+
+         We also performed a parallel analysis for gene expression that correlates with sleep rebound, i.e., the
+
+difference in sleep amount before and after a perturbation. Here we identify 63 genes that demonstrate a
+
+positive correlation (more sleep rebound, more gene expression) and 258 genes that exhibit a negative
+
+correlation (less sleep rebound, more gene expression; Fig. 11, Table S4). As for sleep history we also
+
+observe genes that exhibit correlations over shorter term rebound and others over longer term rebound periods
+
+(Fig. 12). GO analysis (Table S6) reveals a role for immune-related defense pathways that are positively
+
+correlated with wake after sampling (Fig. 13). Given that immunity is also positively correlated with wake prior
+
+to sampling, it suggests a general role of immune genes in wake regulation rather than a homeostatic function.
+
+We then examined the overlap between genes correlated with sleep history and also sleep rebound (Table
+
+S4). We identified 15 genes that are positively correlated with sleep prior to sampling but negatively correlated
+
+with sleep after sampling suggesting that these genes reflect sleep-wake experience and can induce a
+
+homeostatic response. 5 additional genes are negatively correlated with sleep history and positively correlated
+
+with rebound. Remarkably there were no genes that exhibited a positive correlation both before and after
+
+sampling or a negative correlation before and after suggesting that these associations reflect true biological
+
+signals. One of these genes, AstA-R2, has an established role in sleep regulation75 (Fig. 14, Table S7). AstA-
+
+R2 expression has a positive correlation with sleep history and a negative correlation with sleep rebound,
+
+suggesting that AstA-R2 declines with wake and this may then trigger subsequent sleep rebound. Knockdown
+
+of AstA-R2 in blood-brain barrier glia elevates daytime sleep, consistent with a wake promoting role75. Trh, the
+
+rate-limiting enzyme for serotonin biosynthesis, is similarly positively associated with sleep–wake history and
+
+negatively associated with sleep rebound. Notably, loss of Trh leads to both reduced baseline sleep and
+
+diminished rebound sleep76. In parallel, serotonin levels track with sleep pressure77, supporting a model in
+
+which Trh regulation drives wake history–dependent serotonin production, which in turn promotes rebound
+
+sleep.
+      bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+    (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                   available under a CC-BY 4.0 International license.
+
+
+
+
+         CG9377, a predicted serine-type endopeptidase family member, exhibits the opposite response, i.e., a
+
+negative correlation with sleep history and positive correlation with sleep rebound (Fig. 14). CG9377 is
+
+selectively expressed in ensheathing glia and is down regulated by water deprivation78. Notably ensheathing
+
+glia have been implicated in sleep homeostasis79. Taken together, this correlation analysis identifies markers
+
+that track sleep-wake history and predict sleep rebound with bona fide in vivo sleep functions.
+
+.
+
+Discussion
+
+In this study, we sought to identify core molecular mediators of sleep homeostasis that operate independent of
+
+the method used to manipulate the sleep–wake cycle. By integrating whole-brain transcriptomics across
+
+baseline conditions, mechanical sleep deprivation, thermogenetic and optogenetic manipulations, and
+
+pharmacologic sleep induction, we did not identify a universal high-amplitude transcriptional marker of sleep
+
+pressure. Instead, sleep homeostasis appears to emerge from distributed and partially overlapping gene
+
+programs, some method-specific and others shared across perturbations. Across analytical approaches,
+
+including differential gene expression, dataset overlap, correlation with sleep history and rebound, and GPT-
+
+assisted literature mining (fl.ai), we identify candidate genes and pathways with functional in vivo relevance,
+
+including neuropeptidergic signaling (e.g., SIFa, AstA-R2), the NA/UNC79/UNC80 sodium leak channel
+
+complex, ribosomal components, immune effectors, and mitochondrial oxidative phosphorylation genes.
+
+Together, these findings argue that sleep homeostasis is not encoded by a single transcriptional signature but
+
+instead reflects convergent, multi-pathway molecular processes that integrate sleep–wake history across time
+
+scales and contribute to rebound sleep.
+
+         Our data indicate that the transcriptomic response to one method of sleep manipulation shows
+
+surprisingly limited overlap with that induced by alternative approaches. Importantly, we did not identify a
+
+universal transcriptomic marker of sleep homeostasis across all datasets, even when lowering our threshold to
+
+log2FC ≥ 0.5, well below the magnitude observed for core circadian clock genes. One possibility is that such
+
+factors may be evident in a cell-type specific manner necessitating more targeted80 or higher resolution single
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+cell methods33, 81. Nonetheless, these results suggest that sleep homeostasis is not governed by a single large-
+
+amplitude transcriptional program, but rather by context-dependent molecular responses.
+
+        Despite this heterogeneity, we observed significant overlap between genes modulated under baseline
+
+sleep–wake conditions and those altered by multiple sleep perturbations, most notably mechanical sleep
+
+deprivation. This pattern supports the idea that homeostatic processes are continuously engaged during
+
+normal wakefulness, rather than being triggered solely by extreme perturbation. These findings are consistent
+
+with two-process models of sleep regulation as well as forced desynchrony studies 2, 82, 83. Indeed,
+
+transcriptomic studies in mouse cortex have also found a significant overlap between circadian and sleep
+
+deprivation regulated genes84. We propose that core homeostatic mechanisms should therefore be evident
+
+under baseline conditions.
+
+        By integrating transcriptomic data across diverse sleep–wake conditions with GPT-assisted literature
+
+mining, differential gene expression analysis, and gene correlation approaches, we identified genes that are
+
+consistently modulated across sleep–wake states under multiple conditions and that alter sleep in vivo when
+
+genetically perturbed in a manner consistent with a homeostatic function. Among these are unc79, a
+
+component of the sodium leak channel complex; the neuropeptide SIFa; the glucose transporter rumpel; AstA-
+
+R2, an AstA receptor, and Trh, the rate limiting enzyme for serotonin synthesis. Together, these findings
+
+highlight the diverse molecular architecture underlying sleep homeostasis, spanning ion channel regulation,
+
+neuropeptidergic and neuromodulator signaling, metabolism, and nutrient transport. We also identify a
+
+ribosomal protein gene regulated across several sleep–wake manipulations, suggesting a wake-dependent
+
+role in ribosome biogenesis and potentially global protein translation. Of note, genetically increasing ribosomal
+
+RNA expression promotes sleep85. This raises the possibility that sleep–wake history dynamically shapes
+
+translational capacity to mediate sleep homeostasis38, 86.
+
+        An examination of orthologous pathways in mammals suggests that the functional homeostatic genes
+
+identified in Drosophila are evolutionarily conserved. The mammalian orthologs of Drosophila na, unc80,
+
+and unc79—NALCN, UNC80, and UNC79, respectively—have also been genetically linked to sleep regulation.
+
+A large-scale chemical mutagenesis screen in mice identified a semidominant gain-of-function mutation
+
+in Nalcn, termed dreamless, that produced a marked reduction in REM sleep87. Notably, this mutation also
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+altered theta-range power during NREM sleep, suggesting a broader role in sleep regulation beyond REM
+
+sleep alone. Consistent with these findings, mutations in human UNC8088 and NALCN89-91 have also been
+
+associated with altered sleep levels or sleep organization.
+
+        Our identification of a homeostatic role for the serotonin biosynthetic enzyme tryptophan hydroxylase is
+
+likewise consistent with mammalian studies. In both zebrafish and mice, activation of serotonergic raphe
+
+neurons promotes sleep, whereas ablation of these neurons impairs both sleep and the homeostatic response
+
+to sleep deprivation, supporting a conserved role for serotonergic signaling in sleep homeostasis92.
+
+        Conservation is also evident at the level of gene regulation. Mitochondrial electron transport genes are
+
+upregulated in hippocampal astrocytes following sleep deprivation, although the opposite response has been
+
+reported in the prefrontal cortex93, suggesting region-specific regulation. In addition, genes involved in protein
+
+translation and 40S ribosome assembly are enriched among synaptic transcripts upregulated near the end of
+
+the natural wake period (pre-dusk) in mice31. This daily modulation is disrupted by sleep deprivation,
+
+suggesting that these pathways are sensitive to sleep pressure and may participate in homeostatic regulation.
+
+Several transcripts encoding ribosomal proteins are upregulated during wakefulness in rodents, including
+
+genes encoding Rpl21, Rpl17, and Mrpl2394, 95. E-box upstream elements and bHLH transcription factors have
+
+also been implicated in mammalian sleep96. Although a more systematic cross-species analysis will be
+
+required, these findings collectively suggest that key sleep–wake-dependent pathways and transcriptional
+
+programs may be conserved between flies and mammals.
+
+        Collectively, our findings do not support the existence of a single universal transcriptional marker of
+
+sleep pressure. Rather, sleep homeostasis appears to arise from distributed molecular programs spanning
+
+energy metabolism, redox regulation, neuronal excitability, neuropeptidergic signaling, and protein synthesis,
+
+consistent with the large number of diverse sleep genes thus far identified in flies97. In this framework, sleep
+
+need is not encoded by one dominant transcriptional signature but instead emerges from the coordinated
+
+activity of multiple interacting pathways that cumulatively register sleep–wake history over time and drive
+
+restorative rebound sleep. Interestingly, enrichment of E-boxes in potential transcriptional regulators
+
+sequences of wake-induced genes as well as wake-induced bHLH transcription factors that may target those
+
+E-boxes suggest potential key regulators that may orchestrate these diverse pathways. We hypothesize that
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+this distributed logic enables sleep homeostasis to integrate many types of waking experience, to integrate that
+
+experience over multiple time scales, and to maintain robustness to noise.
+
+
+
+Acknowledgements
+
+This research was supported by NIH R35NS132223 and the Eagles Autism Foundation to R.A., and NIH F32
+
+NS110183 to C.R.
+
+
+
+Methods
+
+Fly husbandry and stocks
+
+Flies were maintained on standard media composed of sucrose, yeast, agar and molasses in a 12:12 LD cycle
+
+between 21-25°C. Most of the fly lines used for sequencing experiments were acquired from the Bloomington
+
+Drosophila Stock Center (BDSC; Bloomington, IN) and include w1118 iso31 (#5905), UAS-TrpA1 attP16
+
+(#26263), R21H11-Gal4 (#48960), R60F09-Gal4 (#39255), R65H02-Gal4 (#48234), and R85C10-Gal4
+
+(#40424). HC-Gal4 was obtained from Marco Gallio 64. ppk-Gal80 was obtained from William Joiner63.
+
+
+
+TrpA1-mediated sleep deprivation and sleep promotion
+
+Male flies expressing Gal4 under the control of various promoters were crossed to virgin females containing a
+
+UAS-TrpA1 transgene. Progeny were collected and mated at 21°C in a 12hr:12hr LD cycle. Three to ten-day
+
+old female flies were loaded into 5 × 65 mm glass behavior tubes containing 5% sucrose-2% agar medium. Fly
+
+behavior was recorded using the Drosophila Activity Monitoring System (DAM System) from Trikinetics and
+
+analyzed using Sleepmat software98. Activity was measured in 1 min bins and sleep was identified as 5 min of
+
+inactivity99, 100. For all experiments, flies were allowed to acclimate to the tube during the loading day. Following
+
+acclimation, the flies were monitored for at least 24 hrs of baseline sleep at 21°C. Afterwards, flies were
+
+subjected to various lengths of exposure to 29°C depending on the experiment. For wake-promoting lines, flies
+
+were shifted to 29°C from ZT21 to ZT24 (i.e., for 3 hrs at the end of the night until lights on). For the sleep-
+
+promoting line R85C10-Gal4, flies were shifted to 29°C from ZT0 to ZT12 (ie. for all 12 hrs of the lights on
+
+period). For all RNA-seq experiments, flies were collected immediately at the end of the 29°C temperature
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+shift. Flies were 5-14 days old at the time of collection for RNA-seq. For behavior experiments, flies were
+
+returned to 21°C for measurements of sleep activity in the aftermath of TrpA1 activation. Change in sleep
+
+during activation was calculated as the difference between sleep during activation and sleep during the
+
+equivalent 12 hr period occurring 24 hrs beforehand at baseline. Change in sleep following activation was
+
+calculated as the difference between sleep during rebound immediately following activation and sleep during
+
+the equivalent 12 hr occurring 24 hrs beforehand at baseline.
+
+
+
+Mechanical sleep deprivation
+
+Age-matched Iso31 flies were collected and mated at 25°C in a 12hr:12hr LD cycle. Four to six day-old mated
+
+female flies were placed in 5 × 65 mm glass behavior tubes containing 5% sucrose-2% agar medium. Tubes
+
+were loaded into small DAMS boards which were subsequently secured on a multi-tube vortexer (VWR-2500)
+
+fitted with a mounting plate (Trikinetics, Waltham, Massachusetts, USA) inside an incubator maintained at 25
+
+°C in a 12:12 LD cycle. Following acclimatization on the loading day, a baseline period was recorded for at
+
+least 24 hrs. Mechanical sleep deprivation (SD) was performed by delivering a 2 second vibration stimulus
+
+randomized within consecutive 20 second intervals throughout the night. Behavioral data was recorded
+
+throughout the experiment using the DAM System and data was analyzed using SleepMat software98. For SD
+
+experiments only flies deprived of >90% of baseline sleep at each SD interval were analyzed. Sleep gain was
+
+calculated as the difference between sleep during rebound and sleep during the equivalent 12 hr at baseline.
+
+For RNA-seq experiments, flies were collected from the incubator at ZT0 immediately after the end of SD.
+
+Each SD was timed to end at lights on — thus, 3 hr SD began at ZT21, 6 hr SD began at ZT18, and 12 hr SD
+
+began at ZT12. Flies were 7-9 days old at the time of collection for RNA-seq.
+
+
+
+Circadian profiling
+
+Age-matched Iso31 flies were collected and mated at 25°C in a 12hr:12hr LD cycle. Four to five day-old mated
+
+female flies were placed in 5 × 65 mm glass behavior tubes containing 5% sucrose-2% agar medium. Tubes
+
+were loaded into small DAMS boards (Trikinetics, Waltham, Massachusetts, USA) inside an incubator
+
+maintained at 25 °C in a 12:12 LD cycle. Following acclimatization on the loading day, a baseline period was
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+recorded for at least 24 hrs. Behavioral data was recorded using the DAM System and data was analyzed
+
+using SleepMat software98. For RNA-seq experiments, flies were collected from the incubator at ZT0, 4, 8, 12,
+
+16, and 20 for immediate dissection. Flies collected during the dark period (ZT12, 16, 20) were kept out of the
+
+light until it was time to dissect. Flies were 6-8 days old at the time of collection for RNA-seq.
+
+
+
+Dissection for whole brain RNA-seq
+
+For whole brain bulk RNA-sequencing experiments, the appropriate flies were collected from incubators as
+
+described above. Fly behavior was quickly analyzed using Sleepmat software to rule out dead flies or flies that
+
+did not meet the criteria for sleep deprivation (>90% deprivation) or promotion (>90% sleep) depending on the
+
+experiment 98. For TrpA1 experiments, we collected flies from the experimental group, which contained both a
+
+Gal4 and UAS-TrpA1 and were exposed to the temperature pulse, as well as two groups of control flies. One
+
+control contained both a Gal4 and UAS-TrpA1 but was maintained at 21°C throughout the experiment while
+
+the other contained only a Gal4 and was exposed to the 29°C temperature pulse. For mechanical sleep
+
+deprivation and circadian profiling experiments, flies were maintained at a constant temperature (25°C) and
+
+kept in a 12h:12h LD cycle. Any flies collected during the dark period of the cycle were kept in the dark until
+
+they could be anesthetized with carbon dioxide and decapitated.
+
+        Brains were dissected in in ice-cold dissecting saline containing 9.9 mM HEPES-KOH buffer, 137 mM
+
+NaCl, 5.4 mM KCl, 0.17 mM NaH2PO4, 0.22 mM KH2PO4, 3.3 mM glucose, 43.8 mM sucrose, pH 7.4 and a
+
+cocktail of channel blockers (0.1 μM tetrodotoxin (TTX), 20 μM 6,7-dinitroquinoxaline-2,3- dione (DNQX), and
+
+50 μM D(–)–2-amino-5-phosphonopentanoic acid (AP-5) to block neuronal activity during dissection and
+
+processing. Channel blockers were added to the dissecting saline immediately before use. Fifteen brains were
+
+used for each replicate and three replicates were used for each condition. Once all brains were dissected, they
+
+were transferred to a LoBind microcentrifuge tube and spun down at 2000 rpm for 1 min before removing the
+
+dissecting saline. They were washed twice with 500 μL of dissecting saline with TTX, AP5, and DNQX. All the
+
+saline was removed and 100 μL of extraction buffer from the Arcturus PicoPure kit was added. Then the brains
+
+were vortexed for 30 seconds and incubated at 42°C for 30 min before being stored at -80°C.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Library Preparation
+
+Once all samples were collected, total RNA was isolated using the Arcturus PicoPure kit with on-column
+
+DNaseI digestion. RNA was subjected to quality control assessment on a Bioanalyzer Pico chip and quantified
+
+on a Qubit fluorometer. RNA was used to generate sequencing libraries using the NEBNext Ultra II RNA
+
+Library Prep Kit and following manufacturer instructions. mRNA was selected prior to reverse transcription
+
+using the NEBNext Poly(A) mRNA Magnetic Isolation Module. Library quality was assessed on a Bioanalyzer
+
+High Sensitivity DNA chip and quantity was assessed on a Qubit fluorometer. Libraries were sent to Novogene
+
+for sequencing on a NovaSeq. At least ten million 150 bp paired end reads were generated per sample.
+
+
+
+RNA Sequencing Data Analysis
+
+Reads were pseudo aligned and quantified using Kallisto (v0.46.1)101 against a prebuilt index file constructed
+
+from Ensembl reference transcriptomes (v96). Kallisto was used to process paired end reads with 10
+
+bootstraps. Differential expression analysis of the resulting abundance estimate data was then performed with
+
+Sleuth (v0.30.0102). Gene-level abundance estimates were computed by summing transcripts per million (TPM)
+
+estimates for transcripts for each gene. To measure the effect of a particular condition against another
+
+condition for a variable, sleuth uses a Wald test which generates p values as well as q values (an adjusted p
+
+value using the Benjamini-Hochberg procedure). For rhythmic analysis of circadian profiling control data,
+
+circadian samples were collected at six time points: ZT0, ZT4, ZT8, ZT12, ZT16, and ZT20. Rhythmicity was
+
+assessed using the RAIN algorithm103 with three biological replicates per time point. Genes were considered
+
+rhythmic if they met the criteria of log₂(fold change) > 0.5 and Benjamini–Hochberg adjusted Q value (BH Q) <
+
+0.05. Fold change was calculated as the difference between peak and trough expression values (maximum
+
+minus minimum expression). RNA-sequencing data generated and analyzed in this study have been deposited
+
+in the Gene Expression Omnibus (GEO) under accession number GSE322542.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Classification of consistently sleep and wake associated transcripts
+
+We analyzed differentially expressed and cycling transcripts from seven whole-brain sleep/wake experiments
+
+(Baseline, R85C10>TrpA1, MechSD3, MechSD6, MechSD12, and *THIP, and *R23E10>ChR) to identify
+
+genes consistently associated with sleep or wake state (*41). Within each experiment, genes were classified by
+
+expression direction relative to the manipulation: genes upregulated under sleep-promoting conditions or
+
+downregulated under wake-promoting conditions were labeled sleep-associated, whereas the converse were
+
+labeled wake-associated. We first defined a higher-amplitude gene set (FC1) using a threshold of |log2FC| > 1
+
+and q < 0.05 as a statistical threshold for classifying a gene as ‘sleep’, ‘wake’ or ‘cycling’ within an experiment.
+
+A gene was retained in the consistent sleep set if it was classified as sleep-associated in at least two of the
+
+seven experiments and never classified as wake-associated in any experiment; consistent wake genes were
+
+defined analogously. Cycling transcripts in baseline, after gating by fold-change and q-value thresholds, were
+
+treated as a wild-card supporting both wake- and sleep classifications.
+
+
+
+Overlap analysis
+
+To assess similarity between experiments, we performed pairwise overlap analyses using one-sided Fisher’s
+
+exact tests, with the background defined as the intersection of genes detected in both datasets (>50% of
+
+samples non-zero within each experiment). P-values were adjusted separately for sleep and wake
+
+comparisons using the Benjamini–Hochberg method. We then repeated the same analysis using a lower fold-
+
+change threshold (FC0.5; |log2FC| > 0.5, q < 0.05). The sleep-wake analyses, including overlap-enrichment
+
+tables and UpSet plots, were generated using a custom Hugging Face Streamlit app.
+
+https://huggingface.co/spaces/aadish98/Allada_GeneRef_Search
+
+
+
+Gene Ontology Enrichment Analysis
+
+Functional enrichment analysis was performed using the NIH DAVID web service (DAVID Bioinformatics
+
+Resources). Gene lists were submitted as FlyBase gene IDs (FLYBASE_GENE_ID) for Drosophila
+
+melanogaster (species 7227). Enrichment was evaluated in GOTERM_BP_DIRECT, GOTERM_CC_DIRECT,
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+GOTERM_MF_DIRECT, and KEGG_PATHWAY categories using DAVID Functional Annotation Chart
+
+(minimum term count = 1). Terms with FDR < 10% were defined as statistically significant. The CLI tool used
+
+for executing the analysis and visualization plots are published on GitHub:
+
+https://github.com/aadish98/GO_Analysis
+
+
+
+Motif Enrichment Analysis
+
+Motif enrichment analysis was performed using HOMER (Hypergeometric Optimization of Motif EnRichment)52.
+
+Gene lists corresponding to sleep and wake associated genes (log2FC > 0.5) were analyzed using the
+
+findMotifs.pl function with the Drosophila melanogaster genome as reference. Promoter regions were defined as
+
+−1000 bp upstream to +50 bp downstream of the transcription start site (TSS). HOMER automatically generated
+
+background sequences matched for GC content and sequence composition. Enriched transcription factor binding
+
+motifs were identified using a hypergeometric test, and motifs were ranked based on statistical significance (p-
+
+value). The top enriched motifs were selected for visualization.
+
+
+
+Correlation Between Sleep History or Rebound and Gene Expression
+
+Correlation analyses were performed using gene-level TPM values. Genes with TPM < 1 in more than 50% of
+
+samples were excluded to remove low-expressed genes that could produce unstable or spurious correlations.
+
+For each experimental condition, the three biological replicates were averaged, and the resulting mean TPM
+
+values were log-transformed prior to correlation analysis. Behavioral sleep measurements were averaged
+
+across all flies within each condition. We examined the relationship between gene expressions and two types
+
+of sleep metrics:
+
+   1. Sleep before sampling (sleep history)
+
+        Cumulative sleep was calculated over increasing time windows prior to sample collection (1 h, 2 h, …,
+
+        up to 12 h before sampling). For example, the 2-hour value represents the total sleep across the
+
+        preceding 2 hours, not a rolling 1-hour window. Pearson correlations were computed between log-
+
+        transformed gene expressions and each of these 12 cumulative sleep intervals. All samples were
+
+        included in this analysis.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+    2. Sleep rebound
+
+        Sleep rebound was defined as the difference between cumulative sleep after sampling (1–12 h) and the
+
+        corresponding cumulative baseline sleep (1–12 h) for each condition. Pearson correlations were
+
+        computed between gene expression and each of the 12 rebound intervals. Circadian-control samples
+
+        were excluded from this analysis.
+
+All correlations were assessed using Pearson correlation coefficients. Statistical significance was determined
+
+using Benjamini–Hochberg–adjusted p-values, with q < 0.05 considered significantly correlated.
+
+
+
+LLM-Assisted Literature Review and Gene Classification for Sleep/Circadian Genes
+
+To systematically evaluate whether candidate sleep-wake associated and correlated genes have published
+
+evidence linking them to sleep or circadian biology, we developed an LLM-assisted literature review pipeline
+
+(fl.AI-CLI). The pipeline converts input gene symbols to FlyBase identifiers, then retrieves candidate references
+
+from three complementary sources (FlyBase, PubMed, Europe PMC), deduplicates them at the PMCID level,
+
+and ranks by cross-source agreement and recency. References are filtered by keyword relevance (sleep,
+
+circadian) in title/abstract metadata, and full text is retrieved where available via open-access repositories
+
+(PMC Open Access, Europe PMC, PMC HTML, Unpaywall, OpenAlex, Crossref and DOI resolver.) For each
+
+gene, an LLM (GPT5-nano) summarizes gene-specific evidence (functional role of gene, supporting
+
+phenotypic evidence and reagents used to illicit the phenotype) from up to six passing and relevant references;
+
+reference summaries are aggregated per gene, which are then classified by an LLM (GPT5-mini) into keyword
+
+categories “sleep”, “circadian” (or both) with a confidence score (0–100) and brief rationale. The output is an
+
+annotated spreadsheet containing per-gene classifications and the supporting reference summaries used to
+
+derive them. The CLI tool is made publicly available through GitHub: https://github.com/aadish98/fl.AI-gene-
+
+classification.
+
+
+
+Declaration of generative AI and AI-assisted technologies in the manuscript preparation process
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+During the preparation of this work, the authors used ChatGPT for editing and grammar of specific sections.
+
+The authors reviewed and edited the output as needed and take full responsibility for the content of the
+
+published article.
+
+
+
+
+                                                                    References
+
+1.      Borbely AA, Wirz-Justice A. Sleep, sleep deprivation and depression. A hypothesis derived from a
+model of sleep regulation. Hum Neurobiol. 1982;1(3):205-10. PubMed PMID: 7185793.
+2.      Daan S, Beersma DG, Borbely AA. Timing of human sleep: recovery process gated by a circadian
+pacemaker. The American journal of physiology. 1984;246(2 Pt 2):R161-83. doi:
+10.1152/ajpregu.1984.246.2.R161. PubMed PMID: 6696142.
+3.      Skeldon AC, Dijk DJ. The complexity and commonness of the two-process model of sleep regulation
+from a mathematical perspective. NPJ Biol Timing Sleep. 2025;2(1):24. Epub 20250618. doi: 10.1038/s44323-
+025-00039-z. PubMed PMID: 40546978; PMCID: PMC12176636.
+4.      Sawada T, Iino Y, Yoshida K, Okazaki H, Nomura S, Shimizu C, Arima T, Juichi M, Zhou S,
+Kurabayashi N, Sakurai T, Yagishita S, Yanagisawa M, Toyoizumi T, Kasai H, Shi S. Prefrontal synaptic
+regulation of homeostatic sleep pressure revealed through synaptic chemogenetics. Science.
+2024;385(6716):1459-65. Epub 20240926. doi: 10.1126/science.adl3043. PubMed PMID: 39325885.
+5.      Tononi G, Cirelli C. Sleep and the price of plasticity: from synaptic and cellular homeostasis to memory
+consolidation and integration. Neuron. 2014;81(1):12-34. doi: 10.1016/j.neuron.2013.12.025. PubMed PMID:
+24411729; PMCID: PMC3921176.
+6.      Wang Y, Cao S, Tone D, Fujishima H, Yamada RG, Ohno RI, Shi S, Matsuzawa K, Yada S, Kaneko M,
+Sakamoto H, Onishi T, Ukai-Tadenuma M, Ukai H, Hanashima C, Hirose K, Kiyonari H, Sumiyama K, Ode KL,
+Ueda HR. Postsynaptic competition between calcineurin and PKA regulates mammalian sleep-wake cycles.
+Nature. 2024;636(8042):412-21. Epub 20241106. doi: 10.1038/s41586-024-08132-2. PubMed PMID:
+39506111.
+7.      Ode KL, Ueda HR. Phosphorylation Hypothesis of Sleep. Front Psychol. 2020;11:575328. Epub
+20201002. doi: 10.3389/fpsyg.2020.575328. PubMed PMID: 33123055; PMCID: PMC7566165.
+8.      Wang Z, Ma J, Miyoshi C, Li Y, Sato M, Ogawa Y, Lou T, Ma C, Gao X, Lee C, Fujiyama T, Yang X,
+Zhou S, Hotta-Hirashima N, Klewe-Nebenius D, Ikkyu A, Kakizaki M, Kanno S, Cao L, Takahashi S, Peng J,
+Yu Y, Funato H, Yanagisawa M, Liu Q. Quantitative phosphoproteomic analysis of the molecular substrates of
+sleep need. Nature. 2018;558(7710):435-9. Epub 2018/06/15. doi: 10.1038/s41586-018-0218-8. PubMed
+PMID: 29899451; PMCID: PMC6350790.
+9.      Kim SJ, Hotta-Hirashima N, Asano F, Kitazono T, Iwasaki K, Nakata S, Komiya H, Asama N, Matsuoka
+T, Fujiyama T, Ikkyu A, Kakizaki M, Kanno S, Choi J, Kumar D, Tsukamoto T, Elhosainy A, Mizuno S, Miyazaki
+S, Tsuneoka Y, Sugiyama F, Takahashi S, Hayashi Y, Muratani M, Liu Q, Miyoshi C, Yanagisawa M, Funato
+H. Kinase signalling in excitatory neurons regulates sleep quantity and depth. Nature. 2022;612(7940):512-8.
+Epub 20221207. doi: 10.1038/s41586-022-05450-1. PubMed PMID: 36477539.
+10.     Zhou R, Wang G, Li Q, Meng F, Liu C, Gan R, Ju D, Liao M, Xu J, Sang D, Gao X, Zhou S, Wu K, Sun
+Q, Guo Y, Wu C, Chen Z, Chen L, Shi B, Wang H, Wang X, Li H, Cai T, Li B, Wang F, Funato H, Yanagisawa
+M, Zhang EE, Liu Q. A signalling pathway for transcriptional regulation of sleep amount in mice. Nature.
+2022;612(7940):519-27. Epub 20221207. doi: 10.1038/s41586-022-05510-6. PubMed PMID: 36477534.
+11.     Hartmann C, Kempf A. Mitochondrial control of sleep. Curr Opin Neurobiol. 2023;81:102733. Epub
+20230628. doi: 10.1016/j.conb.2023.102733. PubMed PMID: 37390796.
+12.     Sarnataro R, Velasco CD, Monaco N, Kempf A, Miesenbock G. Mitochondrial origins of the pressure to
+sleep. Nature. 2025;645(8081):722-8. Epub 20250716. doi: 10.1038/s41586-025-09261-y. PubMed PMID:
+40670797; PMCID: PMC12443607.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+13.     Greene RW, Bjorness TE, Suzuki A. The adenosine-mediated, neuronal-glial, homeostatic sleep
+response. Curr Opin Neurobiol. 2017;44:236-42. Epub 20170619. doi: 10.1016/j.conb.2017.05.015. PubMed
+PMID: 28633050; PMCID: PMC5523826.
+14.     Zhao Y, Zhang K, Bian H, Ma X, Wang S, Wang Y, Yu S, Huang L. Sleep regulation in Drosophila: a
+review of neural circuits and genetics. Front Neurosci. 2026;20:1750211. Epub 20260129. doi:
+10.3389/fnins.2026.1750211. PubMed PMID: 41705129; PMCID: PMC12907755.
+15.     Carvalhas-Almeida C, Sehgal A. Glia: the cellular glue that binds circadian rhythms and sleep. Sleep.
+2025;48(3). doi: 10.1093/sleep/zsae314. PubMed PMID: 39812780; PMCID: PMC11893543.
+16.     Chouhan NS, Griffith LC, Haynes P, Sehgal A. Availability of food determines the need for sleep in
+memory consolidation. Nature. 2021;589(7843):582-5. Epub 20201202. doi: 10.1038/s41586-020-2997-y.
+PubMed PMID: 33268891; PMCID: PMC7856038.
+17.     Dissel S, Angadi V, Kirszenblat L, Suzuki Y, Donlea J, Klose M, Koch Z, English D, Winsky-Sommerer
+R, van Swinderen B, Shaw PJ. Sleep restores behavioral plasticity to Drosophila mutants. Current biology :
+CB. 2015;25(10):1270-81. Epub 20150423. doi: 10.1016/j.cub.2015.03.027. PubMed PMID: 25913403;
+PMCID: PMC4465363.
+18.     Allada R, Chung BY. Circadian organization of behavior and physiology in Drosophila. Annual review of
+physiology. 2010;72:605-24. doi: 10.1146/annurev-physiol-021909-135815. PubMed PMID: 20148690;
+PMCID: PMC2887282.
+19.     Claridge-Chang A, Wijnen H, Naef F, Boothroyd C, Rajewsky N, Young MW. Circadian regulation of
+gene expression systems in the Drosophila head. Neuron. 2001;32(4):657-71. PubMed PMID: 11719206.
+20.     Ceriani MF, Hogenesch JB, Yanovsky M, Panda S, Straume M, Kay SA. Genome-wide expression
+analysis in Drosophila reveals genes controlling circadian behavior. The Journal of neuroscience : the official
+journal of the Society for Neuroscience. 2002;22(21):9305-19. PubMed PMID: 12417656.
+21.     McDonald MJ, Rosbash M. Microarray analysis and organization of circadian gene expression in
+Drosophila. Cell. 2001;107(5):567-78. PubMed PMID: 11733057.
+22.     Lin Y, Han M, Shimada B, Wang L, Gibler TM, Amarakone A, Awad TA, Stormo GD, Van Gelder RN,
+Taghert PH. Influence of the period-dependent circadian clock on diurnal, circadian, and aperiodic gene
+expression in Drosophila melanogaster. Proceedings of the National Academy of Sciences of the United States
+of America. 2002;99(14):9562-7. PubMed PMID: 12089325.
+23.     Ueda HR, Matsumoto A, Kawamura M, Iino M, Tanimura T, Hashimoto S. Genome-wide transcriptional
+orchestration of circadian rhythms in Drosophila. The Journal of biological chemistry. 2002;277(16):14048-52.
+PubMed PMID: 11854264.
+24.     Hardin PE, Hall JC, Rosbash M. Feedback of the Drosophila period gene product on circadian cycling
+of its messenger RNA levels. Nature. 1990;343(6258):536-40.
+25.     Zeng H, Hardin PE, Rosbash M. Constitutive overexpression of the Drosophila period protein inhibits
+period mRNA cycling. Embo J. 1994;13(15):3590-8.
+26.     Sehgal A, Rothenfluh-Hilfiker A, Hunter-Ensor M, Chen Y, Myers MP, Young MW. Rhythmic expression
+of timeless: a basis for promoting circadian cycles in period gene autoregulation [see comments]. Science.
+1995;270(5237):808-10.
+27.     Kim EY, Bae K, Ng FS, Glossop NR, Hardin PE, Edery I. Drosophila CLOCK protein is under
+posttranscriptional control and influences light-induced activity. Neuron. 2002;34(1):69-81.
+28.     Hughes ME, Grant GR, Paquin C, Qian J, Nitabach MN. Deep sequencing the circadian and diurnal
+transcriptome of Drosophila brain. Genome Res. 2012;22(7):1266-81. Epub 20120403. doi:
+10.1101/gr.128876.111. PubMed PMID: 22472103; PMCID: PMC3396368.
+29.     Cirelli C, Gutierrez CM, Tononi G. Extensive and divergent effects of sleep and wakefulness on brain
+gene expression. Neuron. 2004;41(1):35-43. doi: 10.1016/s0896-6273(03)00814-6. PubMed PMID: 14715133.
+30.     Seugnet L, Suzuki Y, Thimgan M, Donlea J, Gimbel SI, Gottschalk L, Duntley SP, Shaw PJ. Identifying
+sleep regulatory genes using a Drosophila model of insomnia. The Journal of neuroscience : the official journal
+of the Society for Neuroscience. 2009;29(22):7148-57. doi: 10.1523/JNEUROSCI.5629-08.2009. PubMed
+PMID: 19494137; PMCID: PMC3654681.
+31.     Noya SB, Colameo D, Bruning F, Spinnler A, Mircsof D, Opitz L, Mann M, Tyagarajan SK, Robles MS,
+Brown SA. The forebrain synaptic transcriptome is organized by clocks but its proteome is driven by sleep.
+Science. 2019;366(6462). doi: 10.1126/science.aav2642. PubMed PMID: 31601739.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+32.      Li W, Wang Z, Syed S, Lyu C, Lincoln S, O'Neil J, Nguyen AD, Feng I, Young MW. Chronic social
+isolation signals starvation and reduces sleep in Drosophila. Nature. 2021;597(7875):239-44. Epub 20210818.
+doi: 10.1038/s41586-021-03837-0. PubMed PMID: 34408325; PMCID: PMC8429171.
+33.      Dopp J, Ortega A, Davie K, Poovathingal S, Baz ES, Liu S. Single-cell transcriptomics reveals that glial
+cells integrate homeostatic and circadian processes to drive sleep-wake cycles. Nature neuroscience.
+2024;27(2):359-72. Epub 20240123. doi: 10.1038/s41593-023-01549-4. PubMed PMID: 38263460; PMCID:
+PMC10849968.
+34.      Ford K, Zuin E, Righelli D, Medina E, Schoch H, Singletary K, Muheim C, Frank MG, Hicks SC, Risso
+D, Peixoto L. A global transcriptional atlas of the effect of acute sleep deprivation in the mouse frontal cortex.
+iScience. 2024;27(9):110752. Epub 20240817. doi: 10.1016/j.isci.2024.110752. PubMed PMID: 39280614;
+PMCID: PMC11402219.
+35.      Popescu A, Ottaway C, Ford K, Medina E, Patterson TW, Ingiosi A, Hicks SC, Singletary K, Peixoto L.
+Transcriptional dynamics of sleep deprivation and subsequent recovery sleep in the male mouse cortex.
+Physiol Genomics. 2025;57(7):431-45. Epub 20250502. doi: 10.1152/physiolgenomics.00128.2024. PubMed
+PMID: 40315180; PMCID: PMC12140865.
+36.      Rhoads CA, Hagenauer MH, Xiong J, Hernandez E, Nguyen DM, Saffron A, Flandreau E, Watson S,
+Jr., Akil H. A Meta-Analysis of the Effects of Acute Sleep Deprivation on the Cortical Transcriptome in Rodent
+Models. J Sleep Res. 2025:e70205. Epub 20251001. doi: 10.1111/jsr.70205. PubMed PMID: 41031900.
+37.      Gaine ME, Bahl E, Chatterjee S, Michaelson JJ, Abel T, Lyons LC. Altered hippocampal transcriptome
+dynamics following sleep deprivation. Mol Brain. 2021;14(1):125. Epub 20210812. doi: 10.1186/s13041-021-
+00835-1. PubMed PMID: 34384474; PMCID: PMC8361790.
+38.      Lyons LC, Vanrobaeys Y, Abel T. Sleep and memory: The impact of sleep deprivation on transcription,
+translational control, and protein synthesis in the brain. J Neurochem. 2023;166(1):24-46. Epub 20230325. doi:
+10.1111/jnc.15787. PubMed PMID: 36802068; PMCID: PMC10919414.
+39.      Vanrobaeys Y, Peterson ZJ, Walsh EN, Chatterjee S, Lin LC, Lyons LC, Nickl-Jockschat T, Abel T.
+Spatial transcriptomics reveals unique gene expression changes in different brain regions after sleep
+deprivation. Nat Commun. 2023;14(1):7095. Epub 20231104. doi: 10.1038/s41467-023-42751-z. PubMed
+PMID: 37925446; PMCID: PMC10625558.
+40.      Jones JD, Holder BL, Eiken KR, Vogt A, Velarde AI, Elder AJ, McEllin JA, Dissel S. Regulation of sleep
+by cholinergic neurons located outside the central brain in Drosophila. PLoS biology. 2023;21(3):e3002012.
+Epub 20230302. doi: 10.1371/journal.pbio.3002012. PubMed PMID: 36862736; PMCID: PMC10013921.
+41.      Anthoney N, Tainton-Heap L, Luong H, Notaras E, Kewin AB, Zhao Q, Perry T, Batterham P, Shaw PJ,
+van Swinderen B. Experimentally induced active and quiet sleep engage non-overlapping transcriptional
+programs in Drosophila. Elife. 2023;12. Epub 20231101. doi: 10.7554/eLife.88198. PubMed PMID: 37910019;
+PMCID: PMC10619980.
+42.      Abruzzi KC, Zadina A, Luo W, Wiyanto E, Rahman R, Guo F, Shafer O, Rosbash M. RNA-seq analysis
+of Drosophila clock and non-clock neurons reveals neuron-specific cycling and novel candidate neuropeptides.
+PLoS genetics. 2017;13(2):e1006613. Epub 20170209. doi: 10.1371/journal.pgen.1006613. PubMed PMID:
+28182648; PMCID: PMC5325595.
+43.      Ma D, Przybylski D, Abruzzi KC, Schlichting M, Li Q, Long X, Rosbash M. A transcriptomic taxonomy of
+Drosophila circadian neurons around the clock. Elife. 2021;10. Epub 20210113. doi: 10.7554/eLife.63056.
+PubMed PMID: 33438579; PMCID: PMC7837698.
+44.      Abhilash L, Shafer OT. A two-process model of Drosophila sleep reveals an inter-dependence between
+circadian clock speed and the rate of sleep pressure decay. Sleep. 2024;47(2). doi: 10.1093/sleep/zsad277.
+PubMed PMID: 37930351; PMCID: PMC11275470.
+45.      Andreani T, Rosensweig C, Sisobhan S, Ogunlana E, Kath W, Allada R. Circadian programming of the
+ellipsoid body sleep homeostat in Drosophila. Elife. 2022;11. Epub 20220623. doi: 10.7554/eLife.74327.
+PubMed PMID: 35735904; PMCID: PMC9270026.
+46.      Hill VM, O'Connor RM, Sissoko GB, Irobunda IS, Leong S, Canman JC, Stavropoulos N, Shirasu-Hiza
+M. A bidirectional relationship between sleep and oxidative stress in Drosophila. PLoS biology.
+2018;16(7):e2005206. Epub 20180712. doi: 10.1371/journal.pbio.2005206. PubMed PMID: 30001323; PMCID:
+PMC6042693.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+47.      Vaccaro A, Kaplan Dor Y, Nambara K, Pollina EA, Lin C, Greenberg ME, Rogulja D. Sleep Loss Can
+Cause Death through Accumulation of Reactive Oxygen Species in the Gut. Cell. 2020;181(6):1307-28 e15.
+Epub 2020/06/06. doi: 10.1016/j.cell.2020.04.049. PubMed PMID: 32502393.
+48.      Haynes PR, Pyfrom ES, Li Y, Stein C, Cuddapah VA, Jacobs JA, Yue Z, Sehgal A. A neuron-glia lipid
+metabolic cycle couples daily sleep to mitochondrial homeostasis. Nature neuroscience. 2024;27(4):666-78.
+Epub 20240215. doi: 10.1038/s41593-023-01568-1. PubMed PMID: 38360946; PMCID: PMC11001586.
+49.      Toda H, Williams JA, Gulledge M, Sehgal A. A sleep-inducing gene, nemuri, links sleep and immune
+function in Drosophila. Science. 2019;363(6426):509-15. Epub 2019/02/02. doi: 10.1126/science.aat1650.
+PubMed PMID: 30705188; PMCID: PMC6505470.
+50.      O'Hara MK, Saul C, Handa A, Cho B, Zheng X, Sehgal A, Williams JA. The NFkappaB Dif is required
+for behavioral and molecular correlates of sleep homeostasis in Drosophila. Sleep. 2024;47(8). doi:
+10.1093/sleep/zsae096. PubMed PMID: 38629438; PMCID: PMC11321855.
+51.      van Alphen B, Stewart S, Iwanaszko M, Xu F, Li K, Rozenfeld S, Ramakrishnan A, Itoh TQ, Sisobhan
+S, Qin Z, Lear BC, Allada R. Glial immune-related pathways mediate effects of closed head traumatic brain
+injury on behavior and lethality in Drosophila. PLoS biology. 2022;20(1):e3001456. Epub 2022/01/27. doi:
+10.1371/journal.pbio.3001456. PubMed PMID: 35081110; PMCID: PMC8791498.
+52.      Heinz S, Benner C, Spann N, Bertolino E, Lin YC, Laslo P, Cheng JX, Murre C, Singh H, Glass CK.
+Simple combinations of lineage-determining transcription factors prime cis-regulatory elements required for
+macrophage and B cell identities. Mol Cell. 2010;38(4):576-89. doi: 10.1016/j.molcel.2010.05.004. PubMed
+PMID: 20513432; PMCID: PMC2898526.
+53.      Parisky KM, Agosto J, Pulver SR, Shang Y, Kuklin E, Hodge JJ, Kang K, Liu X, Garrity PA, Rosbash M,
+Griffith LC. PDF cells are a GABA-responsive wake-promoting component of the Drosophila sleep circuit.
+Neuron. 2008;60(4):672-82. Epub 2008/11/29. doi: 10.1016/j.neuron.2008.10.042. PubMed PMID: 19038223;
+PMCID: PMC2734413.
+54.      Sheeba V, Fogle KJ, Kaneko M, Rashid S, Chou YT, Sharma VK, Holmes TC. Large ventral lateral
+neurons modulate arousal and sleep in Drosophila. Current biology : CB. 2008;18(20):1537-45. Epub
+2008/09/06. doi: 10.1016/j.cub.2008.08.033. PubMed PMID: 18771923; PMCID: 2597195.
+55.      Chung BY, Kilman VL, Keath JR, Pitman JL, Allada R. The GABA(A) receptor RDL acts in peptidergic
+PDF neurons to promote sleep in Drosophila. Current biology : CB. 2009;19(5):386-90. doi:
+10.1016/j.cub.2009.01.040. PubMed PMID: 19230663; PMCID: 3209479.
+56.      Park S, Sonn JY, Oh Y, Lim C, Choe J. SIFamide and SIFamide receptor defines a novel neuropeptide
+signaling to promote sleep in Drosophila. Mol Cells. 2014;37(4):295-301. Epub 20140321. doi:
+10.14348/molcells.2014.2371. PubMed PMID: 24658384; PMCID: PMC4012077.
+57.      Huang H, Possidente DR, Vecsey CG. Optogenetic activation of SIFamide (SIFa) neurons induces a
+complex sleep-promoting effect in the fruit fly Drosophila melanogaster. Physiol Behav. 2021;239:113507.
+Epub 20210624. doi: 10.1016/j.physbeh.2021.113507. PubMed PMID: 34175361; PMCID: PMC8440390.
+58.      Lear BC, Lin JM, Keath JR, McGill JJ, Raman IM, Allada R. The ion channel narrow abdomen is critical
+for neural output of the Drosophila circadian pacemaker. Neuron. 2005;48(6):965-76. PubMed PMID:
+16364900.
+59.      Lear BC, Darrah EJ, Aldrich BT, Gebre S, Scott RL, Nash HA, Allada R. UNC79 and UNC80, putative
+auxiliary subunits of the NARROW ABDOMEN ion channel, are indispensable for robust circadian locomotor
+rhythms in Drosophila. PloS one. 2013;8(11):e78147. Epub 20131105. doi: 10.1371/journal.pone.0078147.
+PubMed PMID: 24223770; PMCID: PMC3818319.
+60.      Flourakis M, Kula-Eversole E, Hutchison AL, Han TH, Aranda K, Moose DL, White KP, Dinner AR, Lear
+BC, Ren D, Diekman CO, Raman IM, Allada R. A Conserved Bicycle Model for Circadian Clock Control of
+Membrane Excitability. Cell. 2015;162(4):836-48. Epub 2015/08/16. doi: 10.1016/j.cell.2015.07.036. PubMed
+PMID: 26276633; PMCID: PMC4537776.
+61.      Murakami K, Palermo J, Stanhope BA, Gibbs AG, Keene AC. A screen for sleep and starvation
+resistance identifies a wake-promoting role for the auxiliary channel unc79. G3 (Bethesda). 2021;11(8). doi:
+10.1093/g3journal/jkab199. PubMed PMID: 34849820; PMCID: PMC8496288.
+62.      Jones JD, Holder BL, Montgomery AC, McAdams CV, He E, Burns AE, Eiken KR, Vogt A, Velarde AI,
+Elder AJ, McEllin JA, Dissel S. The dorsal fan-shaped body is a neurochemically heterogeneous sleep-
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+regulating center in Drosophila. PLoS biology. 2025;23(3):e3003014. Epub 20250326. doi:
+10.1371/journal.pbio.3003014. PubMed PMID: 40138668; PMCID: PMC12135941.
+63.     Seidner G, Robinson JE, Wu M, Worden K, Masek P, Roberts SW, Keene AC, Joiner WJ. Identification
+of Neurons with a Privileged Role in Sleep Homeostasis in Drosophila melanogaster. Current biology : CB.
+2015;25(22):2928-38. Epub 20151029. doi: 10.1016/j.cub.2015.10.006. PubMed PMID: 26526372; PMCID:
+PMC4654679.
+64.     Gallio M, Ofstad TA, Macpherson LJ, Wang JW, Zuker CS. The coding of temperature in the
+Drosophila brain. Cell. 2011;144(4):614-24. doi: 10.1016/j.cell.2011.01.028. PubMed PMID: 21335241;
+PMCID: PMC3336488.
+65.     Satterfield LK, De J, Wu M, Qiu T, Joiner WJ. Inputs to the Sleep Homeostat Originate Outside the
+Brain. The Journal of neuroscience : the official journal of the Society for Neuroscience. 2022;42(29):5695-704.
+Epub 20220720. doi: 10.1523/JNEUROSCI.2113-21.2022. PubMed PMID: 35680412; PMCID: PMC9302467.
+66.     Alpert MH, Frank DD, Kaspi E, Flourakis M, Zaharieva EE, Allada R, Para A, Gallio M. A Circuit
+Encoding Absolute Cold Temperature in Drosophila. Current biology : CB. 2020;30(12):2275-88 e5. Epub
+20200521. doi: 10.1016/j.cub.2020.04.038. PubMed PMID: 32442464; PMCID: PMC7314653.
+67.     Meyerhof GT, Easwaran S, Bontempo AE, Montell C, Montell DJ. Altered circadian rhythm, sleep, and
+rhodopsin 7-dependent shade preference during diapause in Drosophila melanogaster. Proceedings of the
+National Academy of Sciences of the United States of America. 2024;121(27):e2400964121. Epub 20240625.
+doi: 10.1073/pnas.2400964121. PubMed PMID: 38917005; PMCID: PMC11228485.
+68.     Alpert MH, Gil H, Para A, Gallio M. A thermometer circuit for hot temperature adjusts Drosophila
+behavior to persistent heat. Current biology : CB. 2022;32(18):4079-87 e4. Epub 20220817. doi:
+10.1016/j.cub.2022.07.060. PubMed PMID: 35981537; PMCID: PMC9529852.
+69.     Ni JD, Gurav AS, Liu W, Ogunmowo TH, Hackbart H, Elsheikh A, Verdegaal AA, Montell C. Differential
+regulation of the Drosophila sleep homeostat by circadian and arousal inputs. Elife. 2019;8. Epub 20190205.
+doi: 10.7554/eLife.40487. PubMed PMID: 30719975; PMCID: PMC6363385.
+70.     Donlea JM, Pimentel D, Talbot CB, Kempf A, Omoto JJ, Hartenstein V, Miesenbock G. Recurrent
+Circuitry for Balancing Sleep Need and Sleep. Neuron. 2018;97(2):378-89 e4. Epub 20180104. doi:
+10.1016/j.neuron.2017.12.016. PubMed PMID: 29307711; PMCID: PMC5779612.
+71.     Diaz MM, Schlichting M, Abruzzi KC, Long X, Rosbash M. Allatostatin-C/AstC-R2 Is a Novel Pathway
+to Modulate the Circadian Activity Pattern in Drosophila. Current biology : CB. 2019;29(1):13-22 e3. Epub
+20181213. doi: 10.1016/j.cub.2018.11.005. PubMed PMID: 30554904; PMCID: PMC6325008.
+72.     Li H, Li Z, Yuan X, Tian Y, Ye W, Zeng P, Li XM, Guo F. Dynamic encoding of temperature in the
+central circadian circuit coordinates physiological activities. Nat Commun. 2024;15(1):2834. Epub 20240402.
+doi: 10.1038/s41467-024-47278-5. PubMed PMID: 38565846; PMCID: PMC10987497.
+73.     Meiselman MR, Alpert MH, Cui X, Shea J, Gregg I, Gallio M, Yapici N. Recovery from cold-induced
+reproductive dormancy is regulated by temperature-dependent AstC signaling. Current biology : CB.
+2022;32(6):1362-75 e8. Epub 20220216. doi: 10.1016/j.cub.2022.01.061. PubMed PMID: 35176227; PMCID:
+PMC8969192.
+74.     Yildirim K, Winkler B, Pogodalla N, Mackensen S, Baldenius M, Garcia L, Naffin E, Rodrigues S,
+Klambt C. Redundant functions of the SLC5A transporters Rumpel, Bumpel, and Kumpel in ensheathing glial
+cells. Biol Open. 2022;11(1). Epub 20220118. doi: 10.1242/bio.059128. PubMed PMID: 34897385; PMCID:
+PMC8790523.
+75.     Malita A, Skakkebaek AH, Kubrak O, Chen X, Koyama T, Connolly EC, Ahrentloev N, Andersen DS,
+Texada MJ, Halberg K, Rewitz K. Glia-mediated gut-brain cytokine signaling couples sleep to intestinal
+inflammatory responses induced by oxidative stress. Elife. 2025;13. Epub 20250909. doi: 10.7554/eLife.99999.
+PubMed PMID: 40924804; PMCID: PMC12419797.
+76.     Qian Y, Cao Y, Deng B, Yang G, Li J, Xu R, Zhang D, Huang J, Rao Y. Sleep homeostasis regulated
+by 5HT2b receptor in a small subset of neurons in the dorsal fan-shaped body of drosophila. Elife. 2017;6.
+Epub 20171006. doi: 10.7554/eLife.26519. PubMed PMID: 28984573; PMCID: PMC5648528.
+77.     Chowdhury B, Abhilash L, Ortega A, Liu S, Shafer O. Homeostatic control of deep sleep and molecular
+correlates of sleep pressure in Drosophila. Elife. 2023;12. Epub 20231031. doi: 10.7554/eLife.91355. PubMed
+PMID: 37906092; PMCID: PMC10642965.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+78.      Park A, Croset V, Otto N, Agarwal D, Treiber CD, Meschi E, Sims D, Waddell S. Gliotransmission of D-
+serine promotes thirst-directed behaviors in Drosophila. Current biology : CB. 2022;32(18):3952-70 e8. Epub
+20220812. doi: 10.1016/j.cub.2022.07.038. PubMed PMID: 35963239; PMCID: PMC9616736.
+79.      Flores-Valle A, Vishniakou I, Seelig JD. Dynamics of glia and neurons regulate homeostatic rest, sleep
+and feeding behavior in Drosophila. Nature neuroscience. 2025;28(6):1226-40. Epub 20250421. doi:
+10.1038/s41593-025-01942-1. PubMed PMID: 40259071; PMCID: PMC12148942.
+80.      Liu S, Liu Q, Tabuchi M, Wu MN. Sleep Drive Is Encoded by Neural Plastic Changes in a Dedicated
+Circuit. Cell. 2016;165(6):1347-60. Epub 2016/05/24. doi: 10.1016/j.cell.2016.04.013. PubMed PMID:
+27212237; PMCID: PMC4892967.
+81.      Shih MM, Zhang J, Brown EB, Dubnau J, Keene AC. Targeted single cell expression profiling identifies
+integrators of sleep and metabolic state. G3 (Bethesda). 2025;15(7). doi: 10.1093/g3journal/jkaf079. PubMed
+PMID: 40509864; PMCID: PMC12239624.
+82.      Dijk DJ, Czeisler CA. Contribution of the circadian pacemaker and the sleep homeostat to sleep
+propensity, sleep structure, electroencephalographic slow waves, and sleep spindle activity in humans. The
+Journal of neuroscience : the official journal of the Society for Neuroscience. 1995;15(5 Pt 1):3526-38. Epub
+1995/05/01. PubMed PMID: 7751928.
+83.      Franken P, Dijk DJ. Circadian clock genes and sleep homeostasis. Eur J Neurosci. 2009;29(9):1820-9.
+Epub 2009/05/29. doi: EJN6723 [pii]
+10.1111/j.1460-9568.2009.06723.x. PubMed PMID: 19473235.
+84.      Hor CN, Yeung J, Jan M, Emmenegger Y, Hubbard J, Xenarios I, Naef F, Franken P. Sleep-wake-
+driven and circadian contributions to daily rhythms in gene expression and chromatin accessibility in the
+murine cortex. Proceedings of the National Academy of Sciences of the United States of America.
+2019;116(51):25773-83. Epub 20191127. doi: 10.1073/pnas.1910590116. PubMed PMID: 31776259; PMCID:
+PMC6925978.
+85.      Li Y, Chouhan NS, Zhang SL, Moore RS, Noya SB, Shon J, Yue Z, Sehgal A. Modulation of RNA
+processing genes during sleep-dependent memory. Elife. 2024;12. Epub 20241206. doi: 10.7554/eLife.89023.
+PubMed PMID: 39642051; PMCID: PMC11623928.
+86.      Lyons LC, Chatterjee S, Vanrobaeys Y, Gaine ME, Abel T. Translational changes induced by acute
+sleep deprivation uncovered by TRAP-Seq. Mol Brain. 2020;13(1):165. Epub 20201203. doi: 10.1186/s13041-
+020-00702-5. PubMed PMID: 33272296; PMCID: PMC7713217.
+87.      Funato H, Miyoshi C, Fujiyama T, Kanda T, Sato M, Wang Z, Ma J, Nakane S, Tomita J, Ikkyu A,
+Kakizaki M, Hotta-Hirashima N, Kanno S, Komiya H, Asano F, Honda T, Kim SJ, Harano K, Muramoto H,
+Yonezawa T, Mizuno S, Miyazaki S, Connor L, Kumar V, Miura I, Suzuki T, Watanabe A, Abe M, Sugiyama F,
+Takahashi S, Sakimura K, Hayashi Y, Liu Q, Kume K, Wakana S, Takahashi JS, Yanagisawa M. Forward-
+genetics analysis of sleep in randomly mutagenized mice. Nature. 2016;539(7629):378-83. Epub 20161102.
+doi: 10.1038/nature20142. PubMed PMID: 27806374; PMCID: PMC6076225.
+88.      Stray-Pedersen A, Cobben JM, Prescott TE, Lee S, Cang C, Aranda K, Ahmed S, Alders M, Gerstner
+T, Aslaksen K, Tetreault M, Qin W, Hartley T, Jhangiani SN, Muzny DM, Tarailo-Graovac M, van Karnebeek
+CD, Care4Rare Canada C, Baylor-Hopkins Center for Mendelian G, Lupski JR, Ren D, Yoon G. Biallelic
+Mutations in UNC80 Cause Persistent Hypotonia, Encephalopathy, Growth Retardation, and Severe
+Intellectual Disability. Am J Hum Genet. 2016;98(1):202-9. Epub 20151217. doi: 10.1016/j.ajhg.2015.11.004.
+PubMed PMID: 26708751; PMCID: PMC4716670.
+89.      Takenouchi T, Inaba M, Uehara T, Takahashi T, Kosaki K, Mizuno S. Biallelic mutations in NALCN:
+Expanding the genotypic and phenotypic spectra of IHPRF1. Am J Med Genet A. 2018;176(2):431-7. Epub
+20171123. doi: 10.1002/ajmg.a.38543. PubMed PMID: 29168298.
+90.      Campbell J, FitzPatrick DR, Azam T, Gibson NA, Somerville L, Joss SK, Deciphering Developmental
+Disorders S, Urquhart DS. NALCN Dysfunction as a Cause of Disordered Respiratory Rhythm With Central
+Apnea. Pediatrics. 2018;141(Suppl 5):S485-S90. doi: 10.1542/peds.2017-0026. PubMed PMID: 29610177.
+91.      Lozic B, Johansson S, Lovric Kojundzic S, Markic J, Knappskog PM, Hahn AF, Boman H. Novel
+NALCN variant: altered respiratory and circadian rhythm, anesthetic sensitivity. Ann Clin Transl Neurol.
+2016;3(11):876-83. Epub 20161011. doi: 10.1002/acn3.362. PubMed PMID: 27844033; PMCID: PMC5099533.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+92.     Oikonomou G, Altermatt M, Zhang RW, Coughlin GM, Montz C, Gradinaru V, Prober DA. The
+Serotonergic Raphe Promote Sleep in Zebrafish and Mice. Neuron. 2019;103(4):686-701 e8. Epub 20190624.
+doi: 10.1016/j.neuron.2019.05.038. PubMed PMID: 31248729; PMCID: PMC6706304.
+93.     Kasuya J, Wang Y, Vanrobaeys Y, Frank M, Abel T. Cell-specific effects of acute sleep deprivation on
+transcriptomic signatures of non-neuronal cells in the mouse hippocampus and prefrontal cortex. bioRxiv.
+2026. Epub 20260203. doi: 10.64898/2026.01.29.702391. PubMed PMID: 41676496; PMCID: PMC12889469.
+94.     Cirelli C, Faraguna U, Tononi G. Changes in brain gene expression after long-term sleep deprivation. J
+Neurochem. 2006;98(5):1632-45. PubMed PMID: 7051.
+95.     Porter NM, Bohannon JH, Curran-Rauhut M, Buechel HM, Dowling AL, Brewer LD, Popovic J, Thibault
+V, Kraner SD, Chen KC, Blalock EM. Hippocampal CA1 transcriptional profile of sleep deprivation: relation to
+aging and stress. PloS one. 2012;7(7):e40128. Epub 20120705. doi: 10.1371/journal.pone.0040128. PubMed
+PMID: 22792227; PMCID: PMC3390348.
+96.     Zhou R, Zhang C, Gan R, Yin X, Wang M, Shi B, Chen L, Wu C, Li Q, Liu Q. Transcriptional regulation
+of daily sleep amount by TCF4-HDAC4-CREB complex in mice. Sleep. 2025;48(5). doi:
+10.1093/sleep/zsae313. PubMed PMID: 39745887.
+97.     Shafer OT. 25 years of Drosophila "Sleep genes". Fly (Austin). 2025;19(1):2502180. Epub 20250506.
+doi: 10.1080/19336934.2025.2502180. PubMed PMID: 40326454; PMCID: PMC12064057.
+98.     Sisobhan S, Rosensweig C, Lear BC, Allada R. SleepMat: A New Behavioral Analysis Software
+Program for Sleep and Circadian Rhythms. bioRxiv. 2022.
+99.     Hendricks JC, Finn SM, Panckeri KA, Chavkin J, Williams JA, Sehgal A, Pack AI. Rest in Drosophila is
+a sleep-like state. Neuron. 2000;25(1):129-38.
+100. Shaw PJ. Correlates of Sleep and Waking in Drosophila melanogaster. Science. 2000;287(5459):1834-
+7. doi: 10.1126/science.287.5459.1834.
+101. Bray NL, Pimentel H, Melsted P, Pachter L. Near-optimal probabilistic RNA-seq quantification. Nat
+Biotechnol. 2016;34(5):525-7. Epub 20160404. doi: 10.1038/nbt.3519. PubMed PMID: 27043002.
+102. Pimentel H, Bray NL, Puente S, Melsted P, Pachter L. Differential analysis of RNA-seq incorporating
+quantification uncertainty. Nat Methods. 2017;14(7):687-90. Epub 20170605. doi: 10.1038/nmeth.4324.
+PubMed PMID: 28581496.
+103. Thaben PF, Westermark PO. Detecting rhythms in time series with RAIN. J Biol Rhythms.
+2014;29(6):391-400. Epub 2014/10/19. doi: 10.1177/0748730414553029. PubMed PMID: 25326247; PMCID:
+PMC4266694.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure 1. Sleep Under Baseline and Mechanical Sleep Deprivation.
+A. Minutes of sleep per 30 min interval over two circadian cycles in 12:12 hr LD conditions from iso31 wild-type
+flies (n = 74). B.Minutes of sleep per 30 min interval over two circadian cycles for iso31 wild-type flies across
+three conditions. The three panels show flies that received a 3 hr (n = 29), 6 hr (n = 20), and 12 hr (n = 25)
+mechanical sleep deprivation at the end of the first dark period respectively. C. Quantitation of the data shown
+in panels A and B. Each SD condition is compared to the equivalent time interval during the first night of the
+circadian data in panel A. Total minutes of sleep during each interval are shown for each fly. Control flies (n =
+74), 3 hr SD (n = 29), 6 hr SD (n = 20), and 12 hr SD (n = 25). **** p<0.0001 by Welch’s t-test. D. Quantitation
+of the rebound shown in panels A and B. Graphs show the total sleep in the first 3 hrs after sleep deprivation.
+Each SD condition is compared to the equivalent time interval (ZT0-3) on the second day of the circadian data
+in panel A. Total minutes of sleep during each interval are shown for each fly. Control flies (n = 74), 3 hr SD (n
+= 29), 6 hr SD (n = 20), and 12 hr SD (n = 25). **** p<0.0001 by Welch’s t-test.
+  bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+(which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                               available under a CC-BY 4.0 International license.
+
+
+
+
+     Figure 2. Modulation of sleep using thermogenetic TrpA1 activation
+     Figures show a GAL4 line (R85C10-GAL4) that promotes sleep and the dissipation of sleep
+     drive following activation. (A) Two circadian cycles of sleep behavior at 21°C depicting flies
+     bearing both the GAL4 and UAS-TrpA1 transgenes. (B) Two circadian cycles of sleep behavior
+     for two genotypes: a GAL4 line paired with a UAS-TrpA1 transgene as well as a GAL4/+ line.
+     The flies are maintained at 21°C for most of the experiment except for a 12 hr transition to 29°C
+     at the beginning of the second day (depicted in orange). (C) Quantification of total sleep during
+     the 12 hr activation for each condition (left) and the change in sleep during the 12 hr rebound
+     period following activation compared to the previous day (right). **** p<0.0001 by ANOVA with
+     Tukey’s multiple comparisons.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure 3. Daily oscillations of core clock-gene expression across Zeitgeber time.
+Transcript abundance (TPM) is shown for three canonical circadian genes (Clk, per, tim) measured every 4
+hours between at ZT00 - ZT20. Points denote individual biological replicates at each timepoint; the connecting
+line represents the mean TPM across replicates. For each gene, rhythmicity across Zeitgeber time was tested
+using the RAIN (Rhythmicity Analysis Incorporating Nonparametric methods*) algorithm, and the estimated
+differential amplitude (log2 FC) and false-discovery-adjusted q-value are reported above each panel.
+      bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+    (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                   available under a CC-BY 4.0 International license.
+
+
+A
+  Upper Triangle: Sleep Gene
+ Overlap Odds Ratios (overlap)
+                               Baseline MechSD3 MechSD6 MechSD12 R85C10>TrpA1 R23E10>ChR THIP
+  Lower Triangle: Wake Gene
+ Overlap Odds Ratios (overlap)
+        Baseline (290)                   0 (0)    1 (3)    0 (0)     3 (4)        0 (0)  9 (1)
+    MechSD3 (S=2, W=55)         12 (13)          178 (1)   0 (0)     0 (0)        0 (0)  0 (0)
+   MechSD6 (S=80, W=241)        14 (58) 79 (30)           72 (2)     15 (4)      18 (3)  0 (0)
+    MechSD12 (S=7, W=32)        20 (11) 267 (14) 192 (24)            0 (0)        0 (0)  0 (0)
+ R85C10>TrpA1 (S=52, W=27) 14 (7)        0 (0)    2 (1)    0 (0)                  0 (0)  0 (0)
+  R23E10>ChR (S=50, W=29)        6 (2)   12 (1)   5 (2)    0 (0)     0 (0)               0 (0)
+      THIP (S=13, W=64)          1 (2)   11 (2)   0 (0)    0 (0)     9 (1)        0 (0)
+
+B
+
+
+
+
+Figure 4. Shared transcriptional signatures of high-amplitude sleep- and wake-regulated genes across
+experimental paradigms.
+A. Overlap enrichment of common high-amplitude genes (|log₂FC| > 1, qvalue < 0.05) between pairs of
+experiments, assessed using one-sided Fisher’s exact test. The matrix is arranged with sleep-gene overlap
+statistics in the upper triangle and wake-gene overlap statistics in the lower triangle; each cell shows the
+rounded odds ratio followed by the overlap count in parentheses (e.g., 79 (23)). Row headers indicate the total
+number of sleep (S) and wake (W) regulated genes for each experiment, and cells with BH-adjusted qvalue <
+0.05 are highlighted in red.
+B. UpSet plot summarizing intersections of high-amplitude, consistently wake- and sleep-associated transcripts
+(|log₂FC| > 1.0, qvalue < 0.05) across the seven whole-brain wake and sleep paradigms. Total differentially
+expressed gene counts per condition are shown horizontally, and intersection sizes are shown vertically. Most
+high-amplitude wake genes (42) overlapped with baseline cycling transcripts and were upregulated in
+MechSD6, whereas high-amplitude sleep genes showed a more even distribution of overlaps across
+paradigms.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure 5. Functional enrichment of high-amplitude consistent wake-up regulated gene sets.
+Bubble plot showing Gene Ontology (GO) and KEGG pathway enrichment (FDR < 10%) for high-amplitude
+wake up-regulated transcripts. The x-axis indicates statistical significance (-log10P.) Major functional clusters
+include Mitochondrial Function (oxidative phosphorylation and electron transport), Translation & Ribosome
+Biogenesis, RNA Processing, and Immune & Defense Response. Circle sizes represent the percentage of
+genes enriched within each term.
+      bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+    (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                   available under a CC-BY 4.0 International license.
+
+
+A
+  Upper Triangle: Sleep Gene
+Overlap Odds Ratios (n=overlap)
+                                Baseline MechSD3 MechSD6 MechSD12 R85C10>TrpA1 R23E10>ChR THIP
+  Lower Triangle: Wake Gene
+Overlap Odds Ratios (n=overlap)
+        Baseline (785)                      2 (n=2)   2 (n=71)    0 (n=0)  2 (n=12) 1 (n=12) 3 (n=2)
+   MechSD3 (S=18, W=474)        6 (n=129)             37 (n=11) 128 (n=3)  0 (n=0)   0 (n=0) 0 (n=0)
+  MechSD6 (S=584, W=1164)       4 (n=238) 91 (n=400)             36 (n=15) 1 (n=4)  4 (n=29) 0 (n=0)
+   MechSD12 (S=25, W=289)       7 (n=90) 128 (n=207) 286 (n=275)           0 (n=0)   6 (n=2) 0 (n=0)
+ R85C10>TrpA1 (S=102, W=79) 4 (n=17)        1 (n=2)    1 (n=8)    1 (n=2)            3 (n=4) 9 (n=1)
+ R23E10>ChR (S=251, W=178) 3 (n=29) 7 (n=32)          8 (n=68)   7 (n=22)  4 (n=4)           0 (n=0)
+      THIP (S=19, W=125)        2 (n=18) 10 (n=29)    6 (n=41)   8 (n=16)  5 (n=3)   6 (n=7)
+
+
+B
+
+
+
+
+C
+      bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+    (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                   available under a CC-BY 4.0 International license.
+
+
+D
+
+
+
+
+Figure 6. Shared transcriptional signatures of low-amplitude sleep- and wake-regulated genes across
+experimental paradigms.
+A. Overlap enrichment of common low-amplitude genes (|log₂FC| > 0.5, qvalue < 0.05) between pairs of
+experiments, assessed using one-sided Fisher’s exact test. The matrix is arranged with sleep-gene overlap
+statistics in the upper triangle and wake-gene overlap statistics in the lower triangle; each cell shows the
+rounded odds ratio followed by the overlap count in parentheses (e.g., 8 (n=16)). Row headers indicate the
+total number of sleep (S) and wake (W) regulated genes for each experiment, and cells with BH-adjusted
+qvalue < 0.05 are highlighted in red.
+B. UpSet plots summarizing intersections of low-amplitude, consistently wake- and sleep-associated
+transcripts (|log₂FC| > 0.5, qvalue < 0.05) across the seven whole-brain wake and sleep paradigms, including
+transcripts present in at least three experiments. Total differentially expressed gene counts per condition are
+shown horizontally, and intersection sizes are shown vertically. The overlap distribution across sleep paradigms
+resembled that observed for the high-amplitude sleep- and wake-conforming transcripts, with many wake
+genes driven by overlap with cycling genes in baseline conditions that were upregulated during wake and
+mechanical sleep deprivation.
+C. Heatmap of low-amplitude, consistently wake-associated transcripts (same gene set as in panel B; |log₂FC|
+> 0.5, qvalue < 0.05). Rows represent the seven whole-brain sleep perturbing paradigms and columns
+represent wake-associated genes (ranked by recurrence across paradigms); color intensity encodes wake-
+normalized log₂FC (orange, wake direction; blue, sleep direction; white, near zero). Each cell is annotated with
+log₂FC (top) and qvalue (bottom), and asterisks indicate experiment-level significance at the stated thresholds.
+D. Heatmap of low-amplitude, consistently sleep-associated transcripts (same gene set as in panel B; |log₂FC|
+> 0.5, qvalue < 0.05). Rows represent the seven whole-brain paradigms and columns represent sleep-
+associated genes (ranked by recurrence across paradigms); color intensity encodes wake-normalized log₂FC
+(orange, wake direction; blue, sleep direction; white, near zero). Each cell is annotated with log₂FC (top) and
+qvalue (bottom), and asterisks indicate experiment-level significance at the stated thresholds.
+      bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+    (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                   available under a CC-BY 4.0 International license.
+
+
+A
+
+
+
+
+B
+
+
+
+
+C
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+Figure 7. Functional enrichment of low-amplitude consistent wake- and sleep-up regulated and gene
+sets.
+A. Bubble plot showing KEGG pathway enrichment (FDR < 10%) for low-amplitude wake up-regulated
+transcripts. The x-axis indicates statistical significance (-log10P.) Circle sizes represent the percentage of
+genes enriched within each term.
+B. Heatmap of low-amplitude wake up-regulated transcripts enriched in the GO Cellular Component term
+"mitochondrial inner membrane" (GO:0005743; FDR < 0.1 using the DAVID bioinformatics web service).
+Genes are ordered by the number of datasets in which they reached statistical significance; cell values show
+wake-normalized log₂FC with q-values in parentheses. Cells are bolded and marked with an asterisk where
+|log₂FC| > 0.5 and q < 0.05.
+C. Bubble plot showing Gene Ontology (GO) and KEGG pathway enrichment (FDR < 10%) for low-amplitude
+sleep up-regulated transcripts. The x-axis indicates statistical significance (-log10P.)
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure 8. Gene and Sample Clusters Based on Sleep–Wake History. Each row represents a gene, and
+each column represents a sample. Gene expression values were z-score transformed across samples to
+visualize relative up- and down-regulation. Rows (genes) and columns (samples) were independently clustered
+using hierarchical clustering based on Pearson correlation. Gene–gene and sample–sample similarity matrices
+were calculated as (1 – Pearson correlation), converted to distance matrices, and clustered using the complete
+linkage method. The resulting dendrograms illustrate patterns of co-expression among genes and similarity
+relationships among samples. Heatmap clustering of genes and samples reveals a strong effect of
+temperature, with samples at 25 °C clustering on the left, 21 °C in the middle, and 29 °C on the right. From a
+sleep–wake perspective, mechanical sleep deprivation (MechSD) clusters separately from ZT0 samples. In
+contrast to the PCA analysis, sleep-promoting R85/TrpA1 samples cluster separately from other wake TrpA1
+samples and instead group with 21 °C samples. Additionally, wake TrpA1 samples at 29 °C cluster apart from
+wake control samples at the same temperature, despite similar sleep–wake states, suggesting genotype- or
+activity-dependent effects beyond sleep state alone.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure 9. Genes positively or negatively correlated with recent or long-term sleep history. Pearson
+correlations were calculated between gene expression levels and amount of sleep prior to sample collection.
+Correlations were evaluated across time bins ranging from 0–1 h to 0–12 h before sampling. Gene expression
+values (log₂ TPM) were averaged across three biological replicates, and sleep measurements were averaged
+across the number of flies per sample. A total of 149 genes showed significant positive correlation (correlation
+coefficient > 0, BH-adjusted q < 0.05), while 66 genes showed significant negative correlation (coefficient < 0,
+BH-adjusted q < 0.05). Among both positive and negatively correlated genes, some exhibited stronger
+associations with shorter sleep-history bins, whereas others showed stronger correlations with longer time
+windows.
+      bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+    (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                   available under a CC-BY 4.0 International license.
+
+
+A
+
+
+
+
+B
+
+
+
+
+Figure 10. Functional enrichment of transcripts negatively- and positively-correlated with sleep history
+A. Bubble plot showing biological process enrichment (FDR < 10%) for genes negatively correlated with sleep-
+history (Pearson correlation, qvalue < 0.05). The x-axis indicates statistical significance (-log10P.) Circle sizes
+represent the percentage of genes enriched within each term.
+B. Bubble plot showing Gene Ontology (GO) and KEGG pathway enrichment (FDR < 10%) for genes positively
+correlated with sleep-history (Pearson correlation, qvalue < 0.05). The x-axis indicates statistical significance (-
+log10P.) Circle sizes represent the percentage of genes enriched within each term.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure 11. Gene and sample clustering based on sleep rebound–associated genes. Each row represents
+a gene positively or negatively correlated with sleep rebound, and each column represents an individual
+sample. Gene expression values (TPM) were z-score normalized across samples to visualize relative up- and
+down-regulation patterns. Rows (genes) and columns (samples) were independently clustered using
+hierarchical clustering based on Pearson correlation. Gene–gene and sample–sample similarity matrices were
+computed as (1 − Pearson correlation), converted to distance matrices, and clustered using the complete
+linkage method. The resulting dendrograms reveal patterns of gene co-expression and similarity relationships
+among samples. In contrast to sleep history–associated genes, samples collected at 29 °C and 21 °C show
+greater intermixing, indicating weaker separation by temperature condition.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure 12. Genes positively or negatively correlated with acute or longer-term sleep rebound. Sleep
+rebound was defined as the difference between cumulative sleep measured after sampling (1–12 h) and the
+corresponding cumulative baseline sleep over matched time intervals (1–12 h) for each condition. Pearson
+correlations were calculated between gene expression levels and each of the 12 rebound intervals. Circadian-
+control samples were excluded from this analysis. Gene expression values (log₂ TPM) were averaged across
+three biological replicates, and rebound sleep measurements were averaged across the number of flies per
+sample. A total of 63 genes showed significant positive correlations (correlation coefficient > 0, BH-adjusted q <
+0.05), whereas 258 genes showed significant negative correlations (correlation coefficient < 0, BH-adjusted q <
+0.05). Similar to sleep history correlations, some genes exhibited stronger associations with shorter rebound
+intervals, while others showed stronger correlations across longer rebound periods.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure 13. Functional enrichment of transcripts negatively-correlated with sleep rebound. Bubble plot
+showing Gene Ontology (GO) and KEGG pathway enrichment (FDR < 10%) for genes negatively correlated
+with sleep-rebound (Pearson Correlation, qvalue.< 0.05). The x-axis indicates statistical significance (-log10P.)
+Circle sizes represent the percentage of genes enriched within each term.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure 14. Sleep vs. gene expression plot: Relationship between sleep history and rebound sleep for
+each genotype plotted against corresponding gene expression levels. In the examples shown, AstA-R2 and
+Trh expression exhibits a positive correlation with sleep history and a negative correlation with sleep
+rebound, whereas CG9377 shows the opposite pattern, with a positive correlation with rebound sleep and a
+negative correlation with sleep history. Gene expression values (log₂ TPM) were averaged across three
+biological replicates, and sleep measurements were averaged across the number of flies per sample.
+     bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+   (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                                  available under a CC-BY 4.0 International license.
+
+
+
+
+Figure S1. Motif enrichment analysis of wake and sleep conditions. (A) Top 10 transcription factor binding
+motifs enriched in promoter regions of wake-associated genes identified using HOMER. (B) Top 10 motifs
+enriched in promoter regions of sleep-associated genes. Motifs are ranked based on enrichment p-value. For
+each motif, the p-value, percentage of target sequences, percentage of background sequences, and best
+match are shown.
+  bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+(which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                               available under a CC-BY 4.0 International license.
+
+
+
+
+     Figure S2 Wake Promotion and Rebound Sleep after 12h TrpA1 Activation
+     GAL4 lines for sleep deprivation were chosen following 12 hr activation experiments.
+     A. Sleep lost during 12 hr nighttime activation of GAL4 lines at 29°C compared to the 12 hr
+     period occurring one day before activation. Outside of activation, flies were maintained at 21°C
+     in a 12:12 LD cycle. Each GAL4 was compared to an enhancer-less GAL4 driver (pBDP-GAL4).
+     *** p = 0.0008, **** p<0.0001 by ANOVA with Dunnett’s multiple comparison test.
+     B. Rebound sleep during the 12 hr period immediately after activation of GAL4 lines. Each
+     GAL4 was compared to an enhancer-less GAL4 driver (pBDP-GAL4). **** p<0.0001 by ANOVA
+     with Dunnett’s multiple comparison test.
+  bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+(which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                               available under a CC-BY 4.0 International license.
+
+
+
+
+     Figure S3. Wake promotion via 3 hour thermogenetic TrpA1 activation
+     A-D. Panels A through D show four GAL4 lines that were used to induce sleep deprivation when
+     paired with TrpA1 and a temperature pulse to activate neurons expressing TrpA1. The top left
+     graph in each panel shows two circadian cycles of sleep behavior at 21°C depicting flies bearing
+     both the GAL4 and UAS-TrpA1 transgenes. The bottom left graph in each panel shows two
+     circadian cycles of sleep behavior for two genotypes: a GAL4 line paired with a UAS-TrpA1
+     transgene as well as a GAL4/+ line. The flies are maintained at 21°C for most of the experiment
+     except for a brief 3 hr transition to 29°C at the end of the second night (depicted in orange). The
+     two other graphs in each panel show a quantification of total sleep during the 3 hr activation for
+     each condition (left) and the change in sleep during the 12 hr rebound period following
+     activation compared to the previous day (right). (A) Activation of HC-GAL4 neurons promotes
+     wakefulness and over 200 minutes of rebound sleep following activation. HC>TrpA1 21°C (n =
+     16), HC>+ 29°C (n = 11), HC>TrpA1 29°C (n = 35). **** p<0.0001 by ANOVA with Tukey’s
+     multiple comparisons. (B) Activation of R60F09-GAL4 neurons promotes wakefulness without
+     rebound sleep following activation. R60F09>TrpA1 21°C (n = 16), R60F09>+ 29°C (n = 16),
+     R60F09>TrpA1 29°C (n = 32). **** p<0.0001 by ANOVA with Tukey’s multiple comparisons. (C)
+     Activation of R21H11-GAL4 neurons promotes wakefulness without rebound sleep following
+     activation. R21H11>TrpA1 21°C (n = 8), R21H11>+ 29°C (n = 13), R21H11>TrpA1 29°C (n =
+     19). ** p = 0.0039, **** p<0.0001 by ANOVA with Tukey’s multiple comparisons. (D) Activation
+     of R65H02-GAL4 neurons promotes wakefulness with limited rebound sleep following
+     activation. R65H02>TrpA1 21°C (n = 8), R65H02>+ 29°C (n = 13), R65H02>TrpA1 29°C (n =
+     23). * p = 0.0146, ** p = 0.0097, **** p = 0.0005 by ANOVA with Tukey’s multiple comparisons.
+  bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+(which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                               available under a CC-BY 4.0 International license.
+
+
+
+
+     Figure S4. pickpocket leg neurons are necessary for HCGAL4 wake promotion and
+     rebound.
+     Wake promotion and rebound in HC-GAL4 experiments is driven by ppk+ cells in the legs.
+     A. Confocal imaging of the brain and leg of flies in which HC-GAL4 was used to drive
+     expression of GFP. GFP is shown in black. Arrow on the brain indicates terminals of the leg
+     neurons in the subesophageal zone (SEZ) of the brain previously reported in Seidner et al.
+     Arrows on the leg indicate two cell bodies associated with wake-promotion {Satterfield, 2022}.
+     B. Confocal imaging of the brain and leg of flies in which HC-GAL4 was used to drive
+     expression of GFP in the presence of a ppk-Gal80 transgene blocking expression in ppk
+     neurons. The absence of terminals in the SEZ is indicated by the arrow. Cell bodies in the distal
+     part of the leg are also missing.
+     C. Coexpression of ppk-Gal80 completely blocked wake promotion during a 29°C nighttime
+     pulse indicated in orange.
+  bioRxiv preprint doi: https://doi.org/10.64898/2026.02.28.708752; this version posted June 6, 2026. The copyright holder for this preprint
+(which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in perpetuity. It is made
+                                               available under a CC-BY 4.0 International license.
+
+
+
+
+     D. Quantification of the data in panel C indicates that coexpression of ppk-Gal80 abrogated the
+     wake promoting effects observed when activating HC-GAL4 neurons with a TrpA1 transgene.
+     **** p<0.0001 by ANOVA with Tukey’s multiple comparisons.
+     E. Quantification of the data in panel C indicates that coexpression of ppk-Gal80 abrogated the
+     wake promoting effects observed when activating HC-GAL4 neurons with a TrpA1 transgene. **
+     p = 0.0013, *** p = 0.0008 by ANOVA with Tukey’s multiple comparisons.
+
