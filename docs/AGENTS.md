@@ -81,8 +81,11 @@ OPENAI_EMBEDDING_MODEL=...   # Optional, overrides default (text-embedding-3-lar
 ### run (primary, config-driven)
 
 ```bash
-python -m fl_ai_reagent_stocker run ./gene_lists --config ./my_config.json [--quiet]
+python -m fl_ai_reagent_stocker run ./gene_lists --config data/config/stock_split_config_priority_example.json [--quiet]
 ```
+
+Unless the user specifies another config, use
+`data/config/stock_split_config_priority_example.json`.
 
 `run` executes the full pipeline:
 
@@ -144,10 +147,12 @@ Stage 1 always writes a `Gene Reagent Index` sheet alongside `Stocks` /
 ## JSON Config Contract
 
 The JSON files in `data/config/` are canonical. The default is
-`stock_split_config_example.json`; `stock_split_config_phenotype_example.json`
-is the phenotype-aware variant. `stock_split_config_priority_example.json` and
-`stock_split_config_priority_all_phenotypes.json` are the phenotype-bucket
-priority configs (see `docs/stock_split_config_priority_example.md`).
+`data/config/stock_split_config_priority_example.json`; use it unless another
+config is explicitly defined. `stock_split_config_example.json` is the
+publication-evidence baseline; `stock_split_config_phenotype_example.json` is
+the phenotype-aware variant. `stock_split_config_priority_all_phenotypes.json`
+is the exhaustive phenotype-bucket variant (see
+`docs/stock_split_config_priority_example.md`).
 
 - `settings.relevantSearchTerms` defines keyword relevance, backing
   `ALLELE_PAPER_RELEVANCE_SCORE` and the `Ref++` / `Ref+` / `Ref-` tiers
@@ -323,7 +328,9 @@ Expected local data layout under `data/`:
   - `fb_synonym_fb_*.tsv.gz`
 - `flybase/sequence_features/`
   - `fbsf_to_fbgn.csv` (built helper, gitignored dir)
-- `config/*.json`
+- `config/*.json` — default is `stock_split_config_priority_example.json`
+  (tracked); other JSON configs in this directory remain gitignored unless
+  another config is explicitly defined for a run
 - `cache/` (gitignored) - PubMed and embedding caches:
   - `pmid_to_title_abstract.csv`
   - `pmid_to_fulltext_method.csv`

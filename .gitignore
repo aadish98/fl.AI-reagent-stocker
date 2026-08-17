@@ -57,7 +57,8 @@ data/flybase/transgenic_constructs/transgenic_construct_descriptions_fb_*.tsv
 data/bdsc/
 data/cache/
 data/gene_sets/
-data/config/
+data/config/*
+!data/config/stock_split_config_priority_example.json
 data/logs/
 data/test/
 

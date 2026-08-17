@@ -1,0 +1,143 @@
+{
+  "_description": "Simple priority phenotypic-stocks config. Produces six named, priority-ordered phenotype buckets for stocks with any FlyBase curated phenotype (PHENOTYPE_RELEVANCE_SCORE != 0), split by collection/stock-center status and RNAi_reagent vs AlleleOrInsertion. Each (stock_id, collection) reagent lands in only the first matching sheet. settings.embeddings.enabled is true.",
+
+  "_column_notes": {
+    "collection": "FlyBase stock collection name, e.g. Bloomington, Vienna, Kyoto.",
+    "RNAi": "COMPUTED: Broad UAS/RNAi proxy. True if genotype contains UAS or RNAi, if a Vienna stock matches VDRC knockdown families such as GD, KK, or VSH, or if construct metadata marks it as an RNAi reagent. Used by AlleleOrInsertion and UAS filters.",
+    "transgenic_product_class_terms": "FlyBase transgenic product class terms for the stock. RNAi_reagent filter matches when this field contains 'RNAi_reagent'.",
+    "custom_stock": "COMPUTED: True for phenotype-backed reagents without an orderable FBst stock-center record. Drives Stock Center vs Non Stock Center filters.",
+    "AlleleOrInsertion": "CONFIG ALIAS: Implemented as RNAi == false, matching the non-UAS shorthand.",
+    "sgRNA": "COMPUTED: True if stock genotype contains 'sgRNA' (case-insensitive). No sgRNA filter excludes CRISPR reagents from the Ref matrix.",
+    "num_Balancers": "COMPUTED: Number of FBba (balancer) components associated with the stock. Drives No Balancers / Has Balancers filters.",
+    "multiple_insertions": "COMPUTED: True if stock has more than one unique transgenic construct. Drives no_other_insertion / other_insertion filters.",
+    "ALLELE_PAPER_RELEVANCE_SCORE": "COMPUTED: 0 (Ref-)=no refs, 1 (Ref+)=has refs but none contain keywords in title/abstract, 2 (Ref++)=at least 1 ref has case-insensitive keyword hit in title/abstract.",
+    "PHENOTYPE_RELEVANCE_SCORE": "COMPUTED: 0=no curated phenotype, 1 (Phenotype+)=has curated phenotype but none match phenotypeSimilarityTargets, 2 (Phenotype++)=curated phenotype matches a target. Phenotype filter qualifies when score is non-zero."
+  },
+
+  "settings": {
+    "input": {
+      "geneCol": "flybase_gene_id",
+      "inputGeneCol": "ext_gene",
+      "skipFbgnidConversion": true
+    },
+    "pubmed": {
+      "batchSize": 50
+    },
+    "relevantSearchTerms": ["sleep", "circadian", "rhythm", "locomotor"],
+    "phenotypeSimilarityTargets": [
+      {
+        "keyword": "sleep",
+        "embedding_text": "sleep"
+      },
+      {
+        "keyword": "circadian",
+        "embedding_text": "circadian"
+      },
+      {
+        "keyword": "rhythm",
+        "embedding_text": "rhythm"
+      },
+      {
+        "keyword": "locomotor",
+        "embedding_text": "locomotor"
+      }
+    ],
+    "maxStocksPerGene": 5,
+    "maxStocksPerAllele": 3,
+    "validation": {
+      "enabled": false,
+      "maxGptCallsPerStock": 5,
+      "minFullTextChars": 500,
+      "gptCallDelaySeconds": 0.5,
+      "shortCircuitOnFunctionalValidation": true,
+      "enableGptLogging": false
+    },
+    "embeddings": {
+      "enabled": true
+    },
+    "output": {
+      "preserveUnsplitWorkbook": false
+    },
+    "contentsSeparatorEvery": 1
+  },
+
+  "filterDescriptions": {
+    "Bloomington": "Stocks from the Bloomington collection in FlyBase.",
+    "Vienna": "Stocks from the Vienna (VDRC) collection in FlyBase.",
+    "Stock Center": "Orderable stock-center rows with an FBst-backed stock record.",
+    "Non Stock Center": "Phenotype-backed custom reagents without an orderable stock-center record.",
+    "RNAi_reagent": "FlyBase marks the stock as an RNAi reagent (transgenic_product_class_terms contains RNAi_reagent). Used in phenotype buckets and the Bloomington Ref matrix.",
+    "UAS": "UAS bucket. Uses the repo's broad UAS/RNAi proxy rather than a narrower genotype-only UAS check. Defined but not referenced by current combinations.",
+    "AlleleOrInsertion": "Non-UAS bucket. Implemented as rows that do not match the broad UAS/RNAi proxy.",
+    "Phenotype": "Stocks with any associated curated FlyBase phenotype (PHENOTYPE_RELEVANCE_SCORE != 0; Phenotype+ or Phenotype++).",
+    "Ref++": "Allele has at least one publication whose title or abstract contains a configured keyword (case-insensitive).",
+    "Ref+": "Allele has publications, but none contain a configured keyword in title or abstract.",
+    "Ref-": "Allele has no publication citations.",
+    "No sgRNA": "Genotype does not include sgRNA (excludes CRISPR reagents from the Ref matrix).",
+    "Has Balancers": "One or more balancer components (FBba) are associated with the stock (num_Balancers > 0).",
+    "No Balancers": "No balancer components (FBba) are associated with the stock (num_Balancers = 0).",
+    "other_insertion": "Stock has more than one unique transgenic construct.",
+    "no_other_insertion": "Stock has only one unique transgenic construct (single insertion)."
+  },
+
+  "filters": {
+    "Bloomington": {
+      "column": "collection",
+      "type": "contains",
+      "value": "Bloomington"
+    },
+    "Vienna": {
+      "column": "collection",
+      "type": "contains",
+      "value": "Vienna"
+    },
+    "Stock Center": {
+      "column": "custom_stock",
+      "type": "equals",
+      "value": false
+    },
+    "Non Stock Center": {
+      "column": "custom_stock",
+      "type": "equals",
+      "value": true
+    },
+    "UAS": {
+      "column": "RNAi",
+      "type": "equals",
+      "value": true
+    },
+    "AlleleOrInsertion": {
+      "column": "RNAi",
+      "type": "equals",
+      "value": false
+    },
+    "Phenotype": {
+      "column": "PHENOTYPE_RELEVANCE_SCORE",
+      "type": "doesnt_equal",
+      "value": 0
+    },
+    "RNAi_reagent": {
+      "column": "transgenic_product_class_terms",
+      "type": "contains",
+      "value": "RNAi_reagent"
+    }
+  },
+
+  "combinations": [
+    ["Bloomington", "RNAi_reagent", "Phenotype"],
+    ["Vienna", "RNAi_reagent", "Phenotype"],
+    ["Bloomington", "AlleleOrInsertion", "Phenotype"],
+    ["Stock Center", "AlleleOrInsertion", "Phenotype"],
+    ["Non Stock Center", "RNAi_reagent", "Phenotype"],
+    ["Non Stock Center", "AlleleOrInsertion", "Phenotype"]
+  ],
+
+  "combination_names": [
+    "BDSC·RNAi·Pheno",
+    "VDRC·RNAi·Pheno",
+    "BDSC·Allele·Pheno",
+    "OtherSC·Allele·Pheno",
+    "Custom·RNAi·Pheno",
+    "Custom·Allele·Pheno"
+  ]
+}
