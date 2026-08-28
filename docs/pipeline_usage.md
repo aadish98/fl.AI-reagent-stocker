@@ -7,8 +7,11 @@ runs OpenAI validation and phenotype-embedding analysis when enabled by config.
 
 ## Inputs
 
-- One folder of gene-list CSV files (for example `./gene_lists`). Each CSV
-  provides gene symbols and/or FBgn IDs.
+- One folder of gene-list CSV files (for example `./gene_lists`). Convert
+  symbols with `scripts/fetch_fbgn_ids.py` first; that leaves the user CSV
+  untouched and writes `validated_*.csv`. `run` skips `needs-review.csv`
+  and prefers a `validated_` sibling when one exists. Each validated CSV
+  provides gene symbols and FBgn IDs.
 - A local FlyBase data tree under `data/flybase/` (see
   [stock_split_config_example.md](stock_split_config_example.md) and the helper
   scripts below).
@@ -192,7 +195,15 @@ tier sidecar.
 
 Standalone scripts under `scripts/` (run from the repo root):
 
-- `fetch_fbgn_ids.py` — gene symbols to FBgn IDs.
+- `fetch_fbgn_ids.py` — gene symbols to FBgn IDs. Never overwrites the
+  user CSV. Writes `validated_<original>.csv` (stocker input),
+  `needs-review.csv`, and `validated_<original>.xlsx` with FBgn hyperlinks
+  to `https://flybase.org/reports/<FBgn>`. This is the only allowed way to
+  write `flybase_gene_id`. Agents must not fill IDs by hand and must not
+  edit the user list. Edit `validated_*.csv` or FBgn columns only if the
+  user explicitly asks. Humans review the xlsx (and
+  https://flybase.org/convert/id if `needs-review.csv` is non-empty) before
+  `run`. See `docs/SOP_Stocker_Cursor_CLI.pdf`.
 - `build_fbst_derived_stock_components.py` — build the derived stock-component CSV.
 - `build_fbtp_to_fbti_mapping.py` — build the FBtp→FBti mapping CSV.
 - `refresh_flybase_data.py` — download the latest FlyBase reports into

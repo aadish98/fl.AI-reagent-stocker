@@ -59,6 +59,36 @@ relevant doc(s) in the same change:
   data source or model dependency, or when the default model changes.
 - `docs/AGENTS.md` — this file; agent-facing reference for commands, package
   layout, key classes, helper scripts, tests, and data layout.
+- `docs/SOP_Stocker_Cursor_CLI.pdf` — standalone SOP: GitHub install, how
+  Stocker works, solid gene-list review, default config, and stock limits.
+  Keep the FBgn conversion hard rule in lockstep with this file.
+
+## FBgn ID conversion (hard rule)
+
+Wrong FBgn IDs are the largest failure mode in this system.
+
+Gene symbol → FlyBase gene ID (`FBgn` / `flybase_gene_id`) conversion
+**must always** go through `scripts/fetch_fbgn_ids.py`. That script
+**never overwrites** the user CSV. It writes:
+
+- `validated_<original>.csv` — mapped rows only
+- `needs-review.csv` — unmatched rows from every input, plus `source_file`
+- `validated_<original>.xlsx` — review workbook; each FBgn is a hyperlink
+  to `https://flybase.org/reports/<FBgn>`
+
+Agents must **never** edit the user-generated gene list. Agents must
+**never** invent, recall, autocomplete, or hand-fill FBgn IDs. Agents
+may edit `validated_*.csv` or FBgn columns **only if the user explicitly
+asks**. Tell the user the xlsx exists and wait for them to review it for
+precision. If `needs-review.csv` has data rows, send them to
+https://flybase.org/convert/id first. Run stocker **only** on
+`validated_*.csv`, and only after that review. `run` skips
+`needs-review.csv` and prefers a `validated_` sibling when one exists.
+
+Shipped configs may set `settings.input.skipFbgnidConversion` to `true`
+(including `stock_split_config_priority_example.json`). In that case
+stocker trusts the validated CSV IDs and will not convert symbols during
+`run`.
 
 ## Setup
 
@@ -261,13 +291,18 @@ fl_ai_reagent_stocker/
 
 ## Helper Scripts
 
-Canonical helper scripts live in `scripts/` (standalone, no package imports).
-Run them from the repo root.
+Canonical helper scripts live in `scripts/`. Run them from the repo root;
+data-building scripts may import shared package utilities when they need the
+same FlyBase, PubMed, or configuration logic as the pipeline.
 
 Data builders / refreshers:
 
 - `refresh_flybase_data.py` - pull the latest FlyBase TSV/TSV.GZ reports.
-- `fetch_fbgn_ids.py` - convert gene symbols to FBgn IDs.
+- `fetch_fbgn_ids.py` - convert gene symbols to FBgn IDs. Never overwrites
+  the user CSV. Writes `validated_*.csv`, `needs-review.csv`, and a
+  hyperlinked `validated_*.xlsx`. The only allowed way to create
+  `flybase_gene_id` values. Agents must never fill those IDs by hand.
+- `build_sop_stocker_pdf.py` - regenerate `docs/SOP_Stocker_Cursor_CLI.pdf`.
 - `build_fbst_derived_stock_components.py` - build
   `data/flybase/alleles_and_stocks/fbst_to_derived_stock_component.csv`.
 - `build_fbtp_to_fbti_mapping.py` - build
@@ -281,6 +316,20 @@ Audits and aggregations:
   Markdown to `audit_outputs/`.
 - `aggregate_similarity_workbook_counts.py` - summarize
   `_aggregated_similarity_tiers.xlsx` Contents tables across a directory tree.
+- `build_temperature_phenotype_gene_list.py` - match all FlyBase curated
+  phenotype/qualifier text against Temperature/heat/cold/thermo keywords
+  (direct text match, no embeddings), attach orderable and custom reagents,
+  enrich citations through the PubMed cache, and write a gene-grouped Excel
+  workbook with `Reagents` and `References` sheets. The inclusion rule is a
+  cited phenotype with a boundary-aware keyword hit AND an allele/insertion
+  reagent (UAS/RNAi constructs, including common VDRC knockdown allele
+  families, are excluded). The `Reagents` sheet carries a `Stock Center`
+  column (`BDSC`, `Vienna`, other FlyBase collection names, or `Custom`).
+  The ubiquitous `w` gene (`FBgn0003996`) is manually blacklisted by both
+  FBgn ID and symbol (`exclude_genes`), applied once before stock/reference
+  expansion and again on the final deduplicated reagent table, so its
+  `w[1118]` background allele can never generate downstream reagent or
+  reference rows.
 
 Visualizations / decks:
 

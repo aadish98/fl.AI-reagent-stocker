@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 """
-Map input gene symbols to FlyBase FBgn IDs in CSV files.
+Map input gene symbols to FlyBase FBgn IDs.
+
+Never overwrites the user's CSV. Writes sidecar review files instead:
+
+    validated_<original>.csv
+    validated_<original>.xlsx   (FBgn cells link to flybase.org/reports/<FBgn>)
+    needs-review.csv            (unmatched rows from every input, plus source_file)
 
 Usage:
     python scripts/fetch_fbgn_ids.py <input_directory> [input_gene_col]
+
+Do not run stocker until a human has reviewed the xlsx. If needs-review.csv
+has data rows, validate at https://flybase.org/convert/id first.
 """
+
+from __future__ import annotations
 
 import argparse
 import gzip
@@ -71,6 +82,10 @@ symbol_to_name = {
 _SCRIPT_DIR = Path(__file__).parent.resolve()
 _REPO_ROOT = _SCRIPT_DIR.parent
 DEFAULT_FLYBASE_DATA = _REPO_ROOT / "data" / "flybase"
+VALIDATED_PREFIX = "validated_"
+NEEDS_REVIEW_NAME = "needs-review.csv"
+FLYBASE_REPORT_URL = "https://flybase.org/reports/{fbgn}"
+FLYBASE_CONVERT_URL = "https://flybase.org/convert/id"
 
 
 def replace_symbol(gene_series):
@@ -360,14 +375,87 @@ def load_mappings(flybase_data_dir: Path):
     return gene_to_fbgnid_main, synonym_to_fbgnid_map, fbgnid_to_symbol_map
 
 
+def is_conversion_sidecar(path) -> bool:
+    """Return True for files this script writes, so a re-run cannot consume them."""
+    name = Path(path).name
+    if name == NEEDS_REVIEW_NAME:
+        return True
+    return name.startswith(VALIDATED_PREFIX) and name.endswith(".csv")
+
+
+def is_mapped_fbgn(value) -> bool:
+    text = str(value).strip()
+    return text.startswith("FBgn")
+
+
+def select_source_csv_paths(input_dir: Path) -> list[Path]:
+    """Return user CSVs only. Skip validated_*.csv and needs-review.csv."""
+    return sorted(
+        path
+        for path in Path(input_dir).glob("*.csv")
+        if not is_conversion_sidecar(path)
+    )
+
+
+def _mapped_mask(series: pd.Series) -> pd.Series:
+    return series.astype(str).str.strip().str.startswith("FBgn")
+
+
+def write_review_xlsx(xlsx_path: Path, gene_column: str, validated_df: pd.DataFrame, review_df: pd.DataFrame) -> None:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils.dataframe import dataframe_to_rows
+
+    corrected_col = "corrected_" + gene_column
+    review_cols = [gene_column, corrected_col, "primary_symbol", "flybase_gene_id"]
+    for extra in review_cols:
+        if extra not in validated_df.columns and not validated_df.empty:
+            raise KeyError(f"Validated table is missing column {extra}")
+
+    workbook = Workbook()
+    validated_sheet = workbook.active
+    validated_sheet.title = "Validated"
+    export_validated = (
+        validated_df.loc[:, [c for c in review_cols if c in validated_df.columns]]
+        if not validated_df.empty
+        else pd.DataFrame(columns=review_cols)
+    )
+    for row in dataframe_to_rows(export_validated, index=False, header=True):
+        validated_sheet.append(row)
+    id_col = review_cols.index("flybase_gene_id") + 1
+    link_font = Font(color="0563C1", underline="single")
+    for row_idx in range(2, validated_sheet.max_row + 1):
+        cell = validated_sheet.cell(row=row_idx, column=id_col)
+        fbgn = str(cell.value or "").strip()
+        if is_mapped_fbgn(fbgn):
+            cell.hyperlink = FLYBASE_REPORT_URL.format(fbgn=fbgn)
+            cell.font = link_font
+
+    review_sheet = workbook.create_sheet("Needs review")
+    export_review = (
+        review_df.loc[:, [c for c in review_cols if c in review_df.columns]]
+        if not review_df.empty
+        else pd.DataFrame(columns=review_cols)
+    )
+    for row in dataframe_to_rows(export_review, index=False, header=True):
+        review_sheet.append(row)
+
+    workbook.save(xlsx_path)
+
+
 def process_csv_file(
     csv_file, gene_column, gene_to_fbgnid_main, synonym_to_fbgnid_map, fbgnid_to_symbol_map
 ):
-    print(f"Processing file: {csv_file}")
+    """Map genes and write sidecar files. Never overwrites ``csv_file``.
+
+    Returns the unmatched rows (with ``source_file``) or None if the file was skipped.
+    """
+    csv_path = Path(csv_file)
+    print(f"Processing file: {csv_path}")
 
     header_row = 0
     try:
-        temp_df = pd.read_csv(csv_file, nrows=10, header=None, encoding="utf-8-sig")
+        temp_df = pd.read_csv(csv_path, nrows=10, header=None, encoding="utf-8-sig")
         for i, row in temp_df.iterrows():
             if gene_column in row.astype(str).values:
                 header_row = i
@@ -397,7 +485,7 @@ def process_csv_file(
         "null",
     ]
     df = pd.read_csv(
-        csv_file,
+        csv_path,
         encoding="utf-8-sig",
         header=header_row,
         na_values=custom_na_values,
@@ -406,13 +494,13 @@ def process_csv_file(
     )
 
     if gene_column not in df.columns:
-        if "GO" in csv_file and "Genes" in df.columns:
+        if "GO" in csv_path.name and "Genes" in df.columns:
             df["Genes"] = df["Genes"].astype(str).str.split(", ")
             df = df.explode("Genes").reset_index(drop=True)
             df[gene_column] = df["Genes"]
         else:
-            print(f"'{gene_column}' column not found in {csv_file}. Skipping file.")
-            return
+            print(f"'{gene_column}' column not found in {csv_path}. Skipping file.")
+            return None
 
     working_col = gene_column + "_new"
     corrected_col = "corrected_" + gene_column
@@ -444,14 +532,52 @@ def process_csv_file(
     ordered = [gene_column, corrected_col, "primary_symbol", "flybase_gene_id"]
     remaining = [c for c in df.columns if c not in ordered]
     df = df[ordered + remaining]
-    df.to_csv(csv_file, index=False, encoding="utf-8-sig")
 
-    print(f"File saved to {csv_file} with {df.shape[0]} rows.")
+    mapped_mask = _mapped_mask(df["flybase_gene_id"])
+    validated_df = df.loc[mapped_mask].copy()
+    review_df = df.loc[~mapped_mask].copy()
+    review_df.insert(0, "source_file", csv_path.name)
+
+    validated_csv = csv_path.with_name(f"{VALIDATED_PREFIX}{csv_path.name}")
+    validated_xlsx = csv_path.with_name(f"{VALIDATED_PREFIX}{csv_path.stem}.xlsx")
+    validated_df.to_csv(validated_csv, index=False, encoding="utf-8-sig")
+    write_review_xlsx(validated_xlsx, gene_column, validated_df, review_df.drop(columns=["source_file"]))
+
+    print(f"Left original untouched: {csv_path}")
+    print(f"Wrote {validated_csv} ({len(validated_df)} mapped rows).")
+    print(f"Wrote {validated_xlsx} (click each FBgn to open the FlyBase gene report).")
+    print(f"Unmatched rows from this file: {len(review_df)}")
+    return review_df
+
+
+def _print_review_gate(validated_paths, unmatched_count: int) -> None:
+    print("\n" + "=" * 72)
+    print("STOP. Do not run stocker yet.")
+    print("The original gene-list CSV was not edited.")
+    print("Review the companion xlsx (FBgn cells are FlyBase hyperlinks) for precision:")
+    for path in validated_paths:
+        print(f"  {path}")
+    print(f"ID validator: {FLYBASE_CONVERT_URL}")
+    if unmatched_count:
+        print(
+            f"{unmatched_count} row(s) are in {NEEDS_REVIEW_NAME}. "
+            "Paste those symbols at the validator before treating any list as ready."
+        )
+    else:
+        print(
+            "No unmatched rows. Still open the xlsx and confirm each FBgn "
+            "before running stocker on validated_*.csv only."
+        )
+    print("Stocker must run only on validated_*.csv after that human review.")
+    print("=" * 72)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Map input fly gene symbols to FlyBase FBgn IDs in CSV files."
+        description=(
+            "Map fly gene symbols to FBgn IDs. Never overwrites the input CSV; "
+            "writes validated_*.csv, validated_*.xlsx, and needs-review.csv."
+        )
     )
     parser.add_argument("input_directory", help="Directory containing input CSV files")
     parser.add_argument(
@@ -477,9 +603,9 @@ def main(argv=None):
         print(f"Error: FlyBase data directory not found at: {flybase_data_dir}")
         return 1
 
-    csv_files = sorted(glob(str(input_dir / "*.csv")))
+    csv_files = select_source_csv_paths(input_dir)
     if not csv_files:
-        print(f"No CSV files found in {input_dir}")
+        print(f"No source CSV files found in {input_dir} (sidecars are ignored).")
         return 0
 
     try:
@@ -490,15 +616,30 @@ def main(argv=None):
         print(f"Error loading FlyBase synonym mappings: {e}")
         return 1
 
+    review_frames = []
+    validated_xlsx_paths = []
     for csv_file in csv_files:
-        process_csv_file(
+        review_df = process_csv_file(
             csv_file,
             args.input_gene_col,
             gene_to_fbgnid_main,
             synonym_to_fbgnid_map,
             fbgnid_to_symbol_map,
         )
+        if review_df is None:
+            continue
+        review_frames.append(review_df)
+        validated_xlsx_paths.append(csv_file.with_name(f"{VALIDATED_PREFIX}{csv_file.stem}.xlsx"))
 
+    needs_review_path = input_dir / NEEDS_REVIEW_NAME
+    if review_frames:
+        combined_review = pd.concat(review_frames, ignore_index=True)
+    else:
+        combined_review = pd.DataFrame(columns=["source_file", args.input_gene_col, "flybase_gene_id"])
+    combined_review.to_csv(needs_review_path, index=False, encoding="utf-8-sig")
+    print(f"Wrote {needs_review_path} ({len(combined_review)} unmatched rows).")
+
+    _print_review_gate(validated_xlsx_paths, len(combined_review))
     print("All files processed.")
     return 0
 

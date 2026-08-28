@@ -120,6 +120,23 @@ class TestRecursiveDiscovery(unittest.TestCase):
                 {"CSW FC0.5/a.csv", "CSW FC1/b.csv", "top.csv"},
             )
 
+    def test_skips_needs_review_and_prefers_validated_sibling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cols = "flybase_gene_id,ext_gene"
+            _write_csv(root / "genes.csv", cols)
+            _write_csv(root / "validated_genes.csv", cols)
+            _write_csv(root / "needs-review.csv", cols)
+            _write_csv(root / "only_original.csv", cols)
+
+            found = {
+                p.relative_to(root).as_posix()
+                for p in cli._discover_input_csvs(root)
+            }
+            self.assertEqual(found, {"only_original.csv", "validated_genes.csv"})
+            self.assertNotIn("genes.csv", found)
+            self.assertNotIn("needs-review.csv", found)
+
 
 class TestGeneColumnValidation(unittest.TestCase):
     def test_reports_missing_columns(self):

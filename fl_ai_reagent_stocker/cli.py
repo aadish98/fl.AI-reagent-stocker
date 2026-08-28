@@ -632,7 +632,13 @@ _GENERATED_DIR_NAMES = {
 }
 _GENERATED_CSV_NAMES = {
     "combination_counts_summary.csv",
+    "needs-review.csv",
 }
+_VALIDATED_CSV_PREFIX = "validated_"
+
+
+def _validated_sibling(path: Path) -> Path:
+    return path.with_name(f"{_VALIDATED_CSV_PREFIX}{path.name}")
 
 
 def _discover_input_csvs(input_dir: Path) -> List[Path]:
@@ -640,7 +646,9 @@ def _discover_input_csvs(input_dir: Path) -> List[Path]:
 
     Generated/output trees (``Per Gene Set Runs``, ``Stocks``, ``Organized
     Stocks``, ``*_similarity`` plot folders, etc.) and hidden files are excluded
-    so re-runs never reprocess prior outputs or staged copies.
+    so re-runs never reprocess prior outputs or staged copies. ``needs-review.csv``
+    is never an input. If ``validated_<name>.csv`` sits next to ``<name>.csv``,
+    only the validated sidecar is used.
     """
     discovered: List[Path] = []
     for path in sorted(input_dir.rglob("*.csv")):
@@ -651,6 +659,14 @@ def _discover_input_csvs(input_dir: Path) -> List[Path]:
             continue
         if any(part.endswith("_similarity") for part in rel_parts):
             continue
+        if not path.name.startswith(_VALIDATED_CSV_PREFIX):
+            validated = _validated_sibling(path)
+            if validated.exists():
+                print(
+                    f"WARNING: skipping {path}; using {validated.name} (stocker runs only on validated lists).",
+                    file=sys.stderr,
+                )
+                continue
         discovered.append(path)
     return discovered
 

@@ -13,6 +13,7 @@ biopython>=1.80
 
 # PDF text extraction
 PyPDF2>=3.0.0
+reportlab>=4.0.0
 
 # OpenAI for functional validation
 openai>=1.0.0

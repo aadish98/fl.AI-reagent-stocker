@@ -10,6 +10,7 @@ OpenAI validation and phenotype-embedding analysis.
 - Pipeline guide: `docs/pipeline_usage.md`
 - Mermaid flowcharts: `docs/pipeline_flowcharts.md`
 - Agent guidance: `docs/AGENTS.md`
+- Shareable SOP (install, gene-list review, default config, stock limits): `docs/SOP_Stocker_Cursor_CLI.pdf`
 - Citing data sources, APIs, and models: `docs/citations.md`
 - Config reference: `docs/stock_split_config_example.md`
 - Phenotypic-stock priority configs: `docs/stock_split_config_priority_example.md`
@@ -123,7 +124,13 @@ python -m fl_ai_reagent_stocker validate-stocks ./gene_lists/Stocks --config ./m
 
 Canonical helper entry points:
 
-- `scripts/fetch_fbgn_ids.py`
+- `scripts/fetch_fbgn_ids.py` — required gene-symbol → FBgn conversion.
+  Never overwrites the user CSV. Never invent or hand-fill FBgn IDs.
+  Writes `validated_<name>.csv`, `needs-review.csv`, and a hyperlinked
+  `validated_<name>.xlsx`. Review that workbook (and
+  https://flybase.org/convert/id if anything is unmatched) before `run`.
+  Edit `validated_*.csv` or FBgn columns only if the user explicitly
+  asks. Stocker uses only `validated_*.csv` after that review.
 - `scripts/build_fbst_derived_stock_components.py`
 - `scripts/build_fbtp_to_fbti_mapping.py`
 - `scripts/refresh_flybase_data.py`

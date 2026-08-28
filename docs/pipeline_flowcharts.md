@@ -124,7 +124,8 @@ available as advanced entry points.
 
 ```mermaid
 flowchart TD
-    A[Input gene-list CSVs] --> S1[find-stocks]
+    A[Input gene-list CSVs] --> ID[fetch_fbgn_ids.py<br/>sidecar conversion + human review]
+    ID --> S1[find-stocks]
     S1 --> O1[(aggregated_stock_refs.xlsx<br/>Stocks + References + Gene Reagent Index)]
 
     O1 --> S2[organize<br/>JSON filters + combinations]
@@ -156,7 +157,8 @@ shared fan-out edges from a single "Inputs" node.
 
 ```mermaid
 flowchart TD
-    A[Input gene-list CSVs]
+    A[Input gene-list CSVs] --> ID[fetch_fbgn_ids.py<br/>validated_*.csv + review xlsx]
+    ID --> A1
 
     subgraph Stage1["Stage 1: find-stocks"]
         direction TB

@@ -65,6 +65,100 @@ def is_valid_id(val) -> bool:
     return bool(clean_id(val))
 
 
+def format_pmid_display(value: Any) -> str:
+    """Return a stable human-readable PMID value."""
+    value = clean_id(value)
+    if not value or value == "-":
+        return "-"
+    return value if value.upper().startswith("PMID") else f"PMID{value}"
+
+
+def format_pmcid_display(value: Any) -> str:
+    """Return a stable human-readable PMCID value."""
+    value = clean_id(value)
+    if not value or value == "-":
+        return "-"
+    if value.upper().startswith("PMCID"):
+        return f"PMCID{value[5:]}"
+    return f"PMCID{value[3:]}" if value.upper().startswith("PMC") else f"PMCID{value}"
+
+
+def format_reference_id_display(pmid: Any, pmcid: Any) -> str:
+    """Prefer PMID, then PMCID, for compact reference labels."""
+    formatted_pmid = format_pmid_display(pmid)
+    if formatted_pmid != "-":
+        return formatted_pmid
+    return format_pmcid_display(pmcid)
+
+
+def format_pmid_list_display(value: Any) -> str:
+    """Format a semicolon-separated PMID list without duplicates."""
+    values = parse_semicolon_list(value)
+    formatted = []
+    seen = set()
+    for item in values:
+        display = format_pmid_display(item)
+        if display != "-" and display not in seen:
+            seen.add(display)
+            formatted.append(display)
+    return "; ".join(formatted) if formatted else "-"
+
+
+def format_reference_id_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy with common reference-ID columns normalized for display."""
+    result = df.copy()
+    for column in result.columns:
+        if column == "PMID":
+            result[column] = result[column].apply(format_pmid_list_display)
+        elif column == "PMCID":
+            result[column] = result[column].apply(format_pmcid_display)
+        elif "PMID" in column:
+            result[column] = result[column].apply(format_pmid_list_display)
+    return result
+
+
+def parse_stock_candidate_label(value: Any) -> tuple[str, str]:
+    """Parse ``(stock number, collection)`` labels used by driver exports."""
+    text = str(value or "").strip()
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1].strip()
+    if "," not in text:
+        return text, ""
+    stock_number, collection = (part.strip() for part in text.split(",", 1))
+    if collection.lower() == "bdsc":
+        collection = "Bloomington"
+    return stock_number, collection
+
+
+def normalize_collection_name(value: Any) -> str:
+    """Normalize common stock-center names to the project's display labels."""
+    text = clean_id(value)
+    if not text or text == "-":
+        return ""
+    lowered = text.lower()
+    if lowered in {"bdsc", "bloomington", "bloomington drosophila stock center"}:
+        return "Bloomington"
+    if "vienna" in lowered:
+        return "Vienna"
+    return text
+
+
+def canonical_stock_candidate_label(stock_number: Any, collection: Any) -> str:
+    """Build the canonical stock candidate label used by driver matching."""
+    stock_number = clean_id(stock_number)
+    collection = normalize_collection_name(collection)
+    if stock_number and collection:
+        return f"({stock_number}, {collection})"
+    if stock_number:
+        return f"({stock_number})"
+    return ""
+
+
+def format_brace_entry(*values: Any) -> str:
+    """Format non-empty values as a comma-separated brace entry."""
+    return "{" + ", ".join(str(value).strip() for value in values if clean_id(value)) + "}"
+
+
 def parse_semicolon_list(values_str: str) -> List[str]:
     """Parse a semicolon-separated string into a list of cleaned values."""
     if pd.isna(values_str) or not str(values_str).strip():

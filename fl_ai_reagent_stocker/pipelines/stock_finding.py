@@ -436,6 +436,12 @@ class StockFindingPipeline:
             print(result.stdout)
             if result.stderr:
                 print(result.stderr)
+            if result.returncode != 0:
+                print(
+                    f"ERROR: {GET_FBGN_IDS_SCRIPT.name} exited with "
+                    f"status {result.returncode}"
+                )
+                return False
         except Exception as e:
             print(f"ERROR: Failed to run {GET_FBGN_IDS_SCRIPT.name}: {e}")
             return False
@@ -472,8 +478,20 @@ class StockFindingPipeline:
     
     def _aggregate_input_genes(self, input_dir: Path, gene_col: str) -> Tuple[List[str], List[Path]]:
         """Read all CSV files and aggregate unique genes."""
-        csv_files = sorted(input_dir.glob("*.csv"))
-        
+        csv_files = []
+        for csv_path in sorted(input_dir.glob("*.csv")):
+            if csv_path.name == "needs-review.csv":
+                continue
+            if not csv_path.name.startswith("validated_"):
+                validated_sibling = csv_path.with_name(f"validated_{csv_path.name}")
+                if validated_sibling.exists():
+                    print(
+                        f"  Skipping {csv_path.name}; using {validated_sibling.name} "
+                        "(stocker runs only on validated lists)."
+                    )
+                    continue
+            csv_files.append(csv_path)
+
         if not csv_files:
             return [], []
         
@@ -2176,11 +2194,12 @@ class StockFindingPipeline:
         
         # Step 0: FBgnID conversion
         if not skip_fbgnid_conversion and not self.settings.skip_fbgnid_conversion:
-            self._run_fbgnid_conversion(input_dir, input_gene_col)
+            if not self._run_fbgnid_conversion(input_dir, input_gene_col):
+                return None
             
             # Validate
             print("\nValidating FBgnID conversion...")
-            csv_files = sorted(input_dir.glob("*.csv"))
+            csv_files = sorted(input_dir.glob("validated_*.csv"))
             all_invalid = []
             for csv_path in csv_files:
                 invalid = self._validate_fbgnids(csv_path, gene_col)
