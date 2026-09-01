@@ -26,6 +26,9 @@ DATA_SHEET_NAMES = {
 WIDE_TEXT_PATTERNS = (
     r"genotype",
     r"phenotype",
+    r"Phenotype Reference-ID Map",
+    r"Published GAL4/ Positive Control",
+    r"Published GAL4 stock id",
     r"title",
     r"author",
     r"journal",

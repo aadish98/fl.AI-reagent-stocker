@@ -180,7 +180,8 @@ flowchart TD
         B1 --> B2[Compute derived columns<br/>Balancers, RNAi,<br/>ALLELE_PAPER_RELEVANCE_SCORE,<br/>PHENOTYPE_RELEVANCE_SCORE*]
         B2 --> B3[Apply JSON filters and combinations<br/>priority order, one sheet per reagent]
         B3 --> B4[Apply maxStocksPerGene<br/>and maxStocksPerAllele]
-        B4 --> O2[(Organized workbook sheets)]
+        B4 --> B5[If Phenotype filter: merge phenotype,<br/>qualifier, reference, GAL4 columns]
+        B5 --> O2[(Organized workbook sheets)]
     end
 
     subgraph PhenotypeSheet["phenotype-sheet (config-controlled embeddings)"]

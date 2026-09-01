@@ -121,7 +121,11 @@ Key fields:
 - `settings.contentsSeparatorEvery` — draw a faint separator after this many
   rows in the `Contents` sheet breakdown table (default: `3`).
 - `filters` — reusable column predicates.
-- `combinations` — ordered sheet definitions.
+- `combinations` — ordered sheet definitions. When any filter or combination
+  name starts with `Phenotype`, each populated combination sheet also receives
+  reagent-level `Phenotype Reference-ID Map`, partner GAL4, and
+  `Published GAL4/ Positive Control` / `Published GAL4 stock id` columns
+  joined from FlyBase curated phenotype evidence.
 - `combination_names` — optional Excel tab names aligned one-to-one with
   `combinations`. Names must be unique, valid Excel worksheet names of at most
   31 characters after numbering. Store unnumbered labels: populated categories

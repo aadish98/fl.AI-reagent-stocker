@@ -237,6 +237,13 @@ Contents count table with `-` as its sheet name and creates no tab. Configs
 without `combination_names` retain legacy `Sheet1..N` names for populated
 combinations.
 
+When a filter or combination name starts with `Phenotype`, those sheets also
+include reagent-level phenotype enrichment: `Phenotype Reference-ID Map`
+(`{phenotype (+ qualifier): PMID}`), `Partner GAL4 FlyBase IDs` /
+`Partner GAL4 Symbols`, and paired `{…}` `Published GAL4/ Positive Control` /
+`Published GAL4 stock id` entries. Exported PMIDs and PMCIDs are prefixed
+(`PMID12345678` / `PMCID12345678`).
+
 This config produces **13 sheets**. Twelve of them are a Bloomington-only,
 non-CRISPR RNAi matrix; the thirteenth is an all-sources catch-all.
 

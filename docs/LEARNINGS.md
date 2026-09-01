@@ -98,6 +98,11 @@ Living notes for coding agents working in this repository.
 - Decision: In the GAL4 workbook exporter, resolve allele and construct symbols through the authoritative `FBal → FBtp → FBti → FBst` chain before fuzzy mixed-stock matching, while excluding generic GAL4 alias keys.
 - Code: `scripts/export_gal4_driver_workbook.py` (`_build_gal4_construct_alias_fbti_index`, `_fbst_map_from_construct_aliases`, `_resolve_gal4_symbol_to_stocks`)
 
+### 2026-09-01 — Combination-sheet phenotype enrichment landed
+- Context: LEARNINGS described Sheet1..N phenotype/qualifier/reference/GAL4 columns, but `write_aggregated_excel` still wrote raw Stage 1 stock rows. The June helpers were never committed.
+- Decision: Build the internal phenotype sheet when `soft_run=True` or the JSON config uses a Phenotype filter, then merge `Phenotype Reference-ID Map`, `Partner GAL4 FlyBase IDs`, `Partner GAL4 Symbols`, `Published GAL4/ Positive Control`, and `Published GAL4 stock id` onto every populated combination sheet. Qualifier is folded into the phenotype text when present. Prefix PMID/PMCID values at Excel write time.
+- Code: `fl_ai_reagent_stocker/pipelines/stock_splitting.py` (`_config_uses_phenotype_filter`, `_build_reagent_phenotype_enrichment`, `_add_phenotype_enrichment_to_stock_sheet`, `_reorder_screening_stock_sheet_columns`, `write_aggregated_excel`)
+
 ### 2026-07-15 — Generic GAL4 placeholders and coverage audit
 - Context: FlyBase symbols such as `nSyb.PU`, `sca.PU`, and `elav.PU` describe unknown particular constructs and therefore have no authoritative stock links; the exporter silently omitted them from collection sheets.
 - Decision: When exact and construct-alias resolution fail for generic `.P?` symbols, recommend one simple current BDSC stock from the same promoter family and label it `Candidate substitution—not the exact published construct`. Emit a `Coverage` sheet with one row per input and never rely on collection sheets alone to detect omissions.

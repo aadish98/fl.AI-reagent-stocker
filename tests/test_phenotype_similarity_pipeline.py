@@ -25,10 +25,14 @@ from fl_ai_reagent_stocker.pipelines.stock_splitting import (  # noqa: E402
     CO_REAGENT_FBIDS_COLUMN,
     CO_REAGENT_SYMBOLS_COLUMN,
     PHENOTYPE_RELEVANCE_SCORE_COLUMN,
+    PHENOTYPE_REFERENCE_MAP_COLUMN,
     PHENOTYPE_SIMILARITY_EMBEDDING_MODEL,
     PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN,
     PARTNER_DRIVER_SYMBOLS_COLUMN,
+    PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN,
+    PUBLISHED_GAL4_STOCK_ID_COLUMN,
     SIMILARITY_TIER_SHEET_COUNT,
+    SOURCE_STOCK_COLUMN,
     StockSplittingPipeline,
     apply_filter_combination,
     apply_stock_limits,
@@ -1903,6 +1907,96 @@ class TestPhenotypeRelevanceFilters(unittest.TestCase):
         # No Phenotype- tier was added.
         combo_names = {name for combo in combos for name in combo}
         self.assertNotIn("Phenotype-", combo_names)
+
+    def test_combination_sheets_receive_phenotype_enrichment_columns(self):
+        config = {
+            "settings": _required_policy_settings(
+                relevantSearchTerms=[],
+                maxStocksPerGene=None,
+                maxStocksPerAllele=None,
+            ),
+            "filters": {
+                "Phenotype": {
+                    "column": PHENOTYPE_RELEVANCE_SCORE_COLUMN,
+                    "type": "equals",
+                    "value": 1,
+                }
+            },
+            "combinations": [["Phenotype"]],
+        }
+        stock_df = pd.DataFrame(
+            [
+                {
+                    "stock_number": "v9241",
+                    "collection": "Vienna",
+                    "relevant_gene_symbols": "tim",
+                    "AlleleSymbol": "P{TRiP.HMS00001}",
+                    "FBal PMID": "999",
+                }
+            ]
+        )
+        phenotype_df = pd.DataFrame(
+            [
+                {
+                    SOURCE_STOCK_COLUMN: "Vienna (v9241)",
+                    "Phenotype": "abnormal circadian rhythm",
+                    "Qualifier": "abnormal",
+                    "PMID": "12345678",
+                    "PMCID": "",
+                    CO_REAGENT_FBIDS_COLUMN: "FBal0888888",
+                    CO_REAGENT_SYMBOLS_COLUMN: "tim-GAL4",
+                    PARTNER_DRIVER_SYMBOLS_COLUMN: "tim-GAL4",
+                    PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN: "(7126, BDSC)",
+                }
+            ]
+        )
+        combination_outputs = [
+            (
+                ["Phenotype"],
+                stock_df,
+                {"Category": "Phenotype", "# Stocks": 1, "# Alleles": 1, "# Genes": 1},
+            )
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "enriched.xlsx"
+            with patch(
+                "fl_ai_reagent_stocker.pipelines.stock_splitting._build_stock_phenotype_sheet",
+                return_value=phenotype_df,
+            ):
+                write_aggregated_excel(
+                    output_path=output_path,
+                    source_workbook_path=Path(tmp_dir) / "source.xlsx",
+                    config=config,
+                    combination_outputs=combination_outputs,
+                    all_stocks_df=stock_df,
+                    references_df=pd.DataFrame([{"PMID": "12345678", "title": "Paper"}]),
+                    verbose=False,
+                    all_input_genes={"tim"},
+                    csv_input_genes={"tim"},
+                    n_input_genes=1,
+                )
+            sheet = pd.read_excel(output_path, sheet_name="Sheet1")
+            contents = pd.read_excel(output_path, sheet_name="Contents", header=None)
+            contents_text = "\n".join(
+                contents.fillna("").astype(str).agg(" ".join, axis=1).tolist()
+            )
+
+        self.assertIn(PHENOTYPE_REFERENCE_MAP_COLUMN, sheet.columns)
+        self.assertIn(PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN, sheet.columns)
+        self.assertIn(PUBLISHED_GAL4_STOCK_ID_COLUMN, sheet.columns)
+        self.assertIn("Partner GAL4 Symbols", sheet.columns)
+        self.assertIn(
+            "{abnormal circadian rhythm (abnormal): PMID12345678}",
+            str(sheet[PHENOTYPE_REFERENCE_MAP_COLUMN].iloc[0]),
+        )
+        self.assertIn(
+            "{tim-GAL4, -, Bloomington, PMID12345678, abnormal circadian rhythm (abnormal)}",
+            str(sheet[PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN].iloc[0]),
+        )
+        self.assertEqual(sheet["FBal PMID"].iloc[0], "PMID999")
+        self.assertIn("Combination sheet phenotype columns", contents_text)
+        self.assertIn(PHENOTYPE_REFERENCE_MAP_COLUMN, contents_text)
 
 
 if __name__ == "__main__":

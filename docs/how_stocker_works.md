@@ -197,7 +197,7 @@ Inside each workbook:
 | Sheet | What a biologist uses it for |
 |---|---|
 | **Contents** | Index of categories and the count breakdown |
-| **Category tabs** | The stocks assigned to each rule above, with genotype, collection, and evidence columns |
+| **Category tabs** | The stocks assigned to each rule above, with genotype, collection, and (when the config uses a Phenotype filter) phenotype + qualifier, reference, and partner GAL4 columns |
 | **References** | The papers cited by stocks that actually made it into those tabs |
 | **Stock Sheet by Gene** | The same reagents viewed from the gene outward |
 

@@ -26,7 +26,17 @@ from fl_ai_reagent_stocker.pipelines.stock_splitting import (  # noqa: E402
     MASTERLIST_TEMPLATE_COLUMNS,
     PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN,
     PARTNER_DRIVER_SYMBOLS_COLUMN,
+    PHENOTYPE_REFERENCE_MAP_COLUMN,
+    PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN,
+    PUBLISHED_GAL4_STOCK_ID_COLUMN,
+    SOURCE_STOCK_COLUMN,
+    _add_phenotype_enrichment_to_stock_sheet,
+    _build_reagent_phenotype_enrichment,
+    _build_reagent_phenotype_reference_map,
+    _build_reagent_published_gal4_enrichment,
     _build_stock_phenotype_sheet,
+    _config_uses_phenotype_filter,
+    _reorder_screening_stock_sheet_columns,
     _reorder_to_masterlist_columns,
 )
 from fl_ai_reagent_stocker.utils import (  # noqa: E402
@@ -1759,6 +1769,121 @@ class TestPhenotypeSheetGeneFirstFlow(unittest.TestCase):
         self.assertEqual(result["Phenotype"].iloc[0], "abnormal locomotor rhythm")
         self.assertEqual(result["Balancers"].iloc[0], "-")
         self.assertTrue(result["GAL4"].iloc[0])
+
+
+class TestCombinationSheetPhenotypeEnrichment(unittest.TestCase):
+    def _phenotype_rows(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    SOURCE_STOCK_COLUMN: "Vienna (v9241)",
+                    "Phenotype": "abnormal circadian rhythm",
+                    "Qualifier": "abnormal",
+                    "PMID": "12345678",
+                    "PMCID": "87654321",
+                    CO_REAGENT_FBIDS_COLUMN: "FBal0888888",
+                    CO_REAGENT_SYMBOLS_COLUMN: "tim-GAL4",
+                    PARTNER_DRIVER_SYMBOLS_COLUMN: "tim-GAL4",
+                    PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN: "(7126, BDSC); (7127, BDSC)",
+                },
+                {
+                    SOURCE_STOCK_COLUMN: "Vienna (v9241)",
+                    "Phenotype": "short sleep",
+                    "Qualifier": "",
+                    "PMID": "",
+                    "PMCID": "5555",
+                    CO_REAGENT_FBIDS_COLUMN: "FBal0888888",
+                    CO_REAGENT_SYMBOLS_COLUMN: "tim-GAL4",
+                    PARTNER_DRIVER_SYMBOLS_COLUMN: "",
+                    PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN: "",
+                },
+            ]
+        )
+
+    def test_config_uses_phenotype_filter(self):
+        self.assertTrue(
+            _config_uses_phenotype_filter(
+                {
+                    "filters": {"Phenotype": {"column": "PHENOTYPE_RELEVANCE_SCORE"}},
+                    "combinations": [["Bloomington"]],
+                }
+            )
+        )
+        self.assertTrue(
+            _config_uses_phenotype_filter(
+                {"filters": {}, "combinations": [["Phenotype++"]]}
+            )
+        )
+        self.assertFalse(
+            _config_uses_phenotype_filter(
+                {
+                    "filters": {"Bloomington": {"column": "collection"}},
+                    "combinations": [["Bloomington"]],
+                }
+            )
+        )
+
+    def test_phenotype_reference_map_pairs_qualifier_and_pmid(self):
+        mapped = _build_reagent_phenotype_reference_map(self._phenotype_rows())
+        self.assertEqual(len(mapped), 1)
+        value = mapped[PHENOTYPE_REFERENCE_MAP_COLUMN].iloc[0]
+        self.assertIn("{abnormal circadian rhythm (abnormal): PMID12345678}", value)
+        self.assertIn("{short sleep: -}", value)
+
+    def test_published_gal4_pairs_collection_reference_and_phenotype(self):
+        gal4 = _build_reagent_published_gal4_enrichment(self._phenotype_rows())
+        positive = gal4[PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN].iloc[0]
+        stock_ids = gal4[PUBLISHED_GAL4_STOCK_ID_COLUMN].iloc[0]
+        self.assertIn(
+            "{tim-GAL4, -, Bloomington, PMID12345678, abnormal circadian rhythm (abnormal)}",
+            positive,
+        )
+        self.assertIn(
+            "{7126, -, Bloomington, PMID12345678, abnormal circadian rhythm (abnormal)}",
+            stock_ids,
+        )
+        self.assertIn(
+            "{7127, -, Bloomington, PMID12345678, abnormal circadian rhythm (abnormal)}",
+            stock_ids,
+        )
+        self.assertIn(
+            "{tim-GAL4, -, -, PMCID5555, short sleep}",
+            positive,
+        )
+
+    def test_enrichment_merge_renames_partner_columns_and_reorders(self):
+        stock_df = pd.DataFrame(
+            [
+                {
+                    "relevant_gene_symbols": "tim",
+                    "collection": "Vienna",
+                    "stock_number": "v9241",
+                    "genotype": "P{TRiP.HMS00001}",
+                    "FBal PMID": "999",
+                }
+            ]
+        )
+        merged = _add_phenotype_enrichment_to_stock_sheet(
+            stock_df,
+            _build_reagent_phenotype_enrichment(self._phenotype_rows()),
+        )
+        merged = _reorder_screening_stock_sheet_columns(merged)
+        self.assertIn("Partner GAL4 FlyBase IDs", merged.columns)
+        self.assertIn("Partner GAL4 Symbols", merged.columns)
+        self.assertEqual(merged["Partner GAL4 Symbols"].iloc[0], "tim-GAL4")
+        self.assertIn(
+            "{abnormal circadian rhythm (abnormal): PMID12345678}",
+            merged[PHENOTYPE_REFERENCE_MAP_COLUMN].iloc[0],
+        )
+        columns = list(merged.columns)
+        self.assertLess(
+            columns.index(PHENOTYPE_REFERENCE_MAP_COLUMN),
+            columns.index(PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN),
+        )
+        self.assertLess(
+            columns.index("relevant_gene_symbols"),
+            columns.index(PHENOTYPE_REFERENCE_MAP_COLUMN),
+        )
 
 
 if __name__ == "__main__":

@@ -65,6 +65,12 @@ from ..utils import (
     REAGENT_BUCKET_COLUMNS,
     RNAI_TYPE_COLUMN,
     infer_rnai_type_from_text,
+    format_pmid_display,
+    format_reference_id_display,
+    format_reference_id_columns,
+    format_brace_entry,
+    parse_stock_candidate_label,
+    normalize_collection_name,
 )
 from ..validation_runner import run_functional_validation
 
@@ -97,6 +103,21 @@ CO_REAGENT_FBIDS_COLUMN = "Co-reagent FBids"
 CO_REAGENT_SYMBOLS_COLUMN = "Co-reagent symbols"
 PARTNER_DRIVER_SYMBOLS_COLUMN = "Partner driver symbols (best-effort)"
 PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN = "Partner driver stock candidates"
+PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN = "Partner driver stock genotypes"
+PHENOTYPE_REFERENCE_MAP_COLUMN = "Phenotype Reference-ID Map"
+PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN = "Published GAL4/ Positive Control"
+PUBLISHED_GAL4_STOCK_ID_COLUMN = "Published GAL4 stock id"
+STOCK_SHEET_ENRICHMENT_COLUMNS = [
+    PHENOTYPE_REFERENCE_MAP_COLUMN,
+    CO_REAGENT_FBIDS_COLUMN,
+    CO_REAGENT_SYMBOLS_COLUMN,
+    PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN,
+    PUBLISHED_GAL4_STOCK_ID_COLUMN,
+]
+STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS = {
+    CO_REAGENT_FBIDS_COLUMN: "Partner GAL4 FlyBase IDs",
+    CO_REAGENT_SYMBOLS_COLUMN: "Partner GAL4 Symbols",
+}
 MASTERLIST_TEMPLATE_COLUMNS = [
     "Screening Group",
     "Actual cross set date",
@@ -3309,6 +3330,11 @@ def _compute_max_cosine_similarity(phenotype_sheet_df: pd.DataFrame) -> pd.Serie
     return cosine_df.max(axis=1, skipna=True)
 
 
+def _is_phenotype_filter_name(name: Any) -> bool:
+    """Return True when a filter or combination name is phenotype-gated."""
+    return str(name).startswith("Phenotype")
+
+
 def _is_phenotype_tier_combination(combo: List[str]) -> bool:
     """Return True when an output sheet is gated by a phenotype filter.
 
@@ -3317,7 +3343,359 @@ def _is_phenotype_tier_combination(combo: List[str]) -> bool:
     the per-reagent cosine similarity columns (including ``Max Cosine
     Similarity``) appended.
     """
-    return any(str(name).startswith("Phenotype") for name in combo)
+    return any(_is_phenotype_filter_name(name) for name in combo)
+
+
+def _config_uses_phenotype_filter(config: Optional[Dict[str, Any]]) -> bool:
+    """Return True when the JSON config partitions by a Phenotype filter."""
+    if not isinstance(config, dict):
+        return False
+    filters = config.get("filters") or {}
+    if any(_is_phenotype_filter_name(name) for name in filters):
+        return True
+    for combo in config.get("combinations") or []:
+        if _is_phenotype_tier_combination(combo):
+            return True
+    return False
+
+
+def _phenotype_with_qualifier(phenotype: Any, qualifier: Any = "") -> str:
+    """Return phenotype text with a qualifier suffix when one is present."""
+    phenotype_text = str(phenotype or "").strip()
+    qualifier_text = str(qualifier or "").strip()
+    if qualifier_text in {"", "-"}:
+        return phenotype_text or "-"
+    if phenotype_text and phenotype_text != "-":
+        return f"{phenotype_text} ({qualifier_text})"
+    return qualifier_text
+
+
+def _split_joined_values(value: Any) -> List[str]:
+    """Split a semicolon-joined cell into non-empty tokens."""
+    return [token for token in parse_semicolon_list(str(value or "")) if token and token != "-"]
+
+
+def _canonical_source_stock_key(source_stock: Any) -> str:
+    """Normalize a phenotype-sheet reagent label for enrichment joins."""
+    collection, stock_number = _split_source_stock_label(source_stock)
+    if collection or stock_number:
+        return _format_source_stock_label(
+            normalize_collection_name(collection) or collection,
+            stock_number,
+        )
+    return _normalize_source_stock_text(source_stock)
+
+
+def _canonical_stock_row_key(row: pd.Series) -> str:
+    """Normalize a Stage 1 stock row for enrichment joins."""
+    collection = normalize_collection_name(row.get("collection", "")) or str(
+        row.get("collection", "") or ""
+    ).strip()
+    return _format_source_stock_label(collection, clean_id(row.get("stock_number", "")))
+
+
+def _align_gal4_symbols_to_candidates(
+    symbols: List[str],
+    candidate_count: int,
+) -> List[str]:
+    """Align published GAL4 symbols to one value per partner stock candidate."""
+    if candidate_count <= 0:
+        return []
+    if not symbols:
+        return ["-"] * candidate_count
+    if len(symbols) == 1:
+        return [symbols[0]] * candidate_count
+    if len(symbols) >= candidate_count:
+        return symbols[:candidate_count]
+    return symbols + [symbols[-1]] * (candidate_count - len(symbols))
+
+
+def _empty_stock_sheet_enrichment_frame() -> pd.DataFrame:
+    """Return the empty enrichment schema used on combination sheets."""
+    return pd.DataFrame(columns=["Source/ Stock #", *STOCK_SHEET_ENRICHMENT_COLUMNS])
+
+
+def _build_reagent_phenotype_reference_map(
+    phenotype_sheet_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Aggregate ``{phenotype (+ qualifier): PMID}`` pairs per focal reagent."""
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return pd.DataFrame(columns=["Source/ Stock #", PHENOTYPE_REFERENCE_MAP_COLUMN])
+
+    pairs_by_reagent: Dict[str, List[str]] = defaultdict(list)
+    seen_by_reagent: Dict[str, Set[str]] = defaultdict(set)
+    for _, row in phenotype_sheet_df.iterrows():
+        reagent_key = _canonical_source_stock_key(row.get(SOURCE_STOCK_COLUMN, ""))
+        if not reagent_key:
+            continue
+        phenotype_label = _phenotype_with_qualifier(
+            row.get("Phenotype", ""),
+            row.get("Qualifier", ""),
+        )
+        pair = f"{{{phenotype_label}: {format_pmid_display(row.get('PMID', ''))}}}"
+        if pair in seen_by_reagent[reagent_key]:
+            continue
+        seen_by_reagent[reagent_key].add(pair)
+        pairs_by_reagent[reagent_key].append(pair)
+
+    rows = [
+        {
+            "Source/ Stock #": reagent_key,
+            PHENOTYPE_REFERENCE_MAP_COLUMN: ", ".join(pairs) if pairs else "-",
+        }
+        for reagent_key, pairs in pairs_by_reagent.items()
+    ]
+    if not rows:
+        return pd.DataFrame(columns=["Source/ Stock #", PHENOTYPE_REFERENCE_MAP_COLUMN])
+    return pd.DataFrame(rows)
+
+
+def _build_reagent_partner_gal4_summary(
+    phenotype_sheet_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Aggregate partner GAL4 FlyBase IDs and symbols per focal reagent."""
+    empty = pd.DataFrame(
+        columns=["Source/ Stock #", CO_REAGENT_FBIDS_COLUMN, CO_REAGENT_SYMBOLS_COLUMN]
+    )
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return empty
+
+    ids_by_reagent: Dict[str, List[str]] = defaultdict(list)
+    symbols_by_reagent: Dict[str, List[str]] = defaultdict(list)
+    for _, row in phenotype_sheet_df.iterrows():
+        reagent_key = _canonical_source_stock_key(row.get(SOURCE_STOCK_COLUMN, ""))
+        if not reagent_key:
+            continue
+        ids_by_reagent[reagent_key].extend(_split_joined_values(row.get(CO_REAGENT_FBIDS_COLUMN, "")))
+        symbols_by_reagent[reagent_key].extend(
+            _split_joined_values(row.get(CO_REAGENT_SYMBOLS_COLUMN, ""))
+        )
+
+    rows = [
+        {
+            "Source/ Stock #": reagent_key,
+            CO_REAGENT_FBIDS_COLUMN: unique_join(ids_by_reagent.get(reagent_key, [])) or "-",
+            CO_REAGENT_SYMBOLS_COLUMN: unique_join(symbols_by_reagent.get(reagent_key, [])) or "-",
+        }
+        for reagent_key in sorted(
+            set(ids_by_reagent) | set(symbols_by_reagent),
+            key=lambda value: (str(value).lower(), str(value)),
+        )
+    ]
+    return pd.DataFrame(rows) if rows else empty
+
+
+def _build_reagent_published_gal4_enrichment(
+    phenotype_sheet_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Build paired Published GAL4 brace entries per focal reagent."""
+    empty = pd.DataFrame(
+        columns=[
+            "Source/ Stock #",
+            PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN,
+            PUBLISHED_GAL4_STOCK_ID_COLUMN,
+        ]
+    )
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return empty
+
+    entries_by_reagent: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    seen_by_reagent: Dict[str, Set[Tuple[str, str]]] = defaultdict(set)
+    for _, row in phenotype_sheet_df.iterrows():
+        reagent_key = _canonical_source_stock_key(row.get(SOURCE_STOCK_COLUMN, ""))
+        if not reagent_key:
+            continue
+        symbols = _split_joined_values(row.get(PARTNER_DRIVER_SYMBOLS_COLUMN, ""))
+        if not symbols:
+            symbols = _split_joined_values(row.get(CO_REAGENT_SYMBOLS_COLUMN, ""))
+        candidates = _split_joined_values(row.get(PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN, ""))
+        genotypes = _split_joined_values(row.get(PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN, ""))
+        if not symbols and not candidates:
+            continue
+        phenotype_label = _phenotype_with_qualifier(
+            row.get("Phenotype", ""),
+            row.get("Qualifier", ""),
+        )
+        reference_id = format_reference_id_display(row.get("PMID", ""), row.get("PMCID", ""))
+        if not candidates:
+            aligned_symbols = symbols or ["-"]
+            aligned_genotypes = ["-"] * len(aligned_symbols)
+            aligned_candidates = [("", "")] * len(aligned_symbols)
+        else:
+            aligned_symbols = _align_gal4_symbols_to_candidates(symbols, len(candidates))
+            aligned_genotypes = _align_gal4_symbols_to_candidates(genotypes, len(candidates))
+            aligned_candidates = [parse_stock_candidate_label(label) for label in candidates]
+        for symbol, genotype, (stock_number, collection) in zip(
+            aligned_symbols, aligned_genotypes, aligned_candidates
+        ):
+            collection = normalize_collection_name(collection) or collection or "-"
+            stock_number = stock_number or "-"
+            genotype = genotype or "-"
+            symbol = symbol or "-"
+            positive = format_brace_entry(
+                symbol, genotype, collection, reference_id, phenotype_label
+            )
+            stock_id = format_brace_entry(
+                stock_number, genotype, collection, reference_id, phenotype_label
+            )
+            pair = (positive, stock_id)
+            if pair in seen_by_reagent[reagent_key]:
+                continue
+            seen_by_reagent[reagent_key].add(pair)
+            entries_by_reagent[reagent_key].append(pair)
+
+    rows = []
+    for reagent_key, pairs in entries_by_reagent.items():
+        rows.append(
+            {
+                "Source/ Stock #": reagent_key,
+                PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN: ", ".join(pair[0] for pair in pairs) or "-",
+                PUBLISHED_GAL4_STOCK_ID_COLUMN: ", ".join(pair[1] for pair in pairs) or "-",
+            }
+        )
+    return pd.DataFrame(rows) if rows else empty
+
+
+def _build_reagent_phenotype_enrichment(
+    phenotype_sheet_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return the combination-sheet enrichment frame for one phenotype sheet."""
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return _empty_stock_sheet_enrichment_frame()
+
+    merged = _build_reagent_phenotype_reference_map(phenotype_sheet_df)
+    partner = _build_reagent_partner_gal4_summary(phenotype_sheet_df)
+    gal4 = _build_reagent_published_gal4_enrichment(phenotype_sheet_df)
+    for frame in (partner, gal4):
+        if frame is None or len(frame) == 0:
+            continue
+        if merged is None or len(merged) == 0:
+            merged = frame
+            continue
+        merged = merged.merge(frame, on="Source/ Stock #", how="outer")
+    if merged is None or len(merged) == 0:
+        return _empty_stock_sheet_enrichment_frame()
+    for column in STOCK_SHEET_ENRICHMENT_COLUMNS:
+        if column not in merged.columns:
+            merged[column] = "-"
+        merged[column] = merged[column].fillna("-")
+    return merged[["Source/ Stock #", *STOCK_SHEET_ENRICHMENT_COLUMNS]].reset_index(drop=True)
+
+
+def _add_phenotype_enrichment_to_stock_sheet(
+    stock_df: pd.DataFrame,
+    enrichment_df: Optional[pd.DataFrame],
+) -> pd.DataFrame:
+    """Left-merge phenotype/GAL4 enrichment onto a combination stock sheet."""
+    if stock_df is None:
+        return pd.DataFrame()
+    out = stock_df.copy()
+    if len(out) == 0:
+        for column in STOCK_SHEET_ENRICHMENT_COLUMNS:
+            display = STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS.get(column, column)
+            if display not in out.columns:
+                out[display] = "-"
+        return out
+
+    enrichment = (
+        enrichment_df.copy()
+        if enrichment_df is not None and len(enrichment_df) > 0
+        else _empty_stock_sheet_enrichment_frame()
+    )
+    out["_reagent_key"] = out.apply(_canonical_stock_row_key, axis=1)
+    if "Source/ Stock #" in enrichment.columns and len(enrichment) > 0:
+        enrichment["_reagent_key"] = enrichment["Source/ Stock #"].map(_canonical_source_stock_key)
+    else:
+        enrichment["_reagent_key"] = pd.Series(dtype=str)
+    merge_columns = [
+        column for column in STOCK_SHEET_ENRICHMENT_COLUMNS if column in enrichment.columns
+    ]
+    merged = out.merge(
+        enrichment[["_reagent_key", *merge_columns]] if merge_columns else enrichment,
+        how="left",
+        on="_reagent_key",
+    )
+    merged = merged.drop(columns=["_reagent_key", SOURCE_STOCK_COLUMN], errors="ignore")
+    for column in merge_columns:
+        merged[column] = merged[column].fillna("-")
+    rename_map = {
+        internal: display
+        for internal, display in STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS.items()
+        if internal in merged.columns
+    }
+    if rename_map:
+        merged = merged.rename(columns=rename_map)
+    return merged.reset_index(drop=True)
+
+
+def _is_similarity_score_column(column: Any) -> bool:
+    """Return True for phenotype-similarity score columns on stock sheets."""
+    name = str(column)
+    return (
+        name == "Max Cosine Similarity"
+        or name.startswith("Cosine Similarity (")
+        or (name.startswith("Similarity to ") and name.endswith(" Phenotype"))
+    )
+
+
+def _reorder_screening_stock_sheet_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Reorder combination-sheet columns for wet-lab screening priority."""
+    if df is None or len(df.columns) == 0:
+        return df.copy() if df is not None else pd.DataFrame()
+
+    partner_fbid = STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS[CO_REAGENT_FBIDS_COLUMN]
+    partner_symbol = STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS[CO_REAGENT_SYMBOLS_COLUMN]
+    priority = [
+        "relevant_gene_symbols",
+        "Gene",
+        "stock_number",
+        "collection",
+        "FBst",
+        "genotype",
+        "Genotype",
+        PHENOTYPE_REFERENCE_MAP_COLUMN,
+        partner_fbid,
+        partner_symbol,
+        PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN,
+        PUBLISHED_GAL4_STOCK_ID_COLUMN,
+        "Phenotype",
+        "Qualifier",
+    ]
+    remaining = [column for column in df.columns if column not in priority]
+    score_columns = [column for column in remaining if _is_similarity_score_column(column)]
+    other_columns = [column for column in remaining if column not in score_columns]
+    ordered = [
+        column for column in priority if column in df.columns
+    ] + other_columns + score_columns
+    return df.loc[:, ordered].copy()
+
+
+def _describe_stock_sheet_enrichment_column(column: str) -> str:
+    """Return the Contents definition for a combination-sheet enrichment column."""
+    definitions = {
+        PHENOTYPE_REFERENCE_MAP_COLUMN: (
+            "Comma-separated {phenotype (+ qualifier): PMID} pairs from FlyBase "
+            "curated phenotype evidence for this reagent. Missing PMIDs are shown as -."
+        ),
+        STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS[CO_REAGENT_FBIDS_COLUMN]: (
+            "FlyBase identifiers for likely partner GAL4 driver components listed "
+            "with the phenotype record."
+        ),
+        STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS[CO_REAGENT_SYMBOLS_COLUMN]: (
+            "Likely partner GAL4 driver symbols listed with the phenotype record."
+        ),
+        PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN: (
+            "Comma-separated {GAL4 symbol, orderable driver genotype, collection, "
+            "reference ID, phenotype} entries for published partner GAL4 drivers. "
+            "Use - when a field cannot be resolved. Reference ID prefers PMID, then PMCID."
+        ),
+        PUBLISHED_GAL4_STOCK_ID_COLUMN: (
+            "Parallel comma-separated {stock id, orderable driver genotype, collection, "
+            "reference ID, phenotype} entries. Field 1 is the orderable stock-center "
+            "number (no FBst). Fields 2-5 match the corresponding Positive Control entry."
+        ),
+    }
+    return definitions.get(column, "Combination-sheet phenotype enrichment column.")
 
 
 def _build_reagent_similarity_scores(
@@ -3862,6 +4240,7 @@ def _write_phenotype_similarity_sheet(
         phenotype_sheet_df,
         format_as_masterlist=format_as_masterlist,
     )
+    sheet_out = format_reference_id_columns(sheet_out)
     sheet_out.to_excel(writer, sheet_name=sheet_name, index=False)
 
 
@@ -5534,12 +5913,14 @@ def write_aggregated_excel(
         'stocks': 0,
         'references': 0,
     }
-    if soft_run:
-        similarity_targets, embedding_scorer = _build_phenotype_similarity_context(
-            config,
-            pipeline_settings,
-            verbose=verbose,
-        )
+    needs_phenotype_sheet = soft_run or _config_uses_phenotype_filter(config)
+    if needs_phenotype_sheet:
+        if soft_run:
+            similarity_targets, embedding_scorer = _build_phenotype_similarity_context(
+                config,
+                pipeline_settings,
+                verbose=verbose,
+            )
         stock_phenotype_sheet_df = _build_stock_phenotype_sheet(
             all_stocks_df if all_stocks_df is not None else pd.DataFrame(),
             flybase_data_path,
@@ -5592,7 +5973,7 @@ def write_aggregated_excel(
                     f"      - '{kw}': {per_kw_reagents.nunique()} unique reagent(s) "
                     f"across {int(per_kw_mask.sum())} rows"
                 )
-    else:
+    if not soft_run:
         stock_sheet_by_gene_df = _build_stock_sheet_by_gene(
             combination_outputs,
             references_df,
@@ -5600,6 +5981,12 @@ def write_aggregated_excel(
             gene_synonyms_map=gene_synonyms_map,
             current_to_input_map=current_to_input_map,
         )
+
+    phenotype_enrichment_df = (
+        _build_reagent_phenotype_enrichment(stock_phenotype_sheet_df)
+        if needs_phenotype_sheet
+        else _empty_stock_sheet_enrichment_frame()
+    )
 
     reagent_similarity_scores = (
         _build_reagent_similarity_scores(stock_phenotype_sheet_df)
@@ -5970,6 +6357,52 @@ def write_aggregated_excel(
             write_cell(row, 0, "(no sheets with stocks)")
             row += 2
 
+        if needs_phenotype_sheet:
+            write_cell(row, 0, "Combination sheet phenotype columns", fmt_13_bold)
+            row += 1
+            write_cell(
+                row,
+                0,
+                "When the JSON config uses a Phenotype filter, each populated combination "
+                "sheet also carries per-reagent phenotype, qualifier, reference, and partner "
+                "GAL4 columns joined from FlyBase curated phenotype evidence. These columns "
+                "are reagent-level summaries; the All Phenotypic Stocks Sheet (soft-run / "
+                "embeddings) keeps the row-level phenotype × reference detail.",
+                fmt_13_wrap,
+                skip_width=True,
+            )
+            row += 1
+            write_row(row, 0, ["Column", "Definition"], bold_bottom)
+            row += 1
+            enrichment_contents_columns = [
+                PHENOTYPE_REFERENCE_MAP_COLUMN,
+                STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS[CO_REAGENT_FBIDS_COLUMN],
+                STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS[CO_REAGENT_SYMBOLS_COLUMN],
+                PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN,
+                PUBLISHED_GAL4_STOCK_ID_COLUMN,
+            ]
+            for column in enrichment_contents_columns:
+                write_cell(row, 0, column)
+                write_cell(
+                    row,
+                    1,
+                    _describe_stock_sheet_enrichment_column(column),
+                    fmt_13_wrap,
+                    skip_width=True,
+                )
+                row += 1
+            write_cell(
+                row,
+                0,
+                "Example: {abnormal sleep (abnormal): PMID12345678}. "
+                "Paired GAL4 entries share collection, reference ID, and phenotype at each "
+                "index, e.g. {tim-GAL4, -, Bloomington, PMID12345678, abnormal sleep} and "
+                "{7126, -, Bloomington, PMID12345678, abnormal sleep}.",
+                fmt_13_wrap,
+                skip_width=True,
+            )
+            row += 2
+
         # Section G: What the references-focused sheets include.
         sheet_label = "All Phenotypic Stocks Sheet" if soft_run else "Stock Sheet by Gene"
         write_cell(row, 0, f"References and {sheet_label} definitions", fmt_13_bold)
@@ -6041,7 +6474,9 @@ def write_aggregated_excel(
         # Auto-resize Contents columns
         for c, w in col_widths.items():
             contents_ws.set_column(c, c, min(w + 2, 255))
-        if soft_run and len(stock_phenotype_sheet_df) > 0:
+        if (soft_run or needs_phenotype_sheet) and (
+            len(stock_phenotype_sheet_df) > 0 or needs_phenotype_sheet
+        ):
             contents_ws.set_column(1, 1, 96)
         
         # Named combination data sheets (or legacy Sheet1, Sheet2, ...).
@@ -6051,6 +6486,11 @@ def write_aggregated_excel(
             if has_stocks and limited_df is not None and len(limited_df) > 0:
                 # Prefix GPT-derived column headers with [EXPERIMENTAL]
                 cleaned_df = _normalize_stock_sheet_columns(limited_df)
+                if needs_phenotype_sheet:
+                    cleaned_df = _add_phenotype_enrichment_to_stock_sheet(
+                        cleaned_df,
+                        phenotype_enrichment_df,
+                    )
                 if (
                     _is_phenotype_tier_combination(combo)
                     and reagent_similarity_scores is not None
@@ -6061,7 +6501,11 @@ def write_aggregated_excel(
                         reagent_similarity_scores,
                         current_to_input_map=current_to_input_map,
                     )
-                limited_df_out = apply_experimental_prefix(cleaned_df)
+                if needs_phenotype_sheet:
+                    cleaned_df = _reorder_screening_stock_sheet_columns(cleaned_df)
+                limited_df_out = apply_experimental_prefix(
+                    format_reference_id_columns(cleaned_df)
+                )
                 limited_df_out.to_excel(writer, sheet_name=sheet_name, index=False)
                 # Apply light grey fill to GPT-derived column headers
                 _apply_grey_fill_xlsxwriter(
@@ -6070,6 +6514,7 @@ def write_aggregated_excel(
         
         # References sheet
         if references_df is not None and len(references_df) > 0:
+            references_df = format_reference_id_columns(references_df)
             references_df.to_excel(writer, sheet_name="References", index=False)
             kw_title_col = find_keyword_title_abstract_column(references_df)
             if kw_title_col and kw_title_col in references_df.columns:
@@ -6095,7 +6540,9 @@ def write_aggregated_excel(
                 )
         else:
             if stock_sheet_by_gene_df is not None and len(stock_sheet_by_gene_df) > 0:
-                stock_sheet_by_gene_out = apply_experimental_prefix(stock_sheet_by_gene_df)
+                stock_sheet_by_gene_out = apply_experimental_prefix(
+                    format_reference_id_columns(stock_sheet_by_gene_df)
+                )
                 stock_sheet_by_gene_out.to_excel(
                     writer, sheet_name="Stock Sheet by Gene", index=False
                 )

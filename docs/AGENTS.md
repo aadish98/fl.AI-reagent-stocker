@@ -205,7 +205,10 @@ is the exhaustive phenotype-bucket variant (see
   breakdown table draws a faint separator row (default `3`)
 - `filters` defines reusable column predicates
 - `combinations` defines ordered sheet partitions; each `(stock_id, collection)`
-  reagent is placed in only the first combination it matches
+  reagent is placed in only the first combination it matches. When any filter
+  or combination name starts with `Phenotype`, combination sheets also receive
+  phenotype/qualifier/reference/GAL4 enrichment columns from the internal
+  phenotype sheet (`_add_phenotype_enrichment_to_stock_sheet`)
 - optional `combination_names` defines Excel tab names aligned one-to-one with
   `combinations`; configured labels are stored without numbers and populated
   sheets receive sequential `1_`, `2_`, ... prefixes. Absent names preserve

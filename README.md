@@ -71,7 +71,9 @@ Output sheets come from ordered `combinations` of named `filters`; each reagent
 (`stock_id`, `collection`) lands in only the first combination it matches. An
 optional `combination_names` list assigns corresponding Excel tab names
 one-to-one. Populated categories are automatically prefixed `1_`, `2_`, and so
-on; without names, they use legacy `Sheet1..N` names.
+on; without names, they use legacy `Sheet1..N` names. When the config uses a
+`Phenotype` filter, those tabs also include phenotype (+ qualifier), reference,
+and partner GAL4 columns.
 Two computed score columns back the standard tiers:
 
 - `settings.input` — required input column and FBgn-conversion policy.
