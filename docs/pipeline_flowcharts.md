@@ -40,7 +40,7 @@ flowchart TD
             direction TB
             StockFBstRoute["component -> stock lookup<br/>(filtered lookup)"]
             Stocks["Find all associated<br/>stocks"]
-            Categorize["Categorize by ★Ref++ <br/>(stock + reagent type)"]
+            Categorize["Categorize by JSON config<br/>(★Ref tier and/or Phenotype bucket)"]
             Validate["Validate Ref++ stocks<br/>using paper text + OpenAI"]
             Available[["ALL AVAILABLE REAGENTS<br/>+ associated refs"]]
         end
@@ -110,7 +110,7 @@ flowchart TD
 
 - ★ `Ref++` = a publication that has a configured keyword in its title or abstract.
 - Data Preprocessing turns the input gene set plus FlyBase TSV/XML-derived lookups into the shared component and stock-lookup context used downstream.
-- ++Available Stocks++ is the all-stocks path: find associated stocks, categorize by `Ref++` and reagent type, then validate `Ref++` candidates with paper text + OpenAI.
+- ++Available Stocks++ is the all-stocks path: find associated stocks, categorize into sheets by the JSON config, then validate `Ref++` candidates with paper text + OpenAI. Which scheme actually splits the sheets depends on the config: the baseline `stock_split_config_example.json` tiers by `Ref++`/`Ref+`/`Ref-`, while the git-tracked default `stock_split_config_priority_example.json` instead uses six named Phenotype buckets (see `docs/stock_split_config_priority_example.md`) and caps stocks at `maxStocksPerGene`/`maxStocksPerAllele`.
 - ++Phenotypic Stocks++ is the phenotype path: find phenotype-associated reagents, split/search those phenotypes, then attach FBst stocks using the full stock-component lookup.
 
 ---
@@ -119,8 +119,12 @@ flowchart TD
 
 The single public command `run` chains the stages: build the Stage 1 workbook,
 organize stocks with the JSON config, validate `Ref++` stocks when enabled, and
-run phenotype embeddings when enabled by config. The individual stages remain
-available as advanced entry points.
+add phenotype-embedding cosine columns when enabled by config. `run` writes the
+final `<gene set>_aggregated.xlsx` directly into that gene set's `Stocks`
+folder (no nested `Organized Stocks` wrapper) and does not emit the
+similarity-tier sidecar workbook or t-SNE/plot folders — those are only
+produced by the advanced `phenotype-sheet` command below. The individual
+stages remain available as advanced entry points.
 
 ```mermaid
 flowchart TD
@@ -129,20 +133,22 @@ flowchart TD
     S1 --> O1[(aggregated_stock_refs.xlsx<br/>Stocks + References + Gene Reagent Index)]
 
     O1 --> S2[organize<br/>JSON filters + combinations]
-    S2 --> O2[(Organized Stocks workbook<br/>Ref + Phenotype tier sheets)]
+    S2 --> O2[(Organized workbook sheets<br/>Ref and/or Phenotype tiers, per config)]
     O2 --> S3[validate Ref++]
     S3 --> O3[(Validated workbook<br/>+ validation columns)]
+    O3 -. "settings.embeddings.enabled" .-> EMB[phenotype-embedding step<br/>adds cosine columns only]
+    EMB --> O4[(Final aggregated workbook<br/>written directly into Stocks/)]
 
-    O1 -. "settings.embeddings.enabled" .-> PS[phenotype-sheet<br/>+ OpenAI embeddings]
+    O1 -. "Phenotype filter or advanced phenotype-sheet" .-> PS[phenotype-sheet<br/>embeddings optional]
     PS --> P1[(All Phenotypic Stocks Sheet)]
     PS --> P2[(Cosine similarity tiers<br/>+ plots)]
 
     classDef stage fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
     classDef artifact fill:#fff8e1,stroke:#f57f17,color:#e65100
     classDef pheno fill:#f3e5f5,stroke:#6a1b9a,color:#4a148c
-    class S1,S2,S3 stage
+    class S1,S2,S3,EMB stage
     class PS pheno
-    class O1,O2,O3,P1,P2 artifact
+    class O1,O2,O3,O4,P1,P2 artifact
 ```
 
 ---
@@ -162,7 +168,7 @@ flowchart TD
 
     subgraph Stage1["Stage 1: find-stocks"]
         direction TB
-        A1[Map gene symbols → FBgn]
+        A1["Map gene symbols → FBgn<br/>(skipped when settings.input.skipFbgnidConversion<br/>is true, as in the default priority config)"]
         A1 --> A2[gene → allele<br/>fbal_to_fbgn]
         A2 --> A3[allele → construct<br/>transgenic_construct_descriptions]
         A3 --> A4[construct → insertion<br/>fbtp_to_fbti]
@@ -184,7 +190,7 @@ flowchart TD
         B5 --> O2[(Organized workbook sheets)]
     end
 
-    subgraph PhenotypeSheet["phenotype-sheet (config-controlled embeddings)"]
+    subgraph PhenotypeSheet["phenotype evidence (Phenotype filter; embeddings optional)"]
         direction TB
         C1[Input-gene reagents from Gene Reagent Index]
         C1 --> C2[Match curated phenotype rows<br/>genotype_phenotype_data]
@@ -211,7 +217,7 @@ flowchart TD
 
     A --> A1
     O1 --> B1
-    O1 --> C1
+    O1 -->|"Phenotype filter or advanced phenotype-sheet"| C1
     O2 --> D1
 
     classDef artifact fill:#fff8e1,stroke:#f57f17,color:#e65100

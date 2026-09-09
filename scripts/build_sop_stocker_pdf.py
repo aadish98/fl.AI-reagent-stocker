@@ -38,7 +38,7 @@ PAPER = HexColor("#FBF8F2")
 
 FLYBASE_URL = "https://flybase.org/convert/id"
 FLYBASE_REPORT_EXAMPLE = "https://flybase.org/reports/FBgn0023076"
-GITHUB_URL = "https://github.com/Allada-Lab/fl-AI-reagent-stocker"
+GITHUB_URL = "https://github.com/aadish98/fl.AI-reagent-stocker"
 CURSOR_URL = "https://cursor.com"
 PYTHON_URL = "https://www.python.org/downloads/"
 DEFAULT_CONFIG = "data/config/stock_split_config_priority_example.json"
@@ -526,7 +526,7 @@ def build():
     story.append(
         Paragraph(
             "You need Python 3 and git. Every later command runs from the repo root "
-            f"({_code('fl-AI-reagent-stocker')}), not from a Downloads folder or a PDF-only Cursor project. "
+            f"({_code('fl.AI-reagent-stocker')}), not from a Downloads folder or a PDF-only Cursor project. "
             f"If the GitHub repo is private, ask the maintainer for access first. "
             f"Source: {_code(GITHUB_URL)}.",
             styles["body"],
@@ -543,7 +543,7 @@ def build():
         CodeBlock(
             [
                 f"git clone {GITHUB_URL}.git",
-                "cd fl-AI-reagent-stocker",
+                "cd fl.AI-reagent-stocker",
                 "python3 --version",
                 "python3 -m pip install -r requirements.txt",
             ]

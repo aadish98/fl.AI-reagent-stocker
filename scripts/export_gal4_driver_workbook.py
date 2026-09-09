@@ -42,12 +42,20 @@ from fl_ai_reagent_stocker.utils import (  # noqa: E402
     REAGENT_BUCKET_COLUMNS,
     canonical_stock_candidate_label,
     clean_id,
+    compact_symbol_key as _compact_symbol_key,
     find_latest_tsv,
     format_pmcid_display,
     format_pmid_display,
     format_reference_id_display,
+    gal4_driver_fingerprint as _gal4_driver_fingerprint,
+    gal4_search_keys as _gal4_search_keys,
+    is_split_gal4_component as _is_split_gal4_component,
     load_flybase_tsv,
+    looks_like_gal4_symbol as _looks_like_gal4_symbol,
     normalize_collection_name,
+    normalize_symbol_token as _normalize_symbol_token,
+    primary_gal4_component_symbol_for_fbst as _primary_gal4_component_symbol_for_fbst,
+    split_genotype_symbol_tokens as _split_genotype_symbol_tokens,
     unique_join,
 )
 
@@ -339,32 +347,6 @@ def _extract_flybase_ids(value: Any) -> List[str]:
     return deduped
 
 
-def _normalize_symbol_token(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
-
-
-def _compact_symbol_key(value: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
-
-
-def _split_genotype_symbol_tokens(value: Any) -> List[str]:
-    tokens: List[str] = []
-    seen: Set[str] = set()
-    raw_parts = re.split(r"[;|,\n]+", str(value or ""))
-    for raw_part in raw_parts:
-        for slash_part in str(raw_part).split("/"):
-            for candidate in re.split(r"\s+", str(slash_part).strip()):
-                token = candidate.strip()
-                if not token or token in {"+", "-"}:
-                    continue
-                normalized = _normalize_symbol_token(token)
-                if normalized in seen:
-                    continue
-                seen.add(normalized)
-                tokens.append(token)
-    return tokens
-
-
 def _format_stock_candidate_label(
     fbst: Any,
     collection: Any,
@@ -404,85 +386,6 @@ def _might_be_gal4_component(symbol: str, gene_symbol: str) -> bool:
         or "lexa" in blob
         or blob.startswith("p{")
     )
-
-
-def _normalized_text_looks_like_gal4_driver(normalized: str) -> bool:
-    """Return True when a normalized symbol/gene fragment is a GAL4 driver."""
-    if not normalized:
-        return False
-    if "gal4" in normalized:
-        return True
-    if "gawb" in normalized:
-        return True
-    if re.search(r"p\{[^}]*gal4", normalized):
-        return True
-    if re.search(r"gal4::", normalized):
-        return True
-    if "aygal4" in normalized:
-        return True
-    if re.search(r"-gal4\b", normalized):
-        return True
-    if re.search(r"\bvt\d*-gal4\b", normalized):
-        return True
-    if re.search(r"\bgmr\d*-gal4\b", normalized):
-        return True
-    if re.search(r"p\{gawb", normalized):
-        return True
-    return False
-
-
-def _looks_like_gal4_symbol(symbol: Any, gene_symbol: Any = "") -> bool:
-    """Return True when the symbol or linked gene clearly indicates GAL4."""
-    for raw_value in (symbol, gene_symbol):
-        normalized = _normalize_symbol_token(raw_value)
-        if normalized and _normalized_text_looks_like_gal4_driver(normalized):
-            return True
-    return False
-
-
-def _gal4_search_keys(symbol: Any) -> Set[str]:
-    """Return compact lookup keys for GAL4 driver names across FlyBase formats."""
-    text = str(symbol or "").strip()
-    lowered = text.lower()
-    keys: Set[str] = set()
-
-    def add(value: Any) -> None:
-        key = _compact_symbol_key(value)
-        if len(key) >= 3:
-            keys.add(key)
-        if key.endswith("gal4") and len(key) > 4:
-            keys.add(key[:-4])
-        if "gal4" in key:
-            prefix = key.split("gal4", 1)[0]
-            if len(prefix) >= 3:
-                keys.add(prefix)
-        if key.startswith("gmr") and len(key) > 6 and re.match(r"gmr[0-9]", key):
-            keys.add(key[3:])
-            keys.add(f"r{key[3:]}")
-        if key.startswith("ey") and len(key) > 5 and re.match(r"ey[a-z]*[0-9]", key):
-            keys.add(key[2:])
-
-    add(text)
-    for inner in re.findall(r"\{([^}]*)\}", text):
-        cleaned_inner = re.sub(r"^[^=]+=", "", inner)
-        cleaned_inner = re.sub(r"^(it\.)", "", cleaned_inner, flags=re.IGNORECASE)
-        add(cleaned_inner)
-    for inner in re.findall(r"\[([^\]]+)\]", text):
-        add(inner)
-    for prefix, suffix in re.findall(r"\}([A-Za-z][A-Za-z0-9_.\\-]*)\[([^\]]+)\]", text):
-        add(f"{prefix}{suffix}")
-    for token in re.split(r"[^A-Za-z0-9_.()\\-]+", text):
-        add(token)
-
-    # Common FlyBase encodings keep the driver name outside the construct braces.
-    without_wrappers = re.sub(r"[A-Za-z]*\{[^}]*\}", " ", text)
-    for token in re.split(r"[^A-Za-z0-9_.()\\-]+", without_wrappers):
-        add(token)
-
-    if "scer\\gal4" in lowered:
-        for inner in re.findall(r"scer\\gal4\[([^\]]+)\]", lowered):
-            add(inner)
-    return keys
 
 
 def _input_gal4_lookup_keys(input_symbol: Any) -> Set[str]:
@@ -582,18 +485,6 @@ def _load_gal4_construct_alias_fbti_index(
     )
 
 
-def _is_split_gal4_component(symbol: Any) -> bool:
-    lowered = str(symbol or "").lower()
-    return bool(
-        ".dbd" in lowered
-        or "-dbd" in lowered
-        or ".ad" in lowered
-        or "-ad" in lowered
-        or "p65.ad" in lowered
-        or "split-gal4" in lowered
-    )
-
-
 def _input_requests_split_gal4(input_symbol: Any) -> bool:
     lowered = str(input_symbol or "").lower()
     return bool(
@@ -604,13 +495,6 @@ def _input_requests_split_gal4(input_symbol: Any) -> bool:
         or "p65" in lowered
         or "split-gal4" in lowered
     )
-
-
-def _gal4_driver_fingerprint(symbol: Any) -> str:
-    keys = _gal4_search_keys(symbol)
-    if not keys:
-        return ""
-    return sorted(keys, key=lambda value: (-len(value), value))[0]
 
 
 def _gal4_driver_symbols_match(left: Any, right: Any) -> bool:
@@ -628,36 +512,6 @@ def _gal4_driver_symbols_match(left: Any, right: Any) -> bool:
             ):
                 return True
     return False
-
-
-def _primary_gal4_component_symbol_for_fbst(
-    fbst: str,
-    component_rows_by_fbst: Dict[str, List[Tuple[str, str]]],
-    fbst_to_fb_genotype: Dict[str, str],
-) -> str:
-    """Return the best FlyBase component symbol for a GAL4 stock."""
-    gal4_symbols: List[str] = []
-    for symbol, gene_symbol in component_rows_by_fbst.get(fbst, []):
-        symbol_text = str(symbol or "").strip()
-        if symbol_text and _looks_like_gal4_symbol(symbol_text, gene_symbol):
-            gal4_symbols.append(symbol_text)
-    if gal4_symbols:
-        gal4_symbols.sort(
-            key=lambda value: (
-                _is_split_gal4_component(value),
-                not value.startswith("P{"),
-                not value.startswith("M{"),
-                -len(value),
-                value.lower(),
-            )
-        )
-        return gal4_symbols[0]
-
-    fb_genotype = str(fbst_to_fb_genotype.get(fbst, "") or "").strip()
-    for token in _split_genotype_symbol_tokens(fb_genotype):
-        if _looks_like_gal4_symbol(token):
-            return token
-    return ""
 
 
 def _build_stock_candidate_label_to_driver_genotype(

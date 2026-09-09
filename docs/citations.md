@@ -28,10 +28,14 @@ genotype-phenotype curation; stock-to-publication links; and FBrf → PMID /
 PMCID / DOI resolution. Specific report families consumed by the pipeline:
 
 - `fbal_to_fbgn`
+- `stocks`
+- `dmel_classical_and_insertion_allele_descriptions`
 - `transgenic_construct_descriptions`
 - `entity_publication`
 - `fbrf_pmid_pmcid_doi`
 - `genotype_phenotype_data`
+- `fb_synonym`
+- `fbgn_annotation_ID`
 - `chado_FBst*.xml(.gz)` and `chado_FBti*.xml(.gz)` (chado XML)
 
 Files are pulled from
@@ -132,10 +136,12 @@ URLs:
 - PMC: <https://pmc.ncbi.nlm.nih.gov/>
 - E-utilities terms: <https://www.ncbi.nlm.nih.gov/books/NBK25497/>
 
-### Europe PMC (search + full-text XML)
+### Europe PMC (ID lookup + full-text XML)
 
-**Used for:** keyword-scoped search and `fullTextXML` retrieval at
-`https://www.ebi.ac.uk/europepmc/webservices/rest/`.
+**Used for:** looking up a paper by `EXT_ID:{pmid}` or `DOI:"..."` when the
+PMCID/DOI isn't already known, and fetching `fullTextXML` at
+`https://www.ebi.ac.uk/europepmc/webservices/rest/` once an ID is resolved.
+Not a keyword-scoped literature search — the queries are always by identifier.
 
 > Europe PMC Consortium. Europe PMC: a full-text literature database for the
 > life sciences and platform for innovation. *Nucleic Acids Research* 43,
@@ -180,8 +186,10 @@ URL: <https://openalex.org/>
 ## 4. AI models (OpenAI)
 
 **Used for:** (a) phenotype-text embeddings when the embedding analysis is
-enabled with `settings.embeddings.enabled`, which produces cosine columns,
-similarity tiers, and plots, and (b) functional
+enabled with `settings.embeddings.enabled`, which adds cosine-similarity
+columns to the aggregated workbook — the similarity-tier sidecar workbook and
+t-SNE/density plot folders are only emitted by the advanced `phenotype-sheet`
+command, not the primary `run`, and (b) functional
 validation of `Ref++` stocks during `run` (or `validate-stocks`) when the
 required JSON config block `settings.validation.enabled` is `true`. Model
 defaults are configured in `fl_ai_reagent_stocker/config.py`:
@@ -219,7 +227,7 @@ software repository in addition to the data sources above.
 @software{fl_ai_reagent_stocker,
   author = {Allada Lab},
   title  = {{fl\_ai\_reagent\_stocker: modular Drosophila stock-processing pipeline}},
-  url    = {https://github.com/Allada-Lab/fl-AI-reagent-stocker},
+  url    = {https://github.com/aadish98/fl.AI-reagent-stocker},
   note   = {Record the commit hash or release tag used in your analysis.}
 }
 ```

@@ -37,7 +37,9 @@ independently: it builds the Stage 1 workbook, organizes stocks with the JSON
 config, validates `Ref++` stocks when enabled, and writes a combined summary at
 the input root. JSON config controls input columns, FBgn conversion, PubMed
 batch size, embeddings, output preservation, and validation policy. Default
-config: `data/config/stock_split_config_example.json`.
+config: `data/config/stock_split_config_priority_example.json` — this is the
+only config in `data/config/` that is git-tracked (see `.gitignore`), so it's
+the one guaranteed to exist right after a fresh clone.
 
 Environment variables (optional, from a repo-root `.env`):
 
@@ -73,7 +75,9 @@ optional `combination_names` list assigns corresponding Excel tab names
 one-to-one. Populated categories are automatically prefixed `1_`, `2_`, and so
 on; without names, they use legacy `Sheet1..N` names. When the config uses a
 `Phenotype` filter, those tabs also include phenotype (+ qualifier), reference,
-and partner GAL4 columns.
+and partner GAL4 columns, and the workbook includes a full-scope `All
+Phenotypic Stocks Sheet` even when embeddings are disabled. Embeddings only add
+cosine-similarity columns; they do not control phenotype/GAL4 evidence capture.
 Two computed score columns back the standard tiers:
 
 - `settings.input` — required input column and FBgn-conversion policy.
@@ -101,13 +105,19 @@ Config fields: `settings.relevantSearchTerms`,
 
 Example configs:
 
+- `data/config/stock_split_config_priority_example.json` — **the default; the
+  only one of these that is git-tracked.** Six phenotype buckets followed by
+  Bloomington RNAi `Ref++` and `Ref+` buckets; its documented filters are the
+  supported ingredients for custom combinations. See
+  `docs/stock_split_config_priority_example.md`.
 - `data/config/stock_split_config_example.json` — publication-evidence tiers
-- `data/config/stock_split_config_phenotype_example.json` — adds `Phenotype++`
-  and `Phenotype+` sheets above each `Ref` group
-- `data/config/stock_split_config_priority_example.json` — six named phenotype
-  buckets; see `docs/stock_split_config_priority_example.md`
+  (`Ref++`/`Ref+`/`Ref-`). Local-only/gitignored.
+- `data/config/stock_split_config_phenotype_example.json` — a standalone
+  curated-phenotype variant; replaces the `Ref` tiers entirely with
+  `Phenotype++`/`Phenotype+` filters (no `Ref` sheets at all).
+  Local-only/gitignored.
 - `data/config/stock_split_config_priority_all_phenotypes.json` — exhaustive
-  RNAi → UAS → allele coverage plus a phenotype audit bucket
+  RNAi → UAS → allele coverage plus a phenotype audit bucket. Local-only/gitignored.
 
 See `docs/stock_split_config_example.md` for the full config reference.
 

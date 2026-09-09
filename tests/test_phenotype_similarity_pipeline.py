@@ -1559,7 +1559,7 @@ class TestPhenotypeSimilarityPipeline(unittest.TestCase):
 
 class TestPhenotypeRelevanceFilters(unittest.TestCase):
 
-    def test_priority_combination_names_validate_and_simple_order_is_unchanged(self):
+    def test_priority_combination_names_validate_and_preserve_phenotype_priority(self):
         simple = load_split_config(PRIORITY_SIMPLE_CONFIG_PATH)
         self.assertEqual(
             simple["combination_names"],
@@ -1570,6 +1570,8 @@ class TestPhenotypeRelevanceFilters(unittest.TestCase):
                 "OtherSC·Allele·Pheno",
                 "Custom·RNAi·Pheno",
                 "Custom·Allele·Pheno",
+                "BDSC·RNAi·Ref++",
+                "BDSC·RNAi·Ref+",
             ],
         )
         self.assertEqual(len(simple["combination_names"]), len(simple["combinations"]))
@@ -1977,6 +1979,10 @@ class TestPhenotypeRelevanceFilters(unittest.TestCase):
                     n_input_genes=1,
                 )
             sheet = pd.read_excel(output_path, sheet_name="Sheet1")
+            all_phenotypic_sheet = pd.read_excel(
+                output_path,
+                sheet_name="All Phenotypic Stocks Sheet",
+            )
             contents = pd.read_excel(output_path, sheet_name="Contents", header=None)
             contents_text = "\n".join(
                 contents.fillna("").astype(str).agg(" ".join, axis=1).tolist()
@@ -1986,6 +1992,8 @@ class TestPhenotypeRelevanceFilters(unittest.TestCase):
         self.assertIn(PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN, sheet.columns)
         self.assertIn(PUBLISHED_GAL4_STOCK_ID_COLUMN, sheet.columns)
         self.assertIn("Partner GAL4 Symbols", sheet.columns)
+        self.assertEqual(sheet["Phenotype"].iloc[0], "abnormal circadian rhythm (abnormal)")
+        self.assertEqual(sheet["Qualifier"].iloc[0], "abnormal")
         self.assertIn(
             "{abnormal circadian rhythm (abnormal): PMID12345678}",
             str(sheet[PHENOTYPE_REFERENCE_MAP_COLUMN].iloc[0]),
@@ -1995,6 +2003,10 @@ class TestPhenotypeRelevanceFilters(unittest.TestCase):
             str(sheet[PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN].iloc[0]),
         )
         self.assertEqual(sheet["FBal PMID"].iloc[0], "PMID999")
+        self.assertEqual(
+            all_phenotypic_sheet["Published phenotype"].iloc[0],
+            "abnormal circadian rhythm",
+        )
         self.assertIn("Combination sheet phenotype columns", contents_text)
         self.assertIn(PHENOTYPE_REFERENCE_MAP_COLUMN, contents_text)
 

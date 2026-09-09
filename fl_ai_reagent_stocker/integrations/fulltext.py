@@ -223,7 +223,7 @@ class FullTextFetcher:
         self._session_cache: Dict[str, str] = {}  # PMID -> failure reason for this session
         self._session = requests.Session()
         self._default_headers = {
-            "User-Agent": "fly-stocker-v2/1.0 (+https://github.com/Allada-Lab)",
+            "User-Agent": "fly-stocker-v2/1.0 (+https://github.com/aadish98/fl.AI-reagent-stocker)",
             "Accept": "*/*",
         }
     

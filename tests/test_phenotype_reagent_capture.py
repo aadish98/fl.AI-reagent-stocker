@@ -25,6 +25,7 @@ from fl_ai_reagent_stocker.pipelines.stock_splitting import (  # noqa: E402
     CO_REAGENT_SYMBOLS_COLUMN,
     MASTERLIST_TEMPLATE_COLUMNS,
     PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN,
+    PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN,
     PARTNER_DRIVER_SYMBOLS_COLUMN,
     PHENOTYPE_REFERENCE_MAP_COLUMN,
     PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN,
@@ -542,30 +543,30 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
                         "FBst": "FBst9000002",
                         "stock_number": "7126",
                         "collection": "BDSC",
-                        "FB_genotype": "tim-GAL4",
+                        "FB_genotype": "P{GawB}elav[C155]",
                         "derived_stock_component": "FBal0888888",
                         "embedded_type": "FBal",
-                        "object_symbol": "tim-GAL4",
+                        "object_symbol": "P{GawB}elav[C155]",
                         "GeneSymbol": "Scer\\GAL4",
                     },
                     {
                         "FBst": "FBst9000003",
                         "stock_number": "7127",
                         "collection": "BDSC",
-                        "FB_genotype": "tim-GAL4",
+                        "FB_genotype": "P{GawB}elav[C155]",
                         "derived_stock_component": "FBal0888888",
                         "embedded_type": "FBal",
-                        "object_symbol": "tim-GAL4",
+                        "object_symbol": "P{GawB}elav[C155]",
                         "GeneSymbol": "Scer\\GAL4",
                     },
                     {
                         "FBst": "FBst9000004",
                         "stock_number": "7128",
                         "collection": "BDSC",
-                        "FB_genotype": "tim-GAL4 / UAS-GFP",
+                        "FB_genotype": "P{GawB}elav[C155] / UAS-GFP",
                         "derived_stock_component": "FBal0888888",
                         "embedded_type": "FBal",
-                        "object_symbol": "tim-GAL4",
+                        "object_symbol": "P{GawB}elav[C155]",
                         "GeneSymbol": "Scer\\GAL4",
                     },
                     {
@@ -585,7 +586,7 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
                 "reference\tphenotype_name\tphenotype_id\tqualifier_names\t"
                 "genotype_FBids\tgenotype_symbols\n"
                 "FBrf0000001\tabnormal circadian rhythm\tFBcv0000002\tabnormal\t"
-                "FBal0999999/FBal0888888\tP{TRiP.HMS00001}/tim-GAL4\n"
+                "FBal0999999/FBal0888888\tP{TRiP.HMS00001}/Scer\\GAL4[elav-C155]\n"
             )
             (alleles_dir / "genotype_phenotype_data_fb_test.tsv").write_text(
                 phenotype_tsv,
@@ -641,8 +642,14 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
         self.assertEqual(result["Phenotype"].iloc[0], "abnormal circadian rhythm")
         self.assertEqual(result[RNAI_TYPE_COLUMN].iloc[0], "shRNA")
         self.assertEqual(result[CO_REAGENT_FBIDS_COLUMN].iloc[0], "FBal0888888")
-        self.assertEqual(result[CO_REAGENT_SYMBOLS_COLUMN].iloc[0], "tim-GAL4")
-        self.assertEqual(result[PARTNER_DRIVER_SYMBOLS_COLUMN].iloc[0], "tim-GAL4")
+        self.assertEqual(
+            result[CO_REAGENT_SYMBOLS_COLUMN].iloc[0],
+            "Scer\\GAL4[elav-C155]",
+        )
+        self.assertEqual(
+            result[PARTNER_DRIVER_SYMBOLS_COLUMN].iloc[0],
+            "Scer\\GAL4[elav-C155]",
+        )
         self.assertIn(
             "(7126, BDSC)",
             result[PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN].iloc[0],
@@ -654,6 +661,10 @@ class TestPhenotypeReagentCapture(unittest.TestCase):
         self.assertNotIn(
             "(7128, BDSC)",
             result[PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN].iloc[0],
+        )
+        self.assertIn(
+            "(7126, BDSC)=P{GawB}elav[C155]",
+            result[PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN].iloc[0],
         )
 
     def test_stock_phenotype_sheet_filters_partner_driver_symbols_when_only_mixed_stock_exists(self):
@@ -1785,6 +1796,10 @@ class TestCombinationSheetPhenotypeEnrichment(unittest.TestCase):
                     CO_REAGENT_SYMBOLS_COLUMN: "tim-GAL4",
                     PARTNER_DRIVER_SYMBOLS_COLUMN: "tim-GAL4",
                     PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN: "(7126, BDSC); (7127, BDSC)",
+                    PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN: (
+                        "(7126, BDSC)=P{GawB}tim[UAS]; "
+                        "(7127, BDSC)=P{GawB}tim[UAS]"
+                    ),
                 },
                 {
                     SOURCE_STOCK_COLUMN: "Vienna (v9241)",
@@ -1835,15 +1850,18 @@ class TestCombinationSheetPhenotypeEnrichment(unittest.TestCase):
         positive = gal4[PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN].iloc[0]
         stock_ids = gal4[PUBLISHED_GAL4_STOCK_ID_COLUMN].iloc[0]
         self.assertIn(
-            "{tim-GAL4, -, Bloomington, PMID12345678, abnormal circadian rhythm (abnormal)}",
+            "{tim-GAL4, P{GawB}tim[UAS], Bloomington, PMID12345678, "
+            "abnormal circadian rhythm (abnormal)}",
             positive,
         )
         self.assertIn(
-            "{7126, -, Bloomington, PMID12345678, abnormal circadian rhythm (abnormal)}",
+            "{7126, P{GawB}tim[UAS], Bloomington, PMID12345678, "
+            "abnormal circadian rhythm (abnormal)}",
             stock_ids,
         )
         self.assertIn(
-            "{7127, -, Bloomington, PMID12345678, abnormal circadian rhythm (abnormal)}",
+            "{7127, P{GawB}tim[UAS], Bloomington, PMID12345678, "
+            "abnormal circadian rhythm (abnormal)}",
             stock_ids,
         )
         self.assertIn(

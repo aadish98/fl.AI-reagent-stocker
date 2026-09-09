@@ -5,9 +5,11 @@
 
 **File under review:** `data/config/stock_split_config_priority_example.json`
 
-**Purpose:** simple config for finding phenotypic stocks. It defines six named,
-priority-ordered phenotype buckets. For exhaustive RNAi → UAS → allele coverage,
-use `data/config/stock_split_config_priority_all_phenotypes.json`.
+**Purpose:** public default config for phenotype-backed reagents plus
+Bloomington RNAi literature follow-up. It defines eight named, priority-ordered
+output buckets: six phenotype buckets followed by `Ref++` and `Ref+` RNAi
+buckets. Its `filters` object is also the reusable ingredient catalog for
+user-authored combinations.
 
 **Related:** [stock_split_config_example.md](stock_split_config_example.md) (shared
 Ref-tier filter glossary) · [pipeline_usage.md § Finding phenotypic stocks](pipeline_usage.md#finding-phenotypic-stocks)
@@ -22,6 +24,7 @@ lands in only the **first** matching sheet.
 | Tier | Sheets | What it captures |
 |---|---|---|
 | Phenotype buckets | 1–6 | Any curated FlyBase phenotype, by collection/reagent class |
+| Bloomington RNAi literature buckets | 7–8 | Remaining Bloomington RNAi reagents with `Ref++` or `Ref+` publication evidence |
 
 ---
 
@@ -40,6 +43,23 @@ All entries require `Phenotype` (`PHENOTYPE_RELEVANCE_SCORE ≠ 0`).
 
 ---
 
+## Tier 2 — Bloomington RNAi literature buckets (sheets 7–8)
+
+These sheets are evaluated only after all phenotype buckets. `Ref++` requires
+at least one configured search term in a cited paper's title or abstract;
+`Ref+` has citations but no such title/abstract hit.
+
+| # | Combination | Intent |
+|---|---|---|
+| 7 | Bloomington + RNAi_reagent + Ref++ | Literature-supported Bloomington RNAi not already claimed by a phenotype bucket |
+| 8 | Bloomington + RNAi_reagent + Ref+ | Bloomington RNAi with citations but no configured keyword hit, not already claimed earlier |
+
+The default 5-stocks-per-gene and 3-stocks-per-allele caps apply across every
+sheet in priority order. A phenotype bucket can therefore exhaust a gene or
+allele cap before either Ref bucket is considered.
+
+---
+
 ## Settings highlights
 
 | Setting | Value |
@@ -49,10 +69,7 @@ All entries require `Phenotype` (`PHENOTYPE_RELEVANCE_SCORE ≠ 0`).
 | `input.skipFbgnidConversion` | `true` |
 | `maxStocksPerGene` / `maxStocksPerAllele` | `5` / `3` |
 
-The exhaustive `stock_split_config_priority_all_phenotypes.json` variant
-sets these limits effectively unlimited, disables functional validation, keeps
-embeddings enabled, and adds a final `Pheno·Audit` coverage bucket. Visible tab
-numbers are assigned sequentially only to populated categories.
+Visible tab numbers are assigned sequentially only to populated categories.
 
 ---
 

@@ -16,7 +16,9 @@ runs OpenAI validation and phenotype-embedding analysis when enabled by config.
   [stock_split_config_example.md](stock_split_config_example.md) and the helper
   scripts below).
 - A JSON split config (defaults to
-  `data/config/stock_split_config_example.json`).
+  `data/config/stock_split_config_priority_example.json` — the only config in
+  `data/config/` that is git-tracked; other example configs are
+  local-only/gitignored).
 
 Environment variables (optional, read from a repo-root `.env`):
 
@@ -64,7 +66,7 @@ embeddings are enabled in config).
 Options:
 
 - `--config`, `-c` — JSON split config (default:
-  `data/config/stock_split_config_example.json`).
+  `data/config/stock_split_config_priority_example.json`).
 - `--quiet`, `-q` — suppress per-file progress logging.
 
 ## Outputs
@@ -72,8 +74,9 @@ Options:
 `run` produces a clean, summary-ready tree under the input folder:
 
 - Per gene set: `./gene_lists/Per Gene Set Runs/<relative path>/<gene set>/Stocks/<gene set>_aggregated.xlsx`
-  (`Contents`, configured combination tabs or legacy `Sheet1..N`, `References`, `Stock Sheet by Gene`, plus Ref++
-  validation columns when enabled, plus embedding cosine columns when enabled).
+  (`Contents`, configured combination tabs or legacy `Sheet1..N`, `References`, `Stock Sheet by Gene`, and, when the
+  config uses a `Phenotype` filter, `All Phenotypic Stocks Sheet`; plus Ref++
+  validation columns when enabled and embedding cosine columns when enabled).
 - Combined summary at the input root: `combination_counts_summary.xlsx` and
   `combination_counts_summary.csv` (one row per gene set and config
   combination, grouped by input folder).
@@ -123,9 +126,11 @@ Key fields:
 - `filters` — reusable column predicates.
 - `combinations` — ordered sheet definitions. When any filter or combination
   name starts with `Phenotype`, each populated combination sheet also receives
-  reagent-level `Phenotype Reference-ID Map`, partner GAL4, and
-  `Published GAL4/ Positive Control` / `Published GAL4 stock id` columns
-  joined from FlyBase curated phenotype evidence.
+  reagent-level `Phenotype`, `Qualifier`, `Phenotype Reference-ID Map`, partner
+  GAL4, and `Published GAL4/ Positive Control` / `Published GAL4 stock id`
+  columns joined from FlyBase curated phenotype evidence. The same condition
+  writes the full-scope `All Phenotypic Stocks Sheet`; this is independent of
+  `settings.embeddings.enabled`.
 - `combination_names` — optional Excel tab names aligned one-to-one with
   `combinations`. Names must be unique, valid Excel worksheet names of at most
   31 characters after numbering. Store unnumbered labels: populated categories
@@ -153,16 +158,19 @@ sheets stay reagent-level over `(stock_id, collection)`.
 
 ### Example configs
 
-- `data/config/stock_split_config_example.json` — publication-evidence tiers.
-- `data/config/stock_split_config_phenotype_example.json` — adds `Phenotype++`
-  and `Phenotype+` sheets above each `Ref` group, so phenotype-backed reagents
-  are claimed before the publication-only tiers.
-- `data/config/stock_split_config_priority_example.json` — six named,
-  priority-ordered phenotype buckets. See
+- `data/config/stock_split_config_priority_example.json` — **the default; the
+  only one of these that is git-tracked.** Six named, priority-ordered
+  phenotype buckets. See
   [stock_split_config_priority_example.md](stock_split_config_priority_example.md).
+- `data/config/stock_split_config_example.json` — publication-evidence tiers.
+  Local-only/gitignored.
+- `data/config/stock_split_config_phenotype_example.json` — a standalone
+  curated-phenotype variant; replaces the `Ref` tiers entirely with
+  `Phenotype++`/`Phenotype+` filters (no `Ref` sheets at all).
+  Local-only/gitignored.
 - `data/config/stock_split_config_priority_all_phenotypes.json` — exhaustive
   RNAi → residual UAS → allele/insertion coverage, plus a final phenotype
-  audit bucket.
+  audit bucket. Local-only/gitignored.
 
 ## Finding phenotypic stocks
 

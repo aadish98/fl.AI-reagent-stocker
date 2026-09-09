@@ -1,5 +1,20 @@
 {
-  "_description": "Simple priority phenotypic-stocks config. Produces six named, priority-ordered phenotype buckets for stocks with any FlyBase curated phenotype (PHENOTYPE_RELEVANCE_SCORE != 0), split by collection/stock-center status and RNAi_reagent vs AlleleOrInsertion. Each (stock_id, collection) reagent lands in only the first matching sheet. settings.embeddings.enabled is true.",
+  "_description": "Public default priority config. Produces eight named, priority-ordered sheets: six FlyBase curated-phenotype buckets followed by Bloomington RNAi Ref++ and Ref+ buckets. Each (stock_id, collection) reagent lands in only the first matching sheet. Phenotype evidence is included whenever a Phenotype filter is active; embeddings only add cosine scores.",
+
+  "_how_to_use": "Build a combination by listing reusable filter names from `filters`. Collection filters select a stock center; reagent-class filters select RNAi or non-RNAi reagents; evidence filters select phenotype or publication tiers; structure filters select CRISPR, balancer, or insertion status. Combinations are evaluated top-to-bottom and the first match wins. `maxStocksPerGene` and `maxStocksPerAllele` are shared across all sheets, so the six phenotype sheets can consume a gene's cap before either Ref sheet is reached.",
+
+  "_filter_catalog_notes": "Every entry in `filters` is a valid reusable ingredient. An ingredient may be absent from `combinations` (for example Ref- or No Balancers) so users can compose a custom sheet without adding unsupported filter types. Do not add explanatory keys inside `filters`: the loader treats every key there as an executable filter specification.",
+
+  "_combination_notes": {
+    "BDSC·RNAi·Pheno": "Highest-priority Bloomington RNAi reagents with any curated FlyBase phenotype.",
+    "VDRC·RNAi·Pheno": "Vienna RNAi reagents with any curated FlyBase phenotype.",
+    "BDSC·Allele·Pheno": "Bloomington non-RNAi allele/insertion reagents with any curated FlyBase phenotype.",
+    "OtherSC·Allele·Pheno": "Orderable non-Bloomington non-RNAi allele/insertion reagents with any curated FlyBase phenotype.",
+    "Custom·RNAi·Pheno": "Custom, non-orderable RNAi reagents with curated FlyBase phenotype evidence.",
+    "Custom·Allele·Pheno": "Custom, non-orderable non-RNAi reagents with curated FlyBase phenotype evidence.",
+    "BDSC·RNAi·Ref++": "Bloomington RNAi reagents with a title/abstract hit for at least one configured search term, after phenotype buckets claim their matches.",
+    "BDSC·RNAi·Ref+": "Bloomington RNAi reagents with cited publications but no configured title/abstract keyword hit, after phenotype and Ref++ buckets claim their matches."
+  },
 
   "_column_notes": {
     "collection": "FlyBase stock collection name, e.g. Bloomington, Vienna, Kyoto.",
@@ -10,8 +25,29 @@
     "sgRNA": "COMPUTED: True if stock genotype contains 'sgRNA' (case-insensitive). No sgRNA filter excludes CRISPR reagents from the Ref matrix.",
     "num_Balancers": "COMPUTED: Number of FBba (balancer) components associated with the stock. Drives No Balancers / Has Balancers filters.",
     "multiple_insertions": "COMPUTED: True if stock has more than one unique transgenic construct. Drives no_other_insertion / other_insertion filters.",
+    "genotype": "FlyBase stock genotype text. It is the source for the computed sgRNA and broad RNAi flags; filter it with contains or doesnt_contain only when an exact string-based rule is appropriate.",
     "ALLELE_PAPER_RELEVANCE_SCORE": "COMPUTED: 0 (Ref-)=no refs, 1 (Ref+)=has refs but none contain keywords in title/abstract, 2 (Ref++)=at least 1 ref has case-insensitive keyword hit in title/abstract.",
     "PHENOTYPE_RELEVANCE_SCORE": "COMPUTED: 0=no curated phenotype, 1 (Phenotype+)=has curated phenotype but none match phenotypeSimilarityTargets, 2 (Phenotype++)=curated phenotype matches a target. Phenotype filter qualifies when score is non-zero."
+  },
+
+  "_settings_notes": {
+    "input.geneCol": "Required column in the reviewed input CSV that contains FlyBase gene IDs.",
+    "input.inputGeneCol": "Required input CSV column preserved as the human-facing gene-symbol label.",
+    "input.skipFbgnidConversion": "True means the input has already passed scripts/fetch_fbgn_ids.py review; false requests the conversion sidecar before Stage 1.",
+    "pubmed.batchSize": "Positive batch size for PubMed and full-text metadata requests.",
+    "relevantSearchTerms": "Case-insensitive title/abstract terms defining Ref++, Ref+, and Ref- publication evidence.",
+    "phenotypeSimilarityTargets": "Required {keyword, embedding_text} target list for phenotype relevance tiers and optional OpenAI cosine scoring.",
+    "maxStocksPerGene": "Maximum selected stock rows per input gene across every combination, applied in priority order.",
+    "maxStocksPerAllele": "Maximum selected stock rows per allele across every combination, applied in priority order.",
+    "validation.enabled": "Enables GPT functional validation for eligible Ref++ output stocks when OPENAI_API_KEY is set.",
+    "validation.maxGptCallsPerStock": "Maximum validation-paper calls per stock; null means no cap.",
+    "validation.minFullTextChars": "Minimum recovered full-text character count required before GPT validation.",
+    "validation.gptCallDelaySeconds": "Delay between GPT validation calls.",
+    "validation.shortCircuitOnFunctionalValidation": "Stops validation for a stock after the first functional hit.",
+    "validation.enableGptLogging": "Writes GPT validation request/response logs when true.",
+    "embeddings.enabled": "Adds optional OpenAI phenotype cosine-similarity scores. It does not control phenotype or GAL4 evidence capture.",
+    "output.preserveUnsplitWorkbook": "Preserves the intermediate Stage 1 workbook when true.",
+    "contentsSeparatorEvery": "Number of Contents-sheet breakdown rows between faint visual separators."
   },
 
   "settings": {
@@ -120,6 +156,46 @@
       "column": "transgenic_product_class_terms",
       "type": "contains",
       "value": "RNAi_reagent"
+    },
+    "Ref++": {
+      "column": "ALLELE_PAPER_RELEVANCE_SCORE",
+      "type": "equals",
+      "value": 2
+    },
+    "Ref+": {
+      "column": "ALLELE_PAPER_RELEVANCE_SCORE",
+      "type": "equals",
+      "value": 1
+    },
+    "Ref-": {
+      "column": "ALLELE_PAPER_RELEVANCE_SCORE",
+      "type": "equals",
+      "value": 0
+    },
+    "No sgRNA": {
+      "column": "sgRNA",
+      "type": "equals",
+      "value": false
+    },
+    "Has Balancers": {
+      "column": "num_Balancers",
+      "type": "doesnt_equal",
+      "value": 0
+    },
+    "No Balancers": {
+      "column": "num_Balancers",
+      "type": "equals",
+      "value": 0
+    },
+    "other_insertion": {
+      "column": "multiple_insertions",
+      "type": "equals",
+      "value": true
+    },
+    "no_other_insertion": {
+      "column": "multiple_insertions",
+      "type": "equals",
+      "value": false
     }
   },
 
@@ -129,7 +205,9 @@
     ["Bloomington", "AlleleOrInsertion", "Phenotype"],
     ["Stock Center", "AlleleOrInsertion", "Phenotype"],
     ["Non Stock Center", "RNAi_reagent", "Phenotype"],
-    ["Non Stock Center", "AlleleOrInsertion", "Phenotype"]
+    ["Non Stock Center", "AlleleOrInsertion", "Phenotype"],
+    ["Bloomington", "RNAi_reagent", "Ref++"],
+    ["Bloomington", "RNAi_reagent", "Ref+"]
   ],
 
   "combination_names": [
@@ -138,6 +216,8 @@
     "BDSC·Allele·Pheno",
     "OtherSC·Allele·Pheno",
     "Custom·RNAi·Pheno",
-    "Custom·Allele·Pheno"
+    "Custom·Allele·Pheno",
+    "BDSC·RNAi·Ref++",
+    "BDSC·RNAi·Ref+"
   ]
 }

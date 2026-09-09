@@ -29,7 +29,7 @@ flowchart LR
     B --> C["🪰 Genetic reagents<br/>alleles · constructs · insertions"]
     C --> D["📦 Stocks<br/>BDSC, VDRC, and others"]
     D --> E["📚 Papers<br/>linked to those alleles"]
-    E --> F["🏷️ Evidence tier<br/>sleep / circadian in title or abstract"]
+    E --> F["🏷️ Phenotype gate<br/>curated FlyBase phenotype present"]
     F --> G["🗂️ Sorted sheets<br/>first matching category wins"]
     G --> H["📊 Counts<br/>genes · stocks · alleles"]
 ```
@@ -133,9 +133,20 @@ Ref++ is a *text match*, not a claim that the paper demonstrated a sleep phenoty
 
 Each stock is tested against the config’s category list, in order, and kept in the **first** category it satisfies. Later categories never see it. Empty categories do not appear as tabs.
 
-### 6. Counts
+### 6. Limits
 
-After all gene lists finish, stocker writes how many genes, stocks, and alleles landed in each category.
+Across the whole workbook, the default priority config keeps at most
+`settings.maxStocksPerGene` (5) stocks per gene and `settings.maxStocksPerAllele`
+(3) per allele. Stocks with stronger publication evidence (Ref++ before Ref+,
+then more keyword-hitting papers) are considered first when a gene or allele is
+near its cap. Gene and allele counters are shared across all six sheets, so
+filling the quota on an earlier sheet means later sheets get no further stocks
+for that gene or allele. Leftovers that hit the cap are dropped, not spilled to
+later sheets.
+
+### 7. Counts
+
+After all gene lists finish, stocker writes how many genes, stocks, and alleles landed in each category (counting what survived the limits above, not every FlyBase stock that theoretically matched).
 
 ---
 
@@ -148,8 +159,8 @@ flowchart TB
     CFG["⚙️ Config file<br/>stock_split_config_priority_example.json"]
     CFG --> I["1. Input contract<br/>read ext_gene and flybase_gene_id"]
     CFG --> K["2. Topic words<br/>sleep · circadian"]
-    CFG --> F["3. Stock predicates<br/>collection · RNAi · sgRNA · balancers · insertions · Ref tier"]
-    CFG --> O["4. Sheet order<br/>first match wins"]
+    CFG --> F["3. Stock predicates<br/>collection · RNAi_reagent · AlleleOrInsertion · Stock Center · Phenotype"]
+    CFG --> O["4. Sheet order<br/>first match wins, then stock limits"]
     I --> RUN["Stocker run"]
     K --> RUN
     F --> RUN
@@ -165,18 +176,32 @@ Stage 1 validates only the generated `validated_*.csv` files.
 
 **2. Topic words.** `relevantSearchTerms` is the only place “sleep” and “circadian” enter the literature score. Changing those words changes what Ref++ means. It does not change which stocks exist.
 
-**3. Stock predicates.** Named tests such as Bloomington, RNAi, no sgRNA, balancers present/absent, single vs multiple insertions, and Ref++ / Ref+ / Ref-. RNAi here is a *practical* flag: UAS or RNAi in the genotype, plus common VDRC knockdown families (GD, KK, VSH).
+**3. Stock predicates.** Named tests such as Bloomington, Vienna, RNAi_reagent, AlleleOrInsertion, Stock Center / Non Stock Center, and Phenotype. RNAi_reagent matches FlyBase `transgenic_product_class_terms` containing `RNAi_reagent`; AlleleOrInsertion is the complement of the repo's broader UAS/RNAi proxy; Stock Center / Non Stock Center is whether an orderable FBst record exists; Phenotype is any non-zero curated-phenotype score (`Phenotype+` or `Phenotype++`).
 
 **4. Sheet order.** The `combinations` list is the priority queue. In the
-default priority config, the live order is:
+default priority config, the live order is six named, priority-ordered
+Phenotype buckets — every entry requires `Phenotype` (`PHENOTYPE_RELEVANCE_SCORE != 0`):
 
-1. Bloomington RNAi, no sgRNA, no balancer, single insertion — split by Ref++ / Ref+ / Ref-
-2. Same, but the stock carries balancers
-3. Same, but the stock has more than one insertion
-4. Same, but balancers *and* extra insertions
-5. Catch-all: any remaining RNAi stock without sgRNA
+1. **BDSC·RNAi·Pheno** — Bloomington RNAi reagent with a curated phenotype
+2. **VDRC·RNAi·Pheno** — Vienna/VDRC RNAi reagent with a curated phenotype
+3. **BDSC·Allele·Pheno** — Bloomington allele or insertion (not the broad RNAi/UAS proxy) with a phenotype
+4. **OtherSC·Allele·Pheno** — any other orderable stock-center allele/insertion with a phenotype
+5. **Custom·RNAi·Pheno** — phenotype-backed RNAi with no orderable FBst record
+6. **Custom·Allele·Pheno** — phenotype-backed allele/insertion with no orderable FBst record
 
-Combinations listed as disabled in that file are not used. This config does not cap how many stocks are kept per gene or allele, and it does not turn on AI paper-reading or phenotype-embedding.
+Each `(stock_id, collection)` reagent lands in only the first sheet it matches; empty categories do not appear as tabs. This config caps stocks at
+`settings.maxStocksPerGene = 5` and `settings.maxStocksPerAllele = 3`, counted
+across the whole workbook (see "What stocker is not" and the counts below —
+gene/allele counters are shared across all six sheets, so a gene that fills
+its quota on sheet 1 gets no further stocks on later sheets). It does turn on
+phenotype-embedding (`settings.embeddings.enabled = true`) but leaves
+AI paper-reading off (`settings.validation.enabled = false`).
+
+Whenever a config activates a `Phenotype` filter, Stocker also writes the
+full-scope **All Phenotypic Stocks Sheet** and attaches curated `Phenotype`,
+`Qualifier`, phenotype-reference, partner-GAL4, and orderable-driver-stock
+context to the category tabs. This evidence is collected from FlyBase even
+when embeddings are disabled; embeddings only add cosine-similarity scores.
 
 ---
 
@@ -197,9 +222,10 @@ Inside each workbook:
 | Sheet | What a biologist uses it for |
 |---|---|
 | **Contents** | Index of categories and the count breakdown |
-| **Category tabs** | The stocks assigned to each rule above, with genotype, collection, and (when the config uses a Phenotype filter) phenotype + qualifier, reference, and partner GAL4 columns |
+| **Category tabs** | The stocks assigned to each rule above, with genotype, collection, and (when the config uses a Phenotype filter) phenotype + qualifier, reference, partner GAL4, and orderable driver-genotype context |
 | **References** | The papers cited by stocks that actually made it into those tabs |
 | **Stock Sheet by Gene** | The same reagents viewed from the gene outward |
+| **All Phenotypic Stocks Sheet** | Full-scope curated phenotype evidence for the input-gene reagent set; included whenever the config uses a Phenotype filter |
 
 The counts table is the companion summary: one row per gene list and per category.
 
@@ -229,19 +255,25 @@ The counts table is the companion summary: one row per gene list and per categor
   Bloomington and VDRC stocks that carry them
            │
            ▼
-  papers linked to those alleles
+  curated FlyBase phenotypes for those alleles
            │
       ┌────┴────┐
       │         │
-   “circadian”  no keyword
-   in abstract  in any paper
+   any curated   no curated
+   phenotype     phenotype
       │         │
       ▼         ▼
-   Ref++      Ref+ or Ref-
-      │         │
-      ▼         ▼
-  first matching Bloomington RNAi sheet
-  (or the RNAi catch-all, if not Bloomington)
+   Phenotype    dropped
+   (+/++)       (no sheet)
+      │
+      ▼
+  first matching bucket, e.g.
+  BDSC·RNAi·Pheno if Bloomington + RNAi_reagent,
+  else VDRC·RNAi·Pheno, BDSC·Allele·Pheno, …
+      │
+      ▼
+  kept only while sky is under its
+  5-stock / 3-per-allele cap
 ```
 
-Two gene lists are processed independently. A stock that qualifies for both a specific Bloomington sheet and the final catch-all appears only on the Bloomington sheet.
+Two gene lists are processed independently. A stock that qualifies for both an earlier bucket (for example `BDSC·RNAi·Pheno`) and a later one (for example `Custom·RNAi·Pheno`) appears only on the earlier bucket.

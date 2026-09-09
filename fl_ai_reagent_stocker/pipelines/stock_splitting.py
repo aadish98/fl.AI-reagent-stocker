@@ -69,8 +69,12 @@ from ..utils import (
     format_reference_id_display,
     format_reference_id_columns,
     format_brace_entry,
+    looks_like_gal4_symbol as _looks_like_gal4_symbol,
     parse_stock_candidate_label,
+    primary_gal4_component_symbol_for_fbst as _primary_gal4_component_symbol_for_fbst,
     normalize_collection_name,
+    normalize_symbol_token as _normalize_symbol_token,
+    split_genotype_symbol_tokens as _split_genotype_symbol_tokens,
 )
 from ..validation_runner import run_functional_validation
 
@@ -108,6 +112,8 @@ PHENOTYPE_REFERENCE_MAP_COLUMN = "Phenotype Reference-ID Map"
 PUBLISHED_GAL4_POSITIVE_CONTROL_COLUMN = "Published GAL4/ Positive Control"
 PUBLISHED_GAL4_STOCK_ID_COLUMN = "Published GAL4 stock id"
 STOCK_SHEET_ENRICHMENT_COLUMNS = [
+    "Phenotype",
+    "Qualifier",
     PHENOTYPE_REFERENCE_MAP_COLUMN,
     CO_REAGENT_FBIDS_COLUMN,
     CO_REAGENT_SYMBOLS_COLUMN,
@@ -1649,35 +1655,6 @@ def _extract_flybase_ids(value: Any) -> List[str]:
     return deduped
 
 
-def _normalize_symbol_token(value: Any) -> str:
-    """Return a comparison-friendly normalization for genotype symbol fragments."""
-    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
-
-
-def _split_genotype_symbol_tokens(value: Any) -> List[str]:
-    """Split genotype text into readable component-like tokens.
-
-    FlyBase genotype_symbols are space-delimited allele components
-    (e.g. ``"A23[A23] Scer\\GAL4[Act5C.PI]"``).  Chromosomal arms are
-    separated by ``";"``, homologous alleles by ``"/"``.
-    """
-    tokens: List[str] = []
-    seen: Set[str] = set()
-    raw_parts = re.split(r"[;|,\n]+", str(value or ""))
-    for raw_part in raw_parts:
-        for slash_part in str(raw_part).split("/"):
-            for candidate in re.split(r"\s+", str(slash_part).strip()):
-                token = candidate.strip()
-                if not token or token in {"+", "-"}:
-                    continue
-                normalized = _normalize_symbol_token(token)
-                if normalized in seen:
-                    continue
-                seen.add(normalized)
-                tokens.append(token)
-    return tokens
-
-
 def _extract_genotype_id_symbol_pairs_with_ids(
     ids: List[str],
     genotype_symbols: Any,
@@ -1737,17 +1714,6 @@ def _extract_genotype_id_symbol_pairs(
     )
 
 
-def _looks_like_gal4_symbol(symbol: Any, gene_symbol: Any = "") -> bool:
-    """Return True when the symbol or linked gene clearly indicates GAL4."""
-    for raw_value in (symbol, gene_symbol):
-        normalized = _normalize_symbol_token(raw_value)
-        if not normalized:
-            continue
-        if "gal4" in normalized:
-            return True
-    return False
-
-
 def _extract_unmatched_gal4_tokens(
     genotype_label: Any,
     matched_symbol_norms: Set[str],
@@ -1757,7 +1723,10 @@ def _extract_unmatched_gal4_tokens(
     seen: Set[str] = set()
     for token in _split_genotype_symbol_tokens(genotype_label):
         normalized_token = _normalize_symbol_token(token)
-        if normalized_token in matched_symbol_norms or "gal4" not in normalized_token:
+        if (
+            normalized_token in matched_symbol_norms
+            or not _looks_like_gal4_symbol(token)
+        ):
             continue
         if normalized_token in seen:
             continue
@@ -2644,9 +2613,10 @@ def _build_stock_phenotype_sheet(
     component_id_to_gene_symbol: Dict[str, str] = {}
     component_id_to_stock_candidates: Dict[str, Set[str]] = defaultdict(set)
     component_id_to_stock_candidate_details: Dict[str, Set[Tuple[str, str]]] = defaultdict(set)
+    component_rows_by_fbst: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    fbst_to_fb_genotype: Dict[str, str] = {}
     gal4_only_fbst: Set[str] = set()
     if len(lookup_derived_df) > 0:
-        component_rows_by_fbst: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
         for _, row in lookup_derived_df.iterrows():
             cid = clean_id(row.get('derived_stock_component', ''))
             sym = str(row.get('object_symbol', '') or '').strip()
@@ -2667,6 +2637,8 @@ def _build_stock_phenotype_sheet(
                 component_id_to_stock_candidate_details[cid].add((fbst, candidate_label))
             if fbst:
                 component_rows_by_fbst[fbst].append((sym or fallback_symbol, gene_symbol))
+                if fallback_symbol:
+                    fbst_to_fb_genotype.setdefault(fbst, fallback_symbol)
         gal4_only_fbst = {
             fbst
             for fbst, component_rows in component_rows_by_fbst.items()
@@ -2676,6 +2648,28 @@ def _build_stock_phenotype_sheet(
                 for symbol, gene_symbol in component_rows
             )
         }
+
+    def _build_stock_candidate_label_to_driver_genotype() -> Dict[str, str]:
+        """Map GAL4-only candidate labels to their orderable driver genotype."""
+        fbst_to_driver_genotype = {
+            fbst: _primary_gal4_component_symbol_for_fbst(
+                fbst,
+                component_rows_by_fbst,
+                fbst_to_fb_genotype,
+            )
+            for fbst in gal4_only_fbst
+        }
+        label_to_genotype: Dict[str, str] = {}
+        for candidate_details in component_id_to_stock_candidate_details.values():
+            for fbst, label in candidate_details:
+                genotype = fbst_to_driver_genotype.get(fbst, "")
+                if fbst in gal4_only_fbst and label and genotype:
+                    label_to_genotype[label] = genotype
+        return label_to_genotype
+
+    stock_candidate_label_to_driver_genotype = (
+        _build_stock_candidate_label_to_driver_genotype()
+    )
     for src_df in [included_df, custom_included_df]:
         if len(src_df) > 0 and 'relevant_fbal_ids' in src_df.columns and 'relevant_fbal_symbols' in src_df.columns:
             for _, row in src_df.iterrows():
@@ -3023,6 +3017,11 @@ def _build_stock_phenotype_sheet(
             partner_driver_stock_candidates = unique_join(
                 sorted(partner_stock_candidate_set)
             )
+            partner_driver_stock_genotypes = unique_join(
+                f"{label}={stock_candidate_label_to_driver_genotype[label]}"
+                for label in sorted(partner_stock_candidate_set)
+                if stock_candidate_label_to_driver_genotype.get(label)
+            )
             component_gene_symbols = ''
             if not is_no_stock_row and derived_fbst_dsc_to_genes:
                 component_gene_symbols = unique_join(
@@ -3088,6 +3087,7 @@ def _build_stock_phenotype_sheet(
                     CO_REAGENT_SYMBOLS_COLUMN: co_reagent_symbols,
                     PARTNER_DRIVER_SYMBOLS_COLUMN: partner_driver_symbols,
                     PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN: partner_driver_stock_candidates,
+                    PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN: partner_driver_stock_genotypes,
                     'Data Set': dataset_label,
                     'Phenotype': phenotype_name,
                     'Qualifier': qualifier_text,
@@ -3143,6 +3143,7 @@ def _build_stock_phenotype_sheet(
             CO_REAGENT_SYMBOLS_COLUMN: lambda s: unique_join(s.tolist()),
             PARTNER_DRIVER_SYMBOLS_COLUMN: lambda s: unique_join(s.tolist()),
             PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN: lambda s: unique_join(s.tolist()),
+            PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN: lambda s: unique_join(s.tolist()),
             'Data Set': lambda s: unique_join(s.tolist()),
             **{
                 col: 'max'
@@ -3254,7 +3255,7 @@ def _build_stock_phenotype_sheet(
         [col for col in similarity_columns if col in phenotype_sheet.columns]
     )
     return phenotype_sheet[
-        visible_columns + ['_reference_url']
+        visible_columns + [PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN, '_reference_url']
     ]
 
 
@@ -3410,6 +3411,18 @@ def _align_gal4_symbols_to_candidates(
     return symbols + [symbols[-1]] * (candidate_count - len(symbols))
 
 
+def _parse_keyed_driver_stock_genotypes(value: Any) -> Dict[str, str]:
+    """Parse ``(stock, collection)=driver genotype`` entries by stock label."""
+    genotypes: Dict[str, str] = {}
+    for entry in _split_joined_values(value):
+        label, separator, genotype = entry.partition("=")
+        label = label.strip()
+        genotype = genotype.strip()
+        if separator and label and genotype:
+            genotypes[label] = genotype
+    return genotypes
+
+
 def _empty_stock_sheet_enrichment_frame() -> pd.DataFrame:
     """Return the empty enrichment schema used on combination sheets."""
     return pd.DataFrame(columns=["Source/ Stock #", *STOCK_SHEET_ENRICHMENT_COLUMNS])
@@ -3448,6 +3461,42 @@ def _build_reagent_phenotype_reference_map(
     if not rows:
         return pd.DataFrame(columns=["Source/ Stock #", PHENOTYPE_REFERENCE_MAP_COLUMN])
     return pd.DataFrame(rows)
+
+
+def _build_reagent_phenotype_summary(
+    phenotype_sheet_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Aggregate phenotype labels and qualifiers per focal reagent."""
+    empty = pd.DataFrame(columns=["Source/ Stock #", "Phenotype", "Qualifier"])
+    if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
+        return empty
+
+    phenotypes_by_reagent: Dict[str, List[str]] = defaultdict(list)
+    qualifiers_by_reagent: Dict[str, List[str]] = defaultdict(list)
+    for _, row in phenotype_sheet_df.iterrows():
+        reagent_key = _canonical_source_stock_key(row.get(SOURCE_STOCK_COLUMN, ""))
+        if not reagent_key:
+            continue
+        phenotypes_by_reagent[reagent_key].append(
+            _phenotype_with_qualifier(
+                row.get("Phenotype", ""),
+                row.get("Qualifier", ""),
+            )
+        )
+        qualifier = str(row.get("Qualifier", "") or "").strip()
+        if qualifier and qualifier != "-":
+            qualifiers_by_reagent[reagent_key].append(qualifier)
+
+    keys = set(phenotypes_by_reagent) | set(qualifiers_by_reagent)
+    rows = [
+        {
+            "Source/ Stock #": reagent_key,
+            "Phenotype": unique_join(phenotypes_by_reagent.get(reagent_key, [])) or "-",
+            "Qualifier": unique_join(qualifiers_by_reagent.get(reagent_key, [])) or "-",
+        }
+        for reagent_key in sorted(keys, key=lambda value: (value.lower(), value))
+    ]
+    return pd.DataFrame(rows) if rows else empty
 
 
 def _build_reagent_partner_gal4_summary(
@@ -3509,7 +3558,9 @@ def _build_reagent_published_gal4_enrichment(
         if not symbols:
             symbols = _split_joined_values(row.get(CO_REAGENT_SYMBOLS_COLUMN, ""))
         candidates = _split_joined_values(row.get(PARTNER_DRIVER_STOCK_CANDIDATES_COLUMN, ""))
-        genotypes = _split_joined_values(row.get(PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN, ""))
+        candidate_genotypes = _parse_keyed_driver_stock_genotypes(
+            row.get(PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN, "")
+        )
         if not symbols and not candidates:
             continue
         phenotype_label = _phenotype_with_qualifier(
@@ -3523,7 +3574,9 @@ def _build_reagent_published_gal4_enrichment(
             aligned_candidates = [("", "")] * len(aligned_symbols)
         else:
             aligned_symbols = _align_gal4_symbols_to_candidates(symbols, len(candidates))
-            aligned_genotypes = _align_gal4_symbols_to_candidates(genotypes, len(candidates))
+            aligned_genotypes = [
+                candidate_genotypes.get(candidate, "-") for candidate in candidates
+            ]
             aligned_candidates = [parse_stock_candidate_label(label) for label in candidates]
         for symbol, genotype, (stock_number, collection) in zip(
             aligned_symbols, aligned_genotypes, aligned_candidates
@@ -3563,10 +3616,11 @@ def _build_reagent_phenotype_enrichment(
     if phenotype_sheet_df is None or len(phenotype_sheet_df) == 0:
         return _empty_stock_sheet_enrichment_frame()
 
-    merged = _build_reagent_phenotype_reference_map(phenotype_sheet_df)
+    merged = _build_reagent_phenotype_summary(phenotype_sheet_df)
+    reference_map = _build_reagent_phenotype_reference_map(phenotype_sheet_df)
     partner = _build_reagent_partner_gal4_summary(phenotype_sheet_df)
     gal4 = _build_reagent_published_gal4_enrichment(phenotype_sheet_df)
-    for frame in (partner, gal4):
+    for frame in (reference_map, partner, gal4):
         if frame is None or len(frame) == 0:
             continue
         if merged is None or len(merged) == 0:
@@ -3601,6 +3655,14 @@ def _add_phenotype_enrichment_to_stock_sheet(
         enrichment_df.copy()
         if enrichment_df is not None and len(enrichment_df) > 0
         else _empty_stock_sheet_enrichment_frame()
+    )
+    out = out.drop(
+        columns=[
+            column
+            for column in STOCK_SHEET_ENRICHMENT_COLUMNS
+            if column in out.columns
+        ],
+        errors="ignore",
     )
     out["_reagent_key"] = out.apply(_canonical_stock_row_key, axis=1)
     if "Source/ Stock #" in enrichment.columns and len(enrichment) > 0:
@@ -3673,6 +3735,13 @@ def _reorder_screening_stock_sheet_columns(df: pd.DataFrame) -> pd.DataFrame:
 def _describe_stock_sheet_enrichment_column(column: str) -> str:
     """Return the Contents definition for a combination-sheet enrichment column."""
     definitions = {
+        "Phenotype": (
+            "Semicolon-separated curated FlyBase phenotype terms for this reagent; "
+            "qualifiers are included in parentheses where present."
+        ),
+        "Qualifier": (
+            "Semicolon-separated FlyBase phenotype qualifiers for this reagent."
+        ),
         PHENOTYPE_REFERENCE_MAP_COLUMN: (
             "Comma-separated {phenotype (+ qualifier): PMID} pairs from FlyBase "
             "curated phenotype evidence for this reagent. Missing PMIDs are shown as -."
@@ -3722,17 +3791,7 @@ def _build_reagent_similarity_scores(
         score_df[column] = pd.to_numeric(score_df[column], errors="coerce")
 
     numeric_scores = score_df.groupby("_reagent_key", as_index=False)[numeric_cols].max()
-    if "Phenotype" not in score_df.columns:
-        return numeric_scores.rename(columns={"_reagent_key": "Source/ Stock #"})
-
-    phenotype_terms = (
-        score_df.groupby("_reagent_key", as_index=False)["Phenotype"]
-        .agg(lambda values: unique_join(values.tolist()))
-    )
-    return (
-        phenotype_terms.merge(numeric_scores, on="_reagent_key", how="left")
-        .rename(columns={"_reagent_key": "Source/ Stock #"})
-    )
+    return numeric_scores.rename(columns={"_reagent_key": "Source/ Stock #"})
 
 
 def _stock_sheet_reagent_key(row: pd.Series) -> str:
@@ -4403,6 +4462,10 @@ def _prepare_phenotype_workbook_output(
 ) -> pd.DataFrame:
     """Return the phenotype sheet exactly as it should appear in Excel."""
     sheet_out = phenotype_sheet_df.copy() if phenotype_sheet_df is not None else pd.DataFrame()
+    sheet_out = sheet_out.drop(
+        columns=[PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN],
+        errors="ignore",
+    )
     if format_as_masterlist:
         sheet_out = _reorder_to_masterlist_columns(sheet_out)
     else:
@@ -6375,6 +6438,8 @@ def write_aggregated_excel(
             write_row(row, 0, ["Column", "Definition"], bold_bottom)
             row += 1
             enrichment_contents_columns = [
+                "Phenotype",
+                "Qualifier",
                 PHENOTYPE_REFERENCE_MAP_COLUMN,
                 STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS[CO_REAGENT_FBIDS_COLUMN],
                 STOCK_SHEET_ENRICHMENT_DISPLAY_LABELS[CO_REAGENT_SYMBOLS_COLUMN],
@@ -6404,7 +6469,11 @@ def write_aggregated_excel(
             row += 2
 
         # Section G: What the references-focused sheets include.
-        sheet_label = "All Phenotypic Stocks Sheet" if soft_run else "Stock Sheet by Gene"
+        sheet_label = (
+            "All Phenotypic Stocks Sheet"
+            if needs_phenotype_sheet
+            else "Stock Sheet by Gene"
+        )
         write_cell(row, 0, f"References and {sheet_label} definitions", fmt_13_bold)
         row += 1
         write_cell(
@@ -6416,7 +6485,7 @@ def write_aggregated_excel(
             skip_width=True,
         )
         row += 1
-        if soft_run:
+        if needs_phenotype_sheet:
             write_cell(
                 row,
                 0,
@@ -6529,7 +6598,7 @@ def write_aggregated_excel(
                     elif value is False or val_norm in ("false", "0", "no"):
                         refs_ws.write_boolean(excel_row_idx, kw_col_idx, False, false_fmt)
         
-        if soft_run:
+        if needs_phenotype_sheet:
             if stock_phenotype_sheet_df is not None and len(stock_phenotype_sheet_df) > 0:
                 _write_phenotype_similarity_sheet(
                     writer,
@@ -6538,7 +6607,7 @@ def write_aggregated_excel(
                     stock_phenotype_sheet_df,
                     format_as_masterlist=True,
                 )
-        else:
+        if not soft_run:
             if stock_sheet_by_gene_df is not None and len(stock_sheet_by_gene_df) > 0:
                 stock_sheet_by_gene_out = apply_experimental_prefix(
                     format_reference_id_columns(stock_sheet_by_gene_df)

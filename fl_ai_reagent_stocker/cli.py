@@ -40,7 +40,7 @@ def _add_config_arg(parser: argparse.ArgumentParser) -> None:
         "-c",
         type=Path,
         default=None,
-        help="Path to a JSON split-config (defaults to data/config/stock_split_config_example.json).",
+        help="Path to a JSON split-config (defaults to data/config/stock_split_config_priority_example.json).",
     )
 
 

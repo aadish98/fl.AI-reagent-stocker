@@ -107,3 +107,47 @@ Living notes for coding agents working in this repository.
 - Context: FlyBase symbols such as `nSyb.PU`, `sca.PU`, and `elav.PU` describe unknown particular constructs and therefore have no authoritative stock links; the exporter silently omitted them from collection sheets.
 - Decision: When exact and construct-alias resolution fail for generic `.P?` symbols, recommend one simple current BDSC stock from the same promoter family and label it `Candidate substitution—not the exact published construct`. Emit a `Coverage` sheet with one row per input and never rely on collection sheets alone to detect omissions.
 - Code: `scripts/export_gal4_driver_workbook.py` (`_generic_shorthand_driver_base`, `_gal4_promoter_keys`, `_resolve_generic_promoter_driver_fallback`, `_build_coverage_sheet`)
+
+### 2026-09-09 — Doc audit: dead/moved code references in earlier entries
+
+This is a correction entry, not a new decision. A documentation audit found
+several `Code:` pointers above no longer match the codebase. History is left
+as-is; use these corrections when following those entries:
+
+- **"Avoid double masterlist reorder" (2026-06-25):** `_is_masterlist_formatted`
+  no longer exists anywhere in the repo. The reorder-skip logic it described
+  was superseded by `_prepare_phenotype_workbook_output` in
+  `fl_ai_reagent_stocker/pipelines/stock_splitting.py`, which is the current
+  entry point for that behavior.
+- **"Sheet1..N Partner GAL4 summary + symbol fallback" (2026-06-25):**
+  `_partner_gal4_symbols_for_row` does not exist in `stock_splitting.py` (or
+  anywhere in the repo). The partner-symbol fallback behavior it described is
+  now implemented inside `_build_reagent_published_gal4_enrichment`.
+- **"Orderable driver genotype in Published GAL4 brace entries" (2026-06-25):**
+  `_join_aligned_driver_stock_genotypes` does not exist. The writer this entry
+  describes is `_build_stock_candidate_label_to_driver_genotype`, which is
+  defined twice for two different consumers: as a local helper inside
+  `_build_stock_phenotype_sheet` in `stock_splitting.py` (for Sheet1..N) and as
+  a module-level function in `scripts/export_gal4_driver_workbook.py` (for the
+  GAL4 driver workbook). Both populate field 2 of the
+  `Published GAL4/ Positive Control` brace entries.
+- **"GawB / cross-format GAL4 driver stock resolution" (2026-06-25):**
+  `_resolve_gal4_stock_candidates_by_driver_symbol` and
+  `_build_gal4_driver_stock_candidate_index` live only in
+  `scripts/export_gal4_driver_workbook.py`; full cross-format driver *stock
+  resolution* still happens there, not in `stock_splitting.py`. The
+  symbol-level primitives, however, are shared: `looks_like_gal4_symbol`,
+  `normalized_text_looks_like_gal4_driver`, `gal4_search_keys`, and
+  `gal4_driver_fingerprint` all live in `fl_ai_reagent_stocker/utils.py`, so
+  the GawB-aware matching is available to the stocker and the exporter alike.
+- Code (for the corrections above): `fl_ai_reagent_stocker/utils.py` (shared GAL4 symbol primitives), `fl_ai_reagent_stocker/pipelines/stock_splitting.py` (`_prepare_phenotype_workbook_output`, `_build_reagent_published_gal4_enrichment`, `_build_stock_phenotype_sheet`, `PARTNER_DRIVER_STOCK_GENOTYPES_COLUMN`), `scripts/export_gal4_driver_workbook.py` (`_resolve_gal4_stock_candidates_by_driver_symbol`, `_build_gal4_driver_stock_candidate_index`, `_build_stock_candidate_label_to_driver_genotype`)
+
+### 2026-09-09 — Phenotype evidence and orderable GAL4 genotypes decoupled from embeddings
+- Context: A `Phenotype` filter built the internal phenotype frame but hid row-level phenotype data from combination sheets unless the separate embedding pass ran; the All Phenotypic Stocks Sheet likewise required embeddings. The orderable driver-genotype field in published-GAL4 brace entries had no writer.
+- Decision: A Phenotype filter now independently emits the All Phenotypic Stocks Sheet and enriches combination sheets with `Phenotype`, `Qualifier`, reference, partner-GAL4, and published-driver context. Orderable GAL4 genotype values use keyed candidate entries internally so they remain aligned after aggregation, and populate brace field 2. GawB-aware driver matching is shared by the stocker and GAL4 exporter.
+- Code: `fl_ai_reagent_stocker/utils.py` (shared GAL4 symbol utilities), `fl_ai_reagent_stocker/pipelines/stock_splitting.py` (`_build_stock_phenotype_sheet`, `_build_reagent_phenotype_enrichment`, `_build_reagent_published_gal4_enrichment`, `write_aggregated_excel`)
+
+### 2026-09-09 — Public config ingredient catalog
+- Context: The only tracked configuration had documented Ref, balancer, insertion, and CRISPR concepts without executable filter definitions, and exposed no simple literature-follow-up buckets after phenotype selection.
+- Decision: The tracked priority config now defines every documented filter as a reusable ingredient, appends Bloomington RNAi `Ref++` / `Ref+` buckets after phenotype buckets, and documents settings, ingredients, ordering, and shared stock-cap behavior for Cursor users.
+- Code: `data/config/stock_split_config_priority_example.json`, `docs/AGENTS.md`, `docs/stock_split_config_priority_example.md`

@@ -193,7 +193,10 @@ FLYBASE_DERIVED_STOCK_COMPONENTS_PATH = (
 
 # Config paths
 CONFIG_DIR = REPO_ROOT / "data" / "config"
-DEFAULT_SPLIT_CONFIG_PATH = CONFIG_DIR / "stock_split_config_example.json"
+# Only stock_split_config_priority_example.json is git-tracked
+# (see .gitignore); the other example configs are local-only, so the
+# default must point at the file that actually ships with a fresh clone.
+DEFAULT_SPLIT_CONFIG_PATH = CONFIG_DIR / "stock_split_config_priority_example.json"
 
 # Repo-local caches
 CACHE_DIR = REPO_ROOT / "data" / "cache"

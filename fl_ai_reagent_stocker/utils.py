@@ -12,7 +12,7 @@ import gzip
 import re
 from glob import glob
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 
@@ -151,6 +151,154 @@ def canonical_stock_candidate_label(stock_number: Any, collection: Any) -> str:
         return f"({stock_number}, {collection})"
     if stock_number:
         return f"({stock_number})"
+    return ""
+
+
+###############################################################################
+# GAL4 Driver Symbol Utilities
+###############################################################################
+
+def normalize_symbol_token(value: Any) -> str:
+    """Normalize a genotype or driver-symbol fragment for comparison."""
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def compact_symbol_key(value: Any) -> str:
+    """Return a punctuation-free lowercase key for a driver-symbol fragment."""
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def split_genotype_symbol_tokens(value: Any) -> List[str]:
+    """Split FlyBase genotype text into unique readable component tokens."""
+    tokens: List[str] = []
+    seen: Set[str] = set()
+    for raw_part in re.split(r"[;|,\n]+", str(value or "")):
+        for slash_part in str(raw_part).split("/"):
+            for candidate in re.split(r"\s+", str(slash_part).strip()):
+                token = candidate.strip()
+                if not token or token in {"+", "-"}:
+                    continue
+                normalized = normalize_symbol_token(token)
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                tokens.append(token)
+    return tokens
+
+
+def normalized_text_looks_like_gal4_driver(normalized: str) -> bool:
+    """Return whether a normalized symbol/gene fragment identifies a GAL4 driver."""
+    if not normalized:
+        return False
+    return bool(
+        "gal4" in normalized
+        or "gawb" in normalized
+        or re.search(r"p\{[^}]*gal4", normalized)
+        or re.search(r"gal4::", normalized)
+        or "aygal4" in normalized
+        or re.search(r"-gal4\b", normalized)
+        or re.search(r"\bvt\d*-gal4\b", normalized)
+        or re.search(r"\bgmr\d*-gal4\b", normalized)
+        or re.search(r"p\{gawb", normalized)
+    )
+
+
+def looks_like_gal4_symbol(symbol: Any, gene_symbol: Any = "") -> bool:
+    """Return whether a symbol or linked gene clearly identifies a GAL4 driver."""
+    return any(
+        normalized_text_looks_like_gal4_driver(normalize_symbol_token(raw_value))
+        for raw_value in (symbol, gene_symbol)
+    )
+
+
+def gal4_search_keys(symbol: Any) -> Set[str]:
+    """Return compact lookup keys that bridge common FlyBase GAL4 spellings."""
+    text = str(symbol or "").strip()
+    lowered = text.lower()
+    keys: Set[str] = set()
+
+    def add(value: Any) -> None:
+        key = compact_symbol_key(value)
+        if len(key) >= 3:
+            keys.add(key)
+        if key.endswith("gal4") and len(key) > 4:
+            keys.add(key[:-4])
+        if "gal4" in key:
+            prefix = key.split("gal4", 1)[0]
+            if len(prefix) >= 3:
+                keys.add(prefix)
+        if key.startswith("gmr") and len(key) > 6 and re.match(r"gmr[0-9]", key):
+            keys.add(key[3:])
+            keys.add(f"r{key[3:]}")
+        if key.startswith("ey") and len(key) > 5 and re.match(r"ey[a-z]*[0-9]", key):
+            keys.add(key[2:])
+
+    add(text)
+    for inner in re.findall(r"\{([^}]*)\}", text):
+        cleaned_inner = re.sub(r"^[^=]+=", "", inner)
+        cleaned_inner = re.sub(r"^(it\.)", "", cleaned_inner, flags=re.IGNORECASE)
+        add(cleaned_inner)
+    for inner in re.findall(r"\[([^\]]+)\]", text):
+        add(inner)
+    for prefix, suffix in re.findall(r"\}([A-Za-z][A-Za-z0-9_.\\-]*)\[([^\]]+)\]", text):
+        add(f"{prefix}{suffix}")
+    for token in re.split(r"[^A-Za-z0-9_.()\\-]+", text):
+        add(token)
+
+    without_wrappers = re.sub(r"[A-Za-z]*\{[^}]*\}", " ", text)
+    for token in re.split(r"[^A-Za-z0-9_.()\\-]+", without_wrappers):
+        add(token)
+
+    if "scer\\gal4" in lowered:
+        for inner in re.findall(r"scer\\gal4\[([^\]]+)\]", lowered):
+            add(inner)
+    return keys
+
+
+def is_split_gal4_component(symbol: Any) -> bool:
+    """Return whether a symbol describes one half of a split-GAL4 driver."""
+    lowered = str(symbol or "").lower()
+    return bool(
+        ".dbd" in lowered
+        or "-dbd" in lowered
+        or ".ad" in lowered
+        or "-ad" in lowered
+        or "p65.ad" in lowered
+        or "split-gal4" in lowered
+    )
+
+
+def gal4_driver_fingerprint(symbol: Any) -> str:
+    """Return a stable most-specific key for a GAL4 driver."""
+    keys = gal4_search_keys(symbol)
+    return sorted(keys, key=lambda value: (-len(value), value))[0] if keys else ""
+
+
+def primary_gal4_component_symbol_for_fbst(
+    fbst: str,
+    component_rows_by_fbst: Dict[str, List[Tuple[str, str]]],
+    fbst_to_fb_genotype: Dict[str, str],
+) -> str:
+    """Return the preferred orderable GAL4 component symbol for a stock."""
+    gal4_symbols = [
+        str(symbol or "").strip()
+        for symbol, gene_symbol in component_rows_by_fbst.get(fbst, [])
+        if str(symbol or "").strip() and looks_like_gal4_symbol(symbol, gene_symbol)
+    ]
+    if gal4_symbols:
+        return sorted(
+            gal4_symbols,
+            key=lambda value: (
+                is_split_gal4_component(value),
+                not value.startswith("P{"),
+                not value.startswith("M{"),
+                -len(value),
+                value.lower(),
+            ),
+        )[0]
+    for token in split_genotype_symbol_tokens(fbst_to_fb_genotype.get(fbst, "")):
+        if looks_like_gal4_symbol(token):
+            return token
     return ""
 
 

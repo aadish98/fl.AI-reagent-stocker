@@ -11,19 +11,26 @@
 written in JSON. This document summarizes the configuration choices
 (keywords, filters, and output sheets) in a reviewable format.
 
-**Example configs that ship with the pipeline:**
+**Example configs referenced below:**
 
 - `data/config/stock_split_config_example.json` — the baseline covered by this
   reference. It tiers stocks by publication evidence (`Ref++` / `Ref+` /
   `Ref-`).
-- `data/config/stock_split_config_phenotype_example.json` — the same config plus
-  curated-phenotype tiers. It adds `Phenotype++` and `Phenotype+` filters and
-  inserts matching sheets above each `Ref` group (see section 4i).
+- `data/config/stock_split_config_phenotype_example.json` — a standalone
+  curated-phenotype variant. It replaces the `Ref` tiers entirely with
+  `Phenotype++` / `Phenotype+` filters (no `Ref` combinations at all — see
+  section 4i).
 - `data/config/stock_split_config_priority_example.json` — six named phenotype
-  buckets for finding phenotypic stocks. See
+  buckets for finding phenotypic stocks; this is the only config in
+  `data/config/` that is git-tracked and is the pipeline's default when
+  `--config` is omitted. See
   [stock_split_config_priority_example.md](stock_split_config_priority_example.md).
 - `data/config/stock_split_config_priority_all_phenotypes.json` — exhaustive
   RNAi → UAS → allele coverage plus a phenotype audit bucket.
+
+Only `stock_split_config_priority_example.json` is git-tracked (see
+`.gitignore`); the other three configs above exist locally but will not be
+present after a fresh clone unless copied over or regenerated.
 
 A short list of review questions appears at the end.
 
@@ -36,13 +43,13 @@ it into a workbook of prioritised Excel sheets. This config controls three
 things:
 
 1. **Keywords.** What counts as a "relevant" publication for a stock.
-   Here: `sleep` and `circadian`.
+   Here: `sleep`, `circadian`, `rhythm`, and `locomotor`.
 2. **Filters.** Reusable yes/no rules about a stock (e.g. "is from
    Bloomington", "has no balancers", "has at least one keyword-hit
-   paper"). The config defines 23 named filters.
+   paper"). The config defines 24 named filters.
 3. **Combinations.** Each entry in the `combinations` list is a set of
    filters that get AND-ed together to produce one output sheet in the
-   final workbook. This config defines 13 sheets.
+   final workbook. This config defines 25 sheets.
 
 The Ref++ / Ref+ / Ref- tiering used throughout is driven purely by whether
 the keywords appear in publication titles or abstracts — there is no GPT
@@ -56,10 +63,10 @@ From the `settings` block of the JSON:
 
 | Setting | Value in this config | Plain-English meaning |
 |---|---|---|
-| `relevantSearchTerms` | `sleep`, `circadian` | Keywords used to tier alleles into Ref++ / Ref+ / Ref-. Matching against publication titles and abstracts is **case-insensitive**. |
-| `phenotypeSimilarityTargets` | `sleep`, `circadian` (each with `embedding_text` equal to the keyword) | Targets used **only** when OpenAI embedding-based phenotype similarity is enabled (off by default). Mirrors the keywords above. |
-| `maxStocksPerGene` | `999999999999999` | Per-gene cap on how many stocks survive limiting. The value is so large in practice it imposes **no** cap. |
-| `maxStocksPerAllele` | `9999999999999999` | Same idea, per allele. Also effectively **no** cap. |
+| `relevantSearchTerms` | `sleep`, `circadian`, `rhythm`, `locomotor` | Keywords used to tier alleles into Ref++ / Ref+ / Ref-. Matching against publication titles and abstracts is **case-insensitive**. |
+| `phenotypeSimilarityTargets` | `sleep`, `circadian`, `rhythm`, `locomotor` (each with `embedding_text` equal to the keyword) | Targets used **only** when OpenAI embedding-based phenotype similarity is enabled (off by default in this config). Mirrors the keywords above. |
+| `maxStocksPerGene` | `5` | Per-gene cap on how many stocks survive limiting, counted across the whole workbook. |
+| `maxStocksPerAllele` | `3` | Same idea, per allele. |
 | `input.geneCol` | `flybase_gene_id` | Required input CSV column containing FBgn IDs after conversion. |
 | `input.inputGeneCol` | `ext_gene` | Required input CSV column containing source gene symbols for conversion. |
 | `input.skipFbgnidConversion` | `false` | Required flag controlling whether Stage 1 trusts existing FBgn IDs instead of running gene-symbol conversion. |
@@ -74,8 +81,8 @@ From the `settings` block of the JSON:
 | `validation.enableGptLogging` | `false` | Required flag controlling per-call GPT logs under `data/logs/gpt_queries/`. |
 | `contentsSeparatorEvery` | `3` | Draws a faint separator after every N rows in the `Contents` sheet breakdown table. |
 
-See the questions at the end about whether the keyword set and the
-effectively-unlimited caps are intentional.
+See the questions at the end for remaining open items (unused filters,
+CRISPR exclusion, multi-insertion prioritisation, chromosome-arm filtering).
 
 ---
 
@@ -111,7 +118,7 @@ source that isn't wired in yet.
 
 ## 4. Filters in plain English
 
-The config defines 23 named filters. Each filter is just a yes/no check
+The config defines 24 named filters. Each filter is just a yes/no check
 on one of the columns above. They are grouped here by intent so you can
 scan by what they do, not by their JSON key order.
 
@@ -120,6 +127,7 @@ scan by what they do, not by their JSON key order.
 | Filter | Plain-English rule | Underlying check |
 |---|---|---|
 | `Bloomington` | Stock comes from the Bloomington collection. | `collection` contains `Bloomington` |
+| `Vienna` | Stock comes from the Vienna (VDRC) collection. | `collection` contains `Vienna` |
 | `Non-Bloomington` | Stock comes from any collection other than Bloomington. | `collection` does **not** contain `Bloomington` |
 
 ### 4b. Publication-evidence tier (the heart of Ref++/Ref+/Ref-)
@@ -128,8 +136,8 @@ scan by what they do, not by their JSON key order.
 
 - `0` → the allele has no publication references at all (= **Ref-**)
 - `1` → the allele has at least one publication, but none of those papers
-  have any of the keywords (`sleep`, `circadian`) in the title or
-  abstract (= **Ref+**)
+  have any of the keywords (`sleep`, `circadian`, `rhythm`, `locomotor`) in
+  the title or abstract (= **Ref+**)
 - `2` → the allele has at least one publication whose title or abstract
   contains a keyword (case-insensitive). This is the strongest tier
   (= **Ref++**)
@@ -213,11 +221,18 @@ baseline config. `PHENOTYPE_RELEVANCE_SCORE` is set per stock from FlyBase
 | `Phenotype++` | Stock has a curated phenotype matching a target keyword. | `PHENOTYPE_RELEVANCE_SCORE` equals `2` |
 | `Phenotype+` | Stock has a curated phenotype, but none match a target keyword. | `PHENOTYPE_RELEVANCE_SCORE` equals `1` |
 
-In the phenotype-aware config, each `Ref` group is preceded by matching
-`Phenotype++` and `Phenotype+` sheets. Because combinations are priority-ordered
-and a reagent lands in only the first sheet it matches, phenotype-backed stocks
-are claimed by the phenotype sheets before the publication-only `Ref` sheets
-below them. (No `Phenotype-` tier is defined.)
+The phenotype-aware config does **not** add these on top of the baseline's
+`Ref` sheets — it is a standalone variant whose `combinations` list has **no
+`Ref` entries at all**. It replaces the whole Bloomington/Vienna × balancer ×
+insertion matrix from section 5 with the same matrix keyed on `Phenotype++` /
+`Phenotype+` instead of `Ref++`/`Ref+`/`Ref-`, and duplicates it again for
+`AlleleOrInsertion` in place of `RNAi` (Bloomington × RNAi, Vienna × RNAi,
+Bloomington × AlleleOrInsertion, Vienna × AlleleOrInsertion, each split
+`Phenotype++` then `Phenotype+`, each split by balancer × insertion count) —
+32 sheets total, with no catch-all combination. It also sets
+`maxStocksPerGene` / `maxStocksPerAllele` to very large numbers (effectively no
+cap), unlike the 5/3 caps in the baseline config. (No `Phenotype-` tier is
+defined.)
 
 ---
 
@@ -244,8 +259,9 @@ include reagent-level phenotype enrichment: `Phenotype Reference-ID Map`
 `Published GAL4 stock id` entries. Exported PMIDs and PMCIDs are prefixed
 (`PMID12345678` / `PMCID12345678`).
 
-This config produces **13 sheets**. Twelve of them are a Bloomington-only,
-non-CRISPR RNAi matrix; the thirteenth is an all-sources catch-all.
+This config produces **25 sheets**. Twelve are a Bloomington-only, non-CRISPR
+RNAi matrix; another twelve mirror that matrix for Vienna; the 25th is an
+all-sources catch-all.
 
 ### 5a. The Bloomington RNAi matrix (12 sheets)
 
@@ -278,23 +294,52 @@ Reading the matrix:
   for ordering.
 - The "No balancers / Single insertion / Ref++" sheet (#1) is the
   cleanest possible reagent: one construct, no balancer headaches, and a
-  paper that already mentions sleep or circadian.
-- The 12-sheet matrix is **Bloomington-only**. There is no parallel
-  matrix for Vienna, NIG-Fly, or Kyoto stocks — see questions.
+  paper that already mentions one of the configured keywords.
+- This matrix is Bloomington-only, but section 5a2 below mirrors it for
+  Vienna. There is still no parallel matrix for NIG-Fly or Kyoto stocks
+  (those stocks only reach the catch-all sheet) — see questions.
 
-### 5b. The catch-all sheet (13th sheet)
+### 5a2. The Vienna RNAi matrix (12 sheets)
+
+Sheets 13–24 repeat the exact same balancer × insertion × publication-tier
+matrix as section 5a, with **Vienna collection** in place of **Bloomington
+collection** as the base filter:
+
+> **Vienna collection** AND **RNAi** AND **No sgRNA**
+
+| # | Balancer status | Insertion count | Pub tier | Sheet contents |
+|---|---|---|---|---|
+| 13 | No balancers | Single insertion | Ref++ | Clean Vienna RNAi stocks with keyword-hit papers. |
+| 14 | No balancers | Single insertion | Ref+ | Clean Vienna RNAi stocks with papers but no keyword hits. |
+| 15 | No balancers | Single insertion | Ref- | Clean Vienna RNAi stocks with no papers at all. |
+| 16 | Has balancers | Single insertion | Ref++ | Balanced Vienna RNAi stocks with keyword-hit papers. |
+| 17 | Has balancers | Single insertion | Ref+ | Balanced Vienna RNAi stocks with papers but no keyword hits. |
+| 18 | Has balancers | Single insertion | Ref- | Balanced Vienna RNAi stocks with no papers. |
+| 19 | No balancers | Multiple insertions | Ref++ | Multi-insertion, unbalanced Vienna RNAi stocks with keyword-hit papers. |
+| 20 | No balancers | Multiple insertions | Ref+ | Multi-insertion, unbalanced Vienna RNAi stocks with papers but no keyword hits. |
+| 21 | No balancers | Multiple insertions | Ref- | Multi-insertion, unbalanced Vienna RNAi stocks with no papers. |
+| 22 | Has balancers | Multiple insertions | Ref++ | Multi-insertion, balanced Vienna RNAi stocks with keyword-hit papers. |
+| 23 | Has balancers | Multiple insertions | Ref+ | Multi-insertion, balanced Vienna RNAi stocks with papers but no keyword hits. |
+| 24 | Has balancers | Multiple insertions | Ref- | Multi-insertion, balanced Vienna RNAi stocks with no papers. |
+
+Because the Bloomington matrix (sheets 1–12) comes first in `combinations`,
+a stock has to fail every Bloomington filter (i.e. actually be a Vienna
+stock, since a stock can't be both) to reach sheets 13–24 — there's no
+overlap to worry about between the two matrices.
+
+### 5b. The catch-all sheet (25th sheet)
 
 | # | Combination | Sheet contents |
 |---|---|---|
-| 13 | `RNAi` AND `No sgRNA` | All non-CRISPR RNAi stocks across every collection (Bloomington, Vienna, Kyoto, etc.), with no balancer or publication-tier restriction. Functions as a complete non-CRISPR RNAi inventory. |
+| 25 | `UAS` AND `No sgRNA` | All non-CRISPR UAS-responsive stocks across every collection (Bloomington, Vienna, Kyoto, etc.) that didn't already match the RNAi matrices above, with no balancer or publication-tier restriction. |
 
 ### 5c. Filters that are defined but never used in a sheet
 
 The following filters exist in the config but no `combinations` entry
-references them: `Non-Bloomington`, `UAS`, `AlleleOrInsertion`,
+references them: `Non-Bloomington`, `AlleleOrInsertion`,
 `Has sgRNA`, `Allele Has Paper Refs`, `Allele Has No Paper Refs`,
 `attP40`, `attP2`, `VALIUM10`, `VALIUM20`, `Split_AD`, `Split_DBD`,
-`Custom Phenotype Reagent`.
+`Custom Phenotype Reagent`. (`UAS` is used by the catch-all sheet above.)
 
 They're functional — they could be slotted into a new combination — but
 they don't currently generate any output sheet. See questions.
@@ -355,32 +400,27 @@ in-house to this pipeline.
 
 ## 7. Review Questions
 
-These items may need confirmation before treating this configuration as final.
+Items 1–3 below were open questions in an earlier revision of this config
+and have since been resolved in the JSON; they're kept here as a record.
+Items 4–7 remain open.
 
-1. **Keyword set.** This config uses `sleep` and `circadian` only. The
-   GUI-design notes suggest a default of `sleep`, `rhythm`, `circadian`,
-   `locomotor`. Should we add `rhythm` and `locomotor` here too, or are
-   they too noisy / too broad for this particular screen?
+1. **Keyword set — RESOLVED.** `relevantSearchTerms` now includes all four
+   of `sleep`, `circadian`, `rhythm`, and `locomotor`.
 
-2. **Per-gene / per-allele caps.** Both caps are set to very large
-   values (`9.99×10¹⁴` and `9.99×10¹⁵`), which is equivalent to having
-   **no cap**. Confirm whether this screen should include all matching
-   stocks, or whether a lower per-gene cap would be preferable
-   (for example, 5 or 10).
+2. **Per-gene / per-allele caps — RESOLVED.** `maxStocksPerGene` and
+   `maxStocksPerAllele` are now `5` and `3` respectively (not unlimited).
 
-3. **Bloomington-only matrix.** The 12 detailed sheets are all
-   Bloomington. Vienna / Kyoto / NIG-Fly stocks only appear via the 13th
-   catch-all sheet. Confirm whether Bloomington should remain the primary
-   order source, or whether a Vienna matrix should also be included,
-   especially for genes with no Bloomington RNAi line.
+3. **Bloomington-only matrix — RESOLVED.** A parallel 12-sheet Vienna
+   matrix (section 5a2) now sits alongside the Bloomington matrix. Kyoto /
+   NIG-Fly stocks still only reach the catch-all sheet.
 
 4. **Unused filters.** These filters are defined but unused in
-   `combinations`: `Non-Bloomington`, `UAS`, `AlleleOrInsertion`,
+   `combinations`: `Non-Bloomington`, `AlleleOrInsertion`,
    `Has sgRNA`, `Allele Has Paper Refs`, `Allele Has No Paper Refs`,
    `attP40`, `attP2`, `VALIUM10`, `VALIUM20`, `Split_AD`, `Split_DBD`,
    `Custom Phenotype Reagent`. Confirm whether any of these should become
-   dedicated sheets, such as `attP40` vs `attP2` sub-sheets, a UAS-driver
-   sheet, or a Split-Gal4 sheet.
+   dedicated sheets, such as `attP40` vs `attP2` sub-sheets, or a
+   Split-Gal4 sheet.
 
 5. **No-sgRNA filter on everything.** Every combination filters out
    CRISPR (`No sgRNA`). Is that the right default for your screen, or
