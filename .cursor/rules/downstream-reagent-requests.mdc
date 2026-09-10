@@ -1,0 +1,43 @@
+---
+description: How to implement follow-up requests on reagents that a stocker run already produced
+alwaysApply: true
+---
+
+# Downstream requests on stocker output
+
+Applies to any request to filter, select, rank, deduplicate, split, count,
+reformat, or otherwise work on reagents, stocks, or sheets that a stocker run
+already produced. Full contract: the "Downstream requests on stocker output"
+section of `AGENTS.md`.
+
+Every such request ships three things in the same change:
+
+1. **A script in `scripts/`.** Never do this work with ad-hoc terminal
+   commands, throwaway snippets, notebook cells, or by hand-editing a workbook.
+   Read the stocker output and write a new file; never overwrite it in place,
+   unless the pass changes only layout and no cell value.
+2. **A test in `tests/`.** Build fixtures by copying real rows out of the
+   actual workbook or `data/` file the request is about, trimmed to a few rows,
+   saved under `tests/fixtures/`. Do not invent column names or values.
+3. **An entry in `docs/features.md`.** One section per feature: what goes in,
+   each keep/remove/sort/count step in order, what comes out.
+
+## Writing the steps
+
+Name real column names exactly as they appear in the workbook, and describe
+each step with a spreadsheet verb: keep, remove, sort, group, count, match,
+combine, deduplicate.
+
+```python
+# Keep only rows where Stock Center is BDSC.
+rows = rows[rows["Stock Center"] == "BDSC"]
+
+# Sort by PHENOTYPE_RELEVANCE_SCORE, highest first, and keep the top 3
+# rows for each flybase_gene_id.
+rows = rows.sort_values("PHENOTYPE_RELEVANCE_SCORE", ascending=False)
+rows = rows.groupby("flybase_gene_id").head(3)
+```
+
+Not: "apply a boolean mask", "vectorized predicate", "regex-filter the frame",
+"left join on the key", "dedupe via hash". Never describe who the comments or
+docs are for.

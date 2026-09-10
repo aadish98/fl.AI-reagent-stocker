@@ -9,7 +9,8 @@ OpenAI validation and phenotype-embedding analysis.
 
 - Pipeline guide: `docs/pipeline_usage.md`
 - Mermaid flowcharts: `docs/pipeline_flowcharts.md`
-- Agent guidance: `docs/AGENTS.md`
+- Agent guidance: `AGENTS.md`, `docs/AGENTS.md`
+- Feature list (what each downstream script filters, selects, and writes): `docs/features.md`
 - Shareable SOP (install, gene-list review, default config, stock limits): `docs/SOP_Stocker_Cursor_CLI.pdf`
 - Citing data sources, APIs, and models: `docs/citations.md`
 - Config reference: `docs/stock_split_config_example.md`

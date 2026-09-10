@@ -2,6 +2,11 @@
 
 This file provides guidance to coding agents working in this repository.
 
+Repo-root `AGENTS.md` carries the rules for handling downstream requests on
+stocker output (filtering, selection, counting, and exports on reagents a run
+has already produced). Follow it whenever a request is about an existing run's
+reagents rather than about the pipeline itself.
+
 ## Project Overview
 
 `fl_ai_reagent_stocker` is a modular Python pipeline that converts Drosophila
@@ -59,6 +64,13 @@ relevant doc(s) in the same change:
   data source or model dependency, or when the default model changes.
 - `docs/AGENTS.md` — this file; agent-facing reference for commands, package
   layout, key classes, helper scripts, tests, and data layout.
+- `docs/features.md` — the running list of features that work on reagents a
+  stocker run already produced: what each one reads, the columns and rule for
+  every filtering or selection step in order, and what it writes. Add an entry
+  with every new `scripts/` feature, and update it in the same change that
+  changes the script's steps.
+- `AGENTS.md` (repo root) — rules for downstream requests on stocker output,
+  plus the wording conventions for step comments and `docs/features.md`.
 - `docs/SOP_Stocker_Cursor_CLI.pdf` — standalone SOP: GitHub install, how
   Stocker works, solid gene-list review, default config, and stock limits.
   Keep the FBgn conversion hard rule in lockstep with this file.
@@ -372,7 +384,9 @@ the `scripts/*_tx_omics_revision*.py` entry points below.
 
 Canonical helper scripts live in `scripts/`. Run them from the repo root;
 data-building scripts may import shared package utilities when they need the
-same FlyBase, PubMed, or configuration logic as the pipeline.
+same FlyBase, PubMed, or configuration logic as the pipeline. A script that
+works on reagents a stocker run already produced also needs a test built from
+real rows and an entry in `docs/features.md` (see repo-root `AGENTS.md`).
 
 Data builders / refreshers:
 
